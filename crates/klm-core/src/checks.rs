@@ -78,26 +78,59 @@ fn check_symbol(root: &LibraryRoot, cat: &str, lib: &Sexpr, sym: &Sexpr) -> Vec<
         return out;
     };
 
-    let pads = numbered_pads(&fp);
+    check_footprint(&pins, &fp, &mut out);
+    if let Some(model) = fp.child("model").and_then(|m| m.arg(0)) {
+        check_model(root, model, &mut out);
+    }
+    out
+}
+
+/// Pins against pads, courtyard and pin 1: what a footprint must satisfy whatever library it is in.
+fn check_footprint(pins: &[(u32, u32, String)], fp: &Sexpr, out: &mut Vec<Issue>) {
+    let pads = numbered_pads(fp);
     let pin_numbers: BTreeSet<&str> = pins.iter().map(|p| p.2.as_str()).collect();
     let pad_numbers: BTreeSet<&str> = pads.iter().map(|p| p.number.as_str()).collect();
     let no_pad: Vec<_> = pin_numbers.difference(&pad_numbers).copied().collect();
     if !no_pad.is_empty() {
-        error(&mut out, format!("Symbol pin(s) {} have no pad in the footprint", list(no_pad)));
+        error(out, format!("Symbol pin(s) {} have no pad in the footprint", list(no_pad)));
     }
     let no_pin: Vec<_> = pad_numbers.difference(&pin_numbers).copied().collect();
     if !no_pin.is_empty() {
-        warning(&mut out, format!("Footprint pad(s) {} have no pin in the symbol", list(no_pin)));
+        warning(out, format!("Footprint pad(s) {} have no pin in the symbol", list(no_pin)));
     }
 
-    if !on_layer(&fp, &["F.CrtYd", "B.CrtYd"]) {
-        warning(&mut out, "The footprint has no courtyard (F.CrtYd or B.CrtYd)".into());
+    if !on_layer(fp, &["F.CrtYd", "B.CrtYd"]) {
+        warning(out, "The footprint has no courtyard (F.CrtYd or B.CrtYd)".into());
     }
-    if !has_pin1_marker(&fp, &pads) {
-        warning(&mut out, "The footprint doesn't mark pin 1 (no silkscreen or fab marker near it, and its pad looks like the others)".into());
+    if !has_pin1_marker(fp, &pads) {
+        warning(out, "The footprint doesn't mark pin 1 (no silkscreen or fab marker near it, and its pad looks like the others)".into());
     }
-    if let Some(model) = fp.child("model").and_then(|m| m.arg(0)) {
-        check_model(root, model, &mut out);
+}
+
+/// The checks that need only the files, for a part that isn't in a library yet: pins against pads,
+/// courtyard, pin 1 and the model file. Required fields are left out because importing fills them in.
+/// The symbol file may be in any format `kicad-cli` can upgrade; the first symbol in it is checked.
+pub fn check_files(symbol: &Path, footprint: &Path, model: Option<&Path>) -> Vec<Issue> {
+    let mut out = vec![];
+    let read = || -> anyhow::Result<(Sexpr, Sexpr)> {
+        let scratch = crate::preview::scratch_dir(&std::env::temp_dir())?;
+        let up = scratch.join("sym.kicad_sym");
+        let lib = crate::kicad_env::upgrade_symbols(symbol, &up).and_then(|_| Ok(sexpr::parse(&std::fs::read_to_string(&up)?)?));
+        let _ = std::fs::remove_dir_all(&scratch);
+        Ok((lib?, sexpr::parse(&std::fs::read_to_string(footprint)?)?))
+    };
+    match read() {
+        Ok((lib, fp)) => match lib.child("symbol") {
+            Some(sym) => {
+                check_duplicate_pins(&symbol_pins(&lib, sym), &mut out);
+                check_footprint(&symbol_pins(&lib, sym), &fp, &mut out);
+            }
+            None => error(&mut out, "The symbol file contains no symbols".into()),
+        },
+        Err(e) => error(&mut out, format!("Files can't be checked: {e:#}")),
+    }
+    if let Some(m) = model {
+        check_model_file(m, &mut out);
     }
     out
 }
@@ -235,7 +268,10 @@ fn check_model(root: &LibraryRoot, uri: &str, out: &mut Vec<Issue>) {
     if path.starts_with("http") || path.contains("${") {
         return; // can't be resolved here
     }
-    let path = Path::new(&path);
+    check_model_file(Path::new(&path), out);
+}
+
+fn check_model_file(path: &Path, out: &mut Vec<Issue>) {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let Ok(mut file) = std::fs::File::open(path) else {
         return error(out, format!("3D model {name} is missing"));
@@ -401,6 +437,22 @@ mod tests {
         assert!(messages(&root).is_empty());
         std::fs::write(root.dir.join("3dmodels/Test.3dshapes/p.wrl"), "<html>").unwrap();
         assert_only(&root, "WRL");
+    }
+
+    #[test]
+    fn loose_files_are_checked_without_a_library() {
+        if !crate::kicad_env::kicad_cli().is_ok_and(|c| std::process::Command::new(c).arg("version").output().is_ok_and(|o| o.status.success())) {
+            return eprintln!("kicad-cli not found; skipping");
+        }
+        let dir = crate::test_dir("checks_loose");
+        let (sym, fp, model) = (dir.join("s.kicad_sym"), dir.join("f.kicad_mod"), dir.join("m.step"));
+        std::fs::write(&sym, SYM).unwrap();
+        std::fs::write(&fp, FP).unwrap();
+        std::fs::write(&model, STEP).unwrap();
+        assert!(check_files(&sym, &fp, Some(&model)).is_empty());
+        std::fs::write(&fp, FP.replace(r#"(pad "3""#, r#"(pad "9""#)).unwrap();
+        let m: Vec<_> = check_files(&sym, &fp, Some(&dir.join("gone.step"))).into_iter().map(|i| i.message).collect();
+        assert!(m.iter().any(|i| i.contains("pin(s) 3")) && m.iter().any(|i| i.contains("gone.step is missing")), "{m:?}");
     }
 
     #[test]
