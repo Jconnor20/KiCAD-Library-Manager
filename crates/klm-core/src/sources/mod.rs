@@ -1,6 +1,10 @@
 //! Part sources. Each search source (LCSC, DigiKey, …) implements [`Source`] and is listed in
 //! [`all`]; the Search tab queries every enabled one. Vendor ZIPs go through `zip_import` instead.
 
+pub mod digikey;
+mod http;
+pub mod mouser;
+pub mod nexar;
 pub mod watcher;
 pub mod zip_import;
 
@@ -29,7 +33,37 @@ pub trait Source: Send + Sync {
     }
 }
 
+/// SnapMagic's part search; its results link to the Ultra Librarian and SamacSys downloads too.
+fn snapmagic_url(part: &Part) -> Option<String> {
+    reqwest::Url::parse_with_params("https://www.snapeda.com/search/", [("q", part.mpn.as_str()), ("search-type", "parts")])
+        .ok()
+        .map(String::from)
+}
+
+/// A source built from its stored credentials, enabled or not (the Settings "Test" button
+/// uses this). `None` when the credentials are missing or the name is not a search source.
+pub fn build(name: &str) -> Option<Box<dyn Source>> {
+    Some(match name {
+        "DigiKey" => Box::new(digikey::DigiKey::from_credentials()?),
+        "Mouser" => Box::new(mouser::Mouser::from_credentials()?),
+        "Nexar" => Box::new(nexar::Nexar::from_credentials()?),
+        _ => return None,
+    })
+}
+
 /// Every source the user has enabled. Each phase adds its sources here.
-pub fn all(_settings: &Settings) -> Vec<Box<dyn Source>> {
-    vec![]
+pub fn all(settings: &Settings) -> Vec<Box<dyn Source>> {
+    ["DigiKey", "Mouser", "Nexar"].into_iter().filter(|n| settings.is_enabled(n)).filter_map(build).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cad_url_encodes_the_mpn() {
+        let part = Part { mpn: "SN74LVC1G17DBVR/A B".into(), ..Part::default() };
+        let url = snapmagic_url(&part).unwrap();
+        assert!(url.starts_with("https://www.snapeda.com/search/?q=SN74LVC1G17DBVR%2FA+B&search-type=parts"), "{url}");
+    }
 }

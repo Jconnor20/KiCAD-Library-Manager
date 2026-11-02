@@ -3,18 +3,22 @@
 mod import_dialog;
 mod library_view;
 mod search_view;
+mod settings_view;
 
 use eframe::egui::{self, RichText};
 use import_dialog::{DialogAction, ImportDialog};
 use library_view::LibraryView;
 use search_view::{SearchAction, SearchView};
+use settings_view::{SettingsAction, SettingsView};
 use klm_core::sources::Source;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use klm_core::library::LibraryRoot;
 use klm_core::part::Part;
 use klm_core::settings::Settings;
 use klm_core::sources::{watcher::Watcher, zip_import};
 use klm_core::kicad_env;
+use klm_core::matching;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
@@ -28,6 +32,9 @@ enum Msg {
     /// A search result's files, downloaded and ready for the import dialog.
     Fetched(Part, PathBuf),
     FetchDone,
+    /// A CAD page was opened for this search result; a matching ZIP may follow.
+    CadOpened(Part),
+    TestDone,
 }
 
 /// An action that edits KiCad's library tables, held until KiCad is closed.
@@ -42,6 +49,7 @@ enum Tab {
     Search,
     Import,
     Library,
+    Settings,
 }
 
 struct Pending {
@@ -64,6 +72,12 @@ struct App {
     search: SearchView,
     sources: Arc<Vec<Box<dyn Source>>>,
     busy: bool,
+    settings_view: SettingsView,
+    testing: bool,
+    /// Search results whose CAD page was opened, waiting for their vendor ZIP.
+    awaiting_cad: Vec<Part>,
+    /// Set to stop the current Downloads watcher thread.
+    watch_stop: Arc<AtomicBool>,
     log: Vec<String>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -132,6 +146,10 @@ impl App {
             search: SearchView::default(),
             sources,
             busy: false,
+            settings_view: SettingsView::new(),
+            testing: false,
+            awaiting_cad: vec![],
+            watch_stop: Arc::new(AtomicBool::new(false)),
             log: vec![],
             tx,
             rx,
@@ -254,9 +272,11 @@ impl App {
         };
         self.log.push(format!("Watching {} for part ZIPs", dir.display()));
         let tx = self.tx.clone();
+        self.watch_stop = Arc::new(AtomicBool::new(false));
+        let stop = self.watch_stop.clone();
         std::thread::spawn(move || {
             let mut w = Watcher::new(dir);
-            loop {
+            while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 for zip in w.poll() {
                     scan_zip(&zip, &tx);
@@ -360,6 +380,7 @@ impl App {
                     match source.cad_page_url(&part) {
                         Some(url) => {
                             let _ = open::that(&url);
+                            let _ = tx.send(Msg::CadOpened(part.clone()));
                             let _ = tx.send(Msg::Log(format!("Opened {url}. Download the KiCad ZIP and it will appear under Import.")));
                         }
                         None => drop(tx.send(Msg::Log(format!("{} has no CAD files for {}", source.name(), part.mpn)))),
@@ -371,6 +392,28 @@ impl App {
                 }
             }
             let _ = tx.send(Msg::FetchDone);
+            ctx.request_repaint();
+        });
+    }
+
+    /// Saves the settings and rebuilds the source list from them and the stored credentials.
+    fn apply_sources(&mut self) {
+        self.save_settings();
+        self.sources = Arc::new(klm_core::sources::all(&self.settings));
+        self.search.results.clear();
+    }
+
+    fn test_source(&mut self, name: &'static str, ctx: egui::Context) {
+        self.testing = true;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = klm_core::sources::build(name).ok_or_else(|| anyhow::anyhow!("keys missing")).and_then(|s| s.search("LM358"));
+            let line = match result {
+                Ok(parts) => format!("{name}: test OK, {} results for LM358", parts.len()),
+                Err(e) => format!("{name}: test failed: {e:#}"),
+            };
+            let _ = tx.send(Msg::Log(line));
+            let _ = tx.send(Msg::TestDone);
             ctx.request_repaint();
         });
     }
@@ -388,7 +431,10 @@ impl App {
     fn handle_messages(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                Msg::Found(part, work) => {
+                Msg::Found(mut part, work) => {
+                    if let Some(i) = self.awaiting_cad.iter().position(|a| matching::same_mpn(&a.mpn, &part.mpn)) {
+                        matching::merge(&mut part, &self.awaiting_cad.remove(i));
+                    }
                     self.log.push(format!("Found {} ({})", part.mpn, part.source));
                     self.pending.push(Pending { part, work });
                 }
@@ -417,6 +463,8 @@ impl App {
                     self.open_dialog(self.pending.len() - 1);
                 }
                 Msg::FetchDone => self.busy = false,
+                Msg::CadOpened(part) => self.awaiting_cad.push(part),
+                Msg::TestDone => self.testing = false,
             }
         }
     }
@@ -556,6 +604,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.tab, Tab::Search, RichText::new("Search").heading());
                 ui.selectable_value(&mut self.tab, Tab::Import, RichText::new("Import").heading());
                 ui.selectable_value(&mut self.tab, Tab::Library, RichText::new("Library").heading());
+                ui.selectable_value(&mut self.tab, Tab::Settings, RichText::new("Settings").heading());
             });
             ui.separator();
             match self.tab {
@@ -578,6 +627,18 @@ impl eframe::App for App {
                     let (global, project) = (self.global_root(), self.project_root());
                     self.library.show(ui, global.as_ref(), project.as_ref());
                 }
+                Tab::Settings => match self.settings_view.show(ui, &mut self.settings, self.testing) {
+                    SettingsAction::None => {}
+                    SettingsAction::Rebuild => self.apply_sources(),
+                    SettingsAction::Test(name) => self.test_source(name, ctx.clone()),
+                    SettingsAction::Note(n) => self.log.push(n),
+                    SettingsAction::Downloads(dir) => {
+                        self.settings.downloads_dir = dir;
+                        self.save_settings();
+                        self.watch_stop.store(true, Ordering::Relaxed);
+                        self.start_watcher(ctx.clone());
+                    }
+                },
             }
         });
 

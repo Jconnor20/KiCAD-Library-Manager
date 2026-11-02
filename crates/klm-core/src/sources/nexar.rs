@@ -1,0 +1,143 @@
+//! Nexar (Octopart) GraphQL API, OAuth2 client credentials.
+
+use super::Source;
+use super::http::{self, TokenCache};
+use crate::credentials;
+use crate::part::Part;
+use anyhow::{Result, bail};
+use reqwest::blocking::Client;
+use serde_json::{Value, json};
+use std::path::Path;
+
+const QUERY: &str = "query Search($q: String!) { supSearch(q: $q, limit: 10) { results { part { \
+    mpn shortDescription totalAvail manufacturer { name } category { name } bestDatasheet { url } \
+    specs { attribute { shortname } displayValue } \
+    sellers { company { name } offers { sku prices { quantity price currency } } } } } } }";
+
+pub struct Nexar {
+    http: Client,
+    token: TokenCache,
+}
+
+impl Nexar {
+    pub fn from_credentials() -> Option<Self> {
+        let id = credentials::get("Nexar", "client_id")?;
+        let secret = credentials::get("Nexar", "client_secret")?;
+        Some(Self { http: http::client(), token: TokenCache::new("https://identity.nexar.com/connect/token", id, secret) })
+    }
+}
+
+impl Source for Nexar {
+    fn name(&self) -> &'static str {
+        "Nexar"
+    }
+
+    fn search(&self, query: &str) -> Result<Vec<Part>> {
+        let req = self
+            .http
+            .post("https://api.nexar.com/graphql")
+            .bearer_auth(self.token.token(&self.http)?)
+            .json(&json!({ "query": QUERY, "variables": { "q": query } }));
+        parse(&http::send(req)?)
+    }
+
+    fn fetch(&self, _part: &Part, _work: &Path) -> Result<Option<Part>> {
+        Ok(None)
+    }
+
+    fn cad_page_url(&self, part: &Part) -> Option<String> {
+        super::snapmagic_url(part)
+    }
+}
+
+fn parse(v: &Value) -> Result<Vec<Part>> {
+    if v["data"].is_null() {
+        let msgs: Vec<String> = v["errors"].as_array().into_iter().flatten().map(|e| http::text(e, "/message")).collect();
+        bail!("{}", if msgs.is_empty() { "empty reply".into() } else { msgs.join("; ") });
+    }
+    Ok(v["data"]["supSearch"]["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| {
+            let p = &r["part"];
+            let package = p["specs"].as_array().into_iter().flatten().find(|s| s["attribute"]["shortname"] == "case_package");
+            let mut part = Part {
+                mpn: http::text(p, "/mpn"),
+                manufacturer: http::text(p, "/manufacturer/name"),
+                description: http::text(p, "/shortDescription"),
+                category_hint: http::text(p, "/category/name"),
+                datasheet_url: http::https(http::text(p, "/bestDatasheet/url")),
+                package: package.map(|s| http::text(s, "/displayValue")).unwrap_or_default(),
+                stock: p["totalAvail"].as_u64(),
+                ..Part::default()
+            };
+            // Lowest-quantity USD price over all sellers, so the column is comparable across rows.
+            let mut best: Option<(u64, f64)> = None;
+            for seller in p["sellers"].as_array().into_iter().flatten() {
+                let company = http::text(seller, "/company/name").to_lowercase();
+                let name = if company.contains("digi-key") || company.contains("digikey") {
+                    Some("DigiKey")
+                } else if company.contains("mouser") {
+                    Some("Mouser")
+                } else {
+                    None
+                };
+                for offer in seller["offers"].as_array().into_iter().flatten() {
+                    let sku = http::text(offer, "/sku");
+                    if let Some(n) = name.filter(|n| !sku.is_empty() && !part.supplier_ids.iter().any(|(s, _)| s == n)) {
+                        part.supplier_ids.push((n.into(), sku));
+                    }
+                    for b in offer["prices"].as_array().into_iter().flatten().filter(|b| b["currency"] == "USD") {
+                        if let (Some(q), Some(price)) = (b["quantity"].as_u64(), b["price"].as_f64())
+                            && best.is_none_or(|(bq, bp)| q < bq || (q == bq && price < bp))
+                        {
+                            best = Some((q, price));
+                        }
+                    }
+                }
+            }
+            if let Some((q, price)) = best {
+                part.unit_price = format!("${price} @{q}");
+            }
+            part
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Shape follows the Nexar supSearch response for the query above.
+    const REPLY: &str = r#"{"data": {"supSearch": {"results": [{"part": {
+        "mpn": "LM358DR", "shortDescription": "Dual Operational Amplifier, 8-Pin SOIC", "totalAvail": 98000,
+        "manufacturer": {"name": "Texas Instruments"}, "category": {"name": "Operational Amplifiers"},
+        "bestDatasheet": {"url": "https://www.ti.com/lit/ds/symlink/lm358.pdf"},
+        "specs": [{"attribute": {"shortname": "supplyvoltage"}, "displayValue": "3V ~ 32V"},
+                  {"attribute": {"shortname": "case_package"}, "displayValue": "SOIC-8"}],
+        "sellers": [
+          {"company": {"name": "Mouser Electronics"}, "offers": [{"sku": "595-LM358DR", "prices": [{"quantity": 1, "price": 0.55, "currency": "USD"}]}]},
+          {"company": {"name": "Digi-Key"}, "offers": [{"sku": "296-1395-1-ND", "prices": [{"quantity": 1, "price": 0.52, "currency": "USD"}, {"quantity": 100, "price": 0.3, "currency": "EUR"}]}]},
+          {"company": {"name": "Somewhere Else"}, "offers": [{"sku": "ZZ", "prices": []}]}]}}]}}}"#;
+
+    #[test]
+    fn parses_search_reply() {
+        let parts = parse(&serde_json::from_str(REPLY).unwrap()).unwrap();
+        assert_eq!(parts.len(), 1);
+        let p = &parts[0];
+        assert_eq!((p.mpn.as_str(), p.manufacturer.as_str(), p.package.as_str()), ("LM358DR", "Texas Instruments", "SOIC-8"));
+        assert_eq!(p.stock, Some(98000));
+        assert_eq!(p.category_hint, "Operational Amplifiers");
+        assert_eq!(p.datasheet_url, "https://www.ti.com/lit/ds/symlink/lm358.pdf");
+        assert_eq!(p.unit_price, "$0.52 @1");
+        assert_eq!(p.supplier_ids, vec![("Mouser".to_string(), "595-LM358DR".to_string()), ("DigiKey".to_string(), "296-1395-1-ND".to_string())]);
+    }
+
+    #[test]
+    fn reports_graphql_errors() {
+        let e = r#"{"errors":[{"message":"Unauthorized"}],"data":null}"#;
+        assert!(parse(&serde_json::from_str(e).unwrap()).unwrap_err().to_string().contains("Unauthorized"));
+        assert!(parse(&serde_json::json!({"data": {"supSearch": {"results": []}}})).unwrap().is_empty());
+    }
+}
