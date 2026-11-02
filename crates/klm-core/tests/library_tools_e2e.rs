@@ -96,6 +96,14 @@ fn attach_and_copy_to_project() {
     assert_eq!([p.footprint, p.model, p.datasheet, p.sim], [Check::Ok; 4]);
     assert_eq!(p.datasheet_target.as_deref(), Some(format!("{g}/datasheets/ACME_TP-100.pdf").as_str()));
 
+    // A model in another format replaces the old file.
+    std::fs::write(src.join("body.wrl"), "#VRML V2.0").unwrap();
+    global.attach_file("ICs", "TP-100", AttachKind::Model, &src.join("body.wrl")).unwrap();
+    assert!(global.dir.join("3dmodels/ICs.3dshapes/SOT-23-ACME.wrl").is_file());
+    assert!(!global.dir.join("3dmodels/ICs.3dshapes/SOT-23-ACME.step").exists());
+    assert_eq!(global.list_parts()[0].model, Check::Ok);
+    global.attach_file("ICs", "TP-100", AttachKind::Model, &src.join("body.step")).unwrap();
+
     // Wrong kind is refused; re-attaching the file already in place doesn't empty it.
     assert!(global.attach_file("ICs", "TP-100", AttachKind::Model, &src.join("any.pdf")).is_err());
     assert!(global.attach_file("ICs", "NOPE", AttachKind::Datasheet, &src.join("any.pdf")).is_err());

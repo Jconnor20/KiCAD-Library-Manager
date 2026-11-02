@@ -482,6 +482,10 @@ impl LibraryRoot {
                 let mut fp = sexpr::parse(&std::fs::read_to_string(&fp_path).with_context(|| format!("reading {}", fp_path.display()))?)?;
                 let shapes = format!("3dmodels/{cat}.3dshapes/{fp_name}.{ext}");
                 copy_file(path, &self.dir.join(&shapes))?;
+                // A model re-attached in another format replaces the old one instead of leaving it behind.
+                for other in ["step", "stp", "wrl"].into_iter().filter(|e| *e != ext) {
+                    let _ = std::fs::remove_file(self.dir.join(format!("3dmodels/{cat}.3dshapes/{fp_name}.{other}")));
+                }
                 set_footprint(&mut fp, fp_name, Some(&format!("{var}/{shapes}")));
                 return write_atomic(&fp_path, &sexpr::to_string(&fp));
             }
