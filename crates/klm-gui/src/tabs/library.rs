@@ -1,7 +1,10 @@
 use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui::{self, Color32, RichText};
+use klm_core::checks::{self, Issue, Severity};
 use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartStatus, Scope};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 pub enum Msg {
     /// Re-read the listing, e.g. after an import.
@@ -25,12 +28,16 @@ pub struct LibraryTab {
     only_incomplete: bool,
     /// Cached listing; `None` means re-read from disk on the next frame.
     parts: Option<Vec<PartStatus>>,
+    /// Part checks for `parts`, by (category, name). They read every footprint and 3D model, so they
+    /// run on a thread and arrive after the listing.
+    checks: Option<HashMap<(String, String), Vec<Issue>>>,
+    checks_rx: Option<mpsc::Receiver<HashMap<(String, String), Vec<Issue>>>>,
     attach_dialog: Option<AttachDialog>,
 }
 
 impl Default for LibraryTab {
     fn default() -> Self {
-        Self { scope: Scope::Global, filter: String::new(), only_incomplete: false, parts: None, attach_dialog: None }
+        Self { scope: Scope::Global, filter: String::new(), only_incomplete: false, parts: None, checks: None, checks_rx: None, attach_dialog: None }
     }
 }
 
@@ -48,6 +55,23 @@ fn check_cell(ui: &mut egui::Ui, c: Check, what: &str) {
         Check::Broken => ("broken", ui.visuals().error_fg_color, format!("{what} is set but its file isn't there")),
     };
     ui.label(RichText::new(text).color(color)).on_hover_text(tip);
+}
+
+static NO_ISSUES: Vec<Issue> = Vec::new();
+
+fn issues_cell(ui: &mut egui::Ui, issues: Option<&Vec<Issue>>) {
+    let Some(issues) = issues else {
+        ui.weak("…").on_hover_text("Checking…");
+        return;
+    };
+    let Some(worst) = issues.iter().map(|i| i.severity).max() else {
+        ui.label(RichText::new("✔").color(Color32::from_rgb(60, 170, 90))).on_hover_text("No problems found");
+        return;
+    };
+    let color = if worst == Severity::Error { ui.visuals().error_fg_color } else { ui.visuals().warn_fg_color };
+    let tip: Vec<_> = issues.iter().map(|i| format!("• {}", i.message)).collect();
+    ui.label(RichText::new(issues.len().to_string()).color(color)).on_hover_text(tip.join("
+"));
 }
 
 impl LibraryTab {
@@ -167,6 +191,18 @@ impl LibraryTab {
             });
             return Action::None;
         };
+        if self.parts.is_none() {
+            let (tx, rx) = mpsc::channel();
+            let (root, ctx) = (root.clone(), ui.ctx().clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(checks::check_library(&root));
+                ctx.request_repaint();
+            });
+            (self.checks, self.checks_rx) = (None, Some(rx));
+        }
+        if let Some(done) = self.checks_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            (self.checks, self.checks_rx) = (Some(done), None);
+        }
         let parts = self.parts.get_or_insert_with(|| root.list_parts());
 
         let bad = parts.iter().filter(|p| incomplete(p)).count();
@@ -182,8 +218,8 @@ impl LibraryTab {
 
         let mut action = Action::None;
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-            egui::Grid::new("library").striped(true).num_columns(9).spacing([14.0, 4.0]).show(ui, |ui| {
-                for h in ["Category", "MPN", "Manufacturer", "Footprint", "3D model", "Datasheet", "Sim model", "In KiCad", ""] {
+            egui::Grid::new("library").striped(true).num_columns(10).spacing([14.0, 4.0]).show(ui, |ui| {
+                for h in ["Category", "MPN", "Manufacturer", "Footprint", "3D model", "Datasheet", "Sim model", "In KiCad", "Checks", ""] {
                     ui.strong(h);
                 }
                 ui.end_row();
@@ -199,6 +235,7 @@ impl LibraryTab {
                     check_cell(ui, p.datasheet, "Datasheet");
                     check_cell(ui, p.sim, "Sim model");
                     check_cell(ui, if p.in_kicad { Check::Ok } else { Check::Missing }, "KiCad library entry");
+                    issues_cell(ui, self.checks.as_ref().map(|c| c.get(&(p.category.clone(), p.name.clone())).unwrap_or(&NO_ISSUES)));
                     ui.horizontal(|ui| {
                         if ui.small_button("Attach…").on_hover_text("Add a datasheet (PDF), SPICE model or 3D model (STEP/WRL)").clicked() {
                             let picked = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
