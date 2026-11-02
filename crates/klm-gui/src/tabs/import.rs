@@ -145,7 +145,7 @@ impl ImportTab {
                     && adopt(&mut part, &work, &g.work.join(format!("zip-{}", g.files.sets.len())))
                 {
                     cx.log.push(format!("Added {} to the open import dialog", part.source));
-                    g.files.add(meta, part);
+                    g.add(meta, part);
                     return;
                 }
                 if let Some(i) = self.awaiting_cad.iter().position(|a| matching::same_mpn(&a.mpn, &part.mpn)) {
@@ -156,7 +156,8 @@ impl ImportTab {
             }
             Msg::Gather { part, work, waiting } => {
                 let mut dialog = ImportDialog::new(usize::MAX, &part, categories(cx), cx.global_root().is_some(), cx.project.is_some());
-                dialog.gathered = Some(Gathered { files: Combined::default(), work, waiting });
+                let auto = (part.manufacturer.clone(), part.description.clone());
+                dialog.gathered = Some(Gathered { files: Combined::default(), work, waiting, auto, edited: (false, false) });
                 self.dialog = Some(dialog);
             }
             Msg::Answer { work, source, found } => {
@@ -170,7 +171,7 @@ impl ImportTab {
                 {
                     g.waiting = g.waiting.saturating_sub(1);
                     if let Ok(Some(p)) = found {
-                        g.files.add(meta, p);
+                        g.add(meta, p);
                     }
                 } else if !self.pending.iter().any(|p| p.work == work) {
                     // The dialog was cancelled before this source answered.
@@ -372,6 +373,27 @@ struct Gathered {
     work: PathBuf,
     /// Sources that haven't answered yet.
     waiting: usize,
+    /// Manufacturer and description as the merge last left them, to tell them from the user's edits.
+    auto: (String, String),
+    /// The user edited (manufacturer, description), so later answers leave it alone.
+    edited: (bool, bool),
+}
+
+impl Gathered {
+    /// Adds a source's answer to the candidates and the metadata, except for fields the user has edited.
+    fn add(&mut self, meta: &mut Part, found: Part) {
+        self.edited.0 |= meta.manufacturer != self.auto.0;
+        self.edited.1 |= meta.description != self.auto.1;
+        let kept = (meta.manufacturer.clone(), meta.description.clone());
+        self.files.add(meta, found);
+        if self.edited.0 {
+            meta.manufacturer = kept.0;
+        }
+        if self.edited.1 {
+            meta.description = kept.1;
+        }
+        self.auto = (meta.manufacturer.clone(), meta.description.clone());
+    }
 }
 
 impl ImportDialog {

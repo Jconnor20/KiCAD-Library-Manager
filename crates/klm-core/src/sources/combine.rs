@@ -7,12 +7,13 @@
 //! pin/pad check before it can be imported.
 
 use super::Source;
-use crate::checks::check_files;
+use crate::checks::{Issue, Severity, check_files};
+use crate::kicad_env::upgrade_symbols;
 use crate::download::download_pdf;
 use crate::matching::same_mpn;
 use crate::part::Part;
 use anyhow::{Result, anyhow};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -120,10 +121,13 @@ impl Combined {
             return;
         }
         let (sym, fp) = (&self.sets[self.pick[0].unwrap()], &self.sets[self.pick[1].unwrap()]);
-        let issues = check_files(sym.symbol_file.as_ref().unwrap(), &fp.footprint_files[0]);
+        let issues = match readable_symbol(sym.symbol_file.as_ref().unwrap()) {
+            Ok(symbol) => check_files(&symbol, &fp.footprint_files[0]),
+            Err(e) => vec![Issue { severity: Severity::Error, message: format!("The symbol can't be checked: {e:#}") }],
+        };
         if !issues.is_empty() {
             let why: Vec<_> = issues.into_iter().map(|i| i.message).collect();
-            self.mismatch = Some(format!("The symbol from {} and the footprint from {} don't match. {}.", sym.source, fp.source, why.join(". ")));
+            self.mismatch = Some(format!("The symbol from {} and the footprint from {} can't be used together. {}.", sym.source, fp.source, why.join(". ")));
         }
     }
 
@@ -154,6 +158,16 @@ impl Combined {
     pub fn cad_page_url(meta: &Part) -> Option<String> {
         super::snapmagic_url(meta)
     }
+}
+
+/// The symbol file in a format the checks can read: a legacy `.lib` is converted next to itself.
+fn readable_symbol(symbol: &Path) -> Result<PathBuf> {
+    if !symbol.extension().is_some_and(|e| e.eq_ignore_ascii_case("lib")) {
+        return Ok(symbol.to_path_buf());
+    }
+    let upgraded = symbol.with_extension("checked.kicad_sym");
+    upgrade_symbols(symbol, &upgraded)?;
+    Ok(upgraded)
 }
 
 /// Supplier numbers from every source; otherwise the first value found, except that a distributor's
@@ -235,7 +249,6 @@ fn ask(src: &dyn Source, chosen: &Part, is_chosen: bool, work: &Path) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use std::sync::Mutex;
 
     const SYM: &str = r#"(kicad_symbol_lib (symbol "P1"
@@ -331,6 +344,22 @@ mod tests {
         c.reset();
         assert!(c.mismatch().is_none());
         assert_eq!(picks(&c)[..2], [Some("LCSC"), Some("LCSC")]);
+    }
+
+    #[test]
+    fn unconvertible_legacy_symbol_is_refused_with_the_reason() {
+        let dir = crate::test_dir("combine_legacy");
+        let (mut c, mut meta) = (Combined::default(), Part::default());
+        let mut zip = set(&dir, "ZIP: P1.zip", "s", FP);
+        let lib = dir.join("ZIP__P1.zip/p.lib");
+        std::fs::write(&lib, "EESCHEMA-LIBRARY Version 2.4
+not a library
+").unwrap();
+        zip.symbol_file = Some(lib);
+        c.add(&mut meta, zip);
+        c.add(&mut meta, set(&dir, "LCSC", "f", FP));
+        c.choose(Kind::Footprint, Some(1));
+        assert!(c.mismatch().is_some_and(|m| m.contains("symbol can't be checked")), "{:?}", c.mismatch());
     }
 
     #[test]
