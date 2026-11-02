@@ -13,6 +13,8 @@ use anyhow::{Context, Result, bail};
 use std::ffi::OsStr;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Once;
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -26,7 +28,7 @@ pub enum Kind {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Sources {
     pub symbol: Option<PathBuf>,
-    /// Draws only this symbol of the file; `None` draws the first one found (a vendor file holds one).
+    /// Draws only this symbol of the file (see `symbol_names`); `None` draws the first one found.
     pub symbol_name: Option<String>,
     pub footprint: Option<PathBuf>,
     /// Replaces the model the footprint names; `None` keeps it.
@@ -65,7 +67,7 @@ fn ext(p: &Path) -> String {
     p.extension().and_then(|e| e.to_str()).unwrap_or_default().to_lowercase()
 }
 
-/// Where pictures are kept between runs. Never cleaned up (about 50 KB each); the OS clears the temp folder.
+/// Where pictures are kept between runs; `render` removes the old ones, see `prune_cache`.
 pub fn cache_dir() -> PathBuf {
     std::env::temp_dir().join("klm-previews")
 }
@@ -73,7 +75,44 @@ pub fn cache_dir() -> PathBuf {
 /// Draws `kind` (or finds it in the cache) and returns the image path: an SVG, or a PNG for `Kind::Model`.
 /// The error is a short sentence fit to show the user.
 pub fn render(kind: Kind, src: &Sources) -> Result<PathBuf> {
+    static PRUNED: Once = Once::new();
+    PRUNED.call_once(|| prune_cache(&cache_dir(), CACHE_MAX_AGE));
     render_in(&cache_dir(), kind, src)
+}
+
+const CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
+
+/// Deletes pictures in `cache` last written more than `max_age` ago, and the scratch folders a crashed
+/// render left behind (those over an hour old, so a render in progress is safe). A picture still in use
+/// that gets deleted is simply drawn again.
+pub fn prune_cache(cache: &Path, max_age: Duration) {
+    let Ok(entries) = std::fs::read_dir(cache) else { return };
+    for e in entries.flatten() {
+        let scratch = e.file_name().to_string_lossy().starts_with("tmp-");
+        let limit = if scratch { Duration::from_secs(3600) } else { max_age };
+        let age = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+        if age.is_some_and(|a| a > limit) {
+            let _ = if e.path().is_dir() { std::fs::remove_dir_all(e.path()) } else { std::fs::remove_file(e.path()) };
+        }
+    }
+}
+
+/// Names of the symbols in a symbol file, in file order; any format `kicad-cli` can upgrade.
+pub fn symbol_names(file: &Path) -> Result<Vec<String>> {
+    let scratch = scratch_dir(&std::env::temp_dir())?;
+    let lib = as_kicad_sym(file, &scratch).and_then(|p| Ok(sexpr::parse(&std::fs::read_to_string(p)?)?));
+    let _ = std::fs::remove_dir_all(&scratch);
+    Ok(lib?.children("symbol").filter_map(|s| s.arg(0).map(String::from)).collect())
+}
+
+/// `file` itself if it is already a `.kicad_sym`, else an upgraded copy in `scratch`. Legacy `.lib` files draw as nothing.
+fn as_kicad_sym(file: &Path, scratch: &Path) -> Result<PathBuf> {
+    if ext(file) == "kicad_sym" {
+        return Ok(file.to_path_buf());
+    }
+    let up = scratch.join("sym.kicad_sym");
+    kicad_env::upgrade_symbols(file, &up)?;
+    Ok(up)
 }
 
 fn render_in(cache: &Path, kind: Kind, src: &Sources) -> Result<PathBuf> {
@@ -143,12 +182,7 @@ fn find_output(dir: &Path, ext: &str, prefer: &str) -> Result<PathBuf> {
 
 fn draw_symbol(src: &Sources, scratch: &Path) -> Result<PathBuf> {
     let file = src.symbol.as_ref().context("No symbol in this part")?;
-    let mut lib = file.clone();
-    if ext(file) != "kicad_sym" {
-        // Legacy .lib files draw as nothing, so bring them to the current format first.
-        lib = scratch.join("sym.kicad_sym");
-        kicad_env::upgrade_symbols(file, &lib)?;
-    }
+    let lib = as_kicad_sym(file, scratch)?;
     let out = scratch.join("sym");
     std::fs::create_dir_all(&out)?;
     let mut args: Vec<&OsStr> = vec!["sym".as_ref(), "export".as_ref(), "svg".as_ref(), "-o".as_ref(), out.as_os_str()];
@@ -312,6 +346,38 @@ mod tests {
         if part_src.model.is_some() {
             assert!(render_in(&cache, Kind::Model, &src).unwrap().is_file());
         }
+    }
+
+    #[test]
+    fn old_pictures_are_pruned_and_fresh_scratch_folders_kept() {
+        let cache = crate::test_dir("preview_prune");
+        let age = |p: &Path, secs: u64| {
+            let f = std::fs::File::options().write(true).open(p).unwrap();
+            f.set_modified(std::time::SystemTime::now() - Duration::from_secs(secs)).unwrap();
+        };
+        for name in ["old.svg", "new.svg"] {
+            std::fs::write(cache.join(name), "x").unwrap();
+        }
+        age(&cache.join("old.svg"), 8 * 24 * 3600);
+        std::fs::create_dir(cache.join("tmp-1-1")).unwrap(); // a render in progress
+        prune_cache(&cache, CACHE_MAX_AGE);
+        let left: Vec<_> = std::fs::read_dir(&cache).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(left.contains(&"new.svg".to_string()) && left.contains(&"tmp-1-1".to_string()) && !left.contains(&"old.svg".to_string()), "{left:?}");
+    }
+
+    #[test]
+    fn symbols_in_a_file_are_listed_and_drawn_by_name() {
+        if !kicad_available() {
+            return eprintln!("kicad-cli not found; skipping");
+        }
+        let (cache, mut src) = sources("preview_names");
+        let other = r#"(symbol "OTHER" (symbol "OTHER_1_1" (pin passive line (at 0 0 0) (length 2.54) (name "B") (number "1"))))"#;
+        let two = format!("{}{other})", SYMBOL.trim_end().strip_suffix(')').unwrap());
+        std::fs::write(src.symbol.as_ref().unwrap(), two).unwrap();
+        assert_eq!(symbol_names(src.symbol.as_ref().unwrap()).unwrap(), ["TESTPART", "OTHER"]);
+        let first = render_in(&cache, Kind::Symbol, &src).unwrap();
+        src.symbol_name = Some("OTHER".into());
+        assert_ne!(render_in(&cache, Kind::Symbol, &src).unwrap(), first);
     }
 
     #[test]

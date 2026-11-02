@@ -9,7 +9,7 @@ use klm_core::library::LibraryRoot;
 use klm_core::part::Part;
 use klm_core::preview::{self, Kind, Sources};
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 const KINDS: [(Kind, &str); 3] = [(Kind::Symbol, "Symbol"), (Kind::Footprint, "Footprint"), (Kind::Model, "3D")];
 
@@ -20,12 +20,24 @@ enum Slot {
     Failed(String),
 }
 
+enum Msg {
+    Image(usize, Result<PathBuf, String>),
+    /// The symbols in the file, and the one drawn first.
+    Symbols(Vec<String>, Option<String>),
+}
+
 pub struct PreviewPanel {
+    ctx: egui::Context,
+    src: Sources,
     slots: [Slot; 3],
     /// `None` while the checks run.
     issues: Option<Vec<Issue>>,
     zoomed: Option<usize>,
-    rx: Receiver<(usize, Result<PathBuf, String>)>,
+    /// Every symbol in the file when there is more than one, and the one shown.
+    symbols: Vec<String>,
+    symbol: Option<String>,
+    tx: Sender<Msg>,
+    rx: Receiver<Msg>,
     issues_rx: Receiver<Vec<Issue>>,
 }
 
@@ -34,7 +46,7 @@ impl PreviewPanel {
     pub fn for_part(ctx: &egui::Context, part: &Part) -> Self {
         let src = Sources::from_part(part);
         let files = src.clone();
-        Self::start(ctx, src, move || match (&files.symbol, &files.footprint) {
+        Self::start(ctx, src, Some(part.mpn.clone()), move || match (&files.symbol, &files.footprint) {
             (Some(s), Some(f)) => checks::check_files(s, f, files.model.as_deref()),
             _ => vec![],
         })
@@ -42,27 +54,46 @@ impl PreviewPanel {
 
     pub fn for_library(ctx: &egui::Context, root: &LibraryRoot, category: &str, name: &str) -> Self {
         let (root, category, name) = (root.clone(), category.to_string(), name.to_string());
-        Self::start(ctx, Sources::from_library(&root, &category, &name), move || checks::check_part(&root, &category, &name))
+        Self::start(ctx, Sources::from_library(&root, &category, &name), None, move || checks::check_part(&root, &category, &name))
     }
 
-    fn start(ctx: &egui::Context, src: Sources, check: impl FnOnce() -> Vec<Issue> + Send + 'static) -> Self {
+    /// `mpn` picks which symbol of a multi-symbol file is drawn first, as the import does; `None` when the symbol is already named.
+    fn start(ctx: &egui::Context, src: Sources, mpn: Option<String>, check: impl FnOnce() -> Vec<Issue> + Send + 'static) -> Self {
         egui_extras::install_image_loaders(ctx); // idempotent
         let (tx, rx) = channel();
         for (i, (kind, _)) in KINDS.iter().enumerate() {
-            let (tx, src, ctx) = (tx.clone(), src.clone(), ctx.clone());
+            let (tx, mut src, ctx, mpn) = (tx.clone(), src.clone(), ctx.clone(), mpn.clone());
             let kind = *kind;
             std::thread::spawn(move || {
-                let _ = tx.send((i, preview::render(kind, &src).map_err(|e| format!("{e:#}"))));
+                if let (Kind::Symbol, Some(file), Some(mpn), None) = (kind, &src.symbol, &mpn, &src.symbol_name) {
+                    if let Ok(names) = preview::symbol_names(file) {
+                        src.symbol_name = names.iter().find(|n| n.eq_ignore_ascii_case(mpn)).or(names.first()).cloned();
+                        let _ = tx.send(Msg::Symbols(names, src.symbol_name.clone()));
+                    }
+                }
+                let _ = tx.send(Msg::Image(i, preview::render(kind, &src).map_err(|e| format!("{e:#}"))));
                 ctx.request_repaint();
             });
         }
         let (itx, issues_rx) = channel();
-        let ctx = ctx.clone();
+        let repaint = ctx.clone();
         std::thread::spawn(move || {
             let _ = itx.send(check());
+            repaint.request_repaint();
+        });
+        Self { ctx: ctx.clone(), src, slots: [Slot::Loading, Slot::Loading, Slot::Loading], issues: None, zoomed: None, symbols: vec![], symbol: None, tx, rx, issues_rx }
+    }
+
+    /// Draws another symbol of the file.
+    fn pick_symbol(&mut self, name: String) {
+        self.slots[0] = Slot::Loading;
+        let (tx, ctx, mut src) = (self.tx.clone(), self.ctx.clone(), self.src.clone());
+        src.symbol_name = Some(name.clone());
+        self.symbol = Some(name);
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::Image(0, preview::render(Kind::Symbol, &src).map_err(|e| format!("{e:#}"))));
             ctx.request_repaint();
         });
-        Self { slots: [Slot::Loading, Slot::Loading, Slot::Loading], issues: None, zoomed: None, rx, issues_rx }
     }
 
     /// The panel in a window of its own; returns false once the user closes it.
@@ -76,11 +107,16 @@ impl PreviewPanel {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
-        while let Ok((i, result)) = self.rx.try_recv() {
-            self.slots[i] = match result {
-                Ok(path) => Slot::Image(path),
-                Err(reason) => Slot::Failed(reason),
-            };
+        while let Ok(msg) = self.rx.try_recv() {
+            match msg {
+                Msg::Image(i, result) => {
+                    self.slots[i] = match result {
+                        Ok(path) => Slot::Image(path),
+                        Err(reason) => Slot::Failed(reason),
+                    }
+                }
+                Msg::Symbols(names, first) => (self.symbols, self.symbol) = (names, first),
+            }
         }
         if let Ok(issues) = self.issues_rx.try_recv() {
             self.issues = Some(issues);
@@ -88,7 +124,22 @@ impl PreviewPanel {
         ui.horizontal(|ui| {
             for (i, (kind, label)) in KINDS.iter().enumerate() {
                 ui.vertical(|ui| {
-                    ui.weak(*label);
+                    let mut picked = None;
+                    if i == 0 && self.symbols.len() > 1 {
+                        let shown = self.symbol.clone().unwrap_or_default();
+                        egui::ComboBox::from_id_salt("symbol_pick").selected_text(shown).width(140.0).show_ui(ui, |ui| {
+                            for name in &self.symbols {
+                                if ui.selectable_label(self.symbol.as_ref() == Some(name), name).clicked() {
+                                    picked = Some(name.clone());
+                                }
+                            }
+                        });
+                    } else {
+                        ui.weak(*label);
+                    }
+                    if let Some(name) = picked.filter(|n| self.symbol.as_ref() != Some(n)) {
+                        self.pick_symbol(name);
+                    }
                     if slot(ui, &self.slots[i], *kind, Vec2::new(140.0, 105.0)) {
                         self.zoomed = if self.zoomed == Some(i) { None } else { Some(i) };
                     }
