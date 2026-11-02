@@ -16,6 +16,8 @@ pub struct Settings {
     pub source_enabled: BTreeMap<String, bool>,
     /// Currency search prices are converted to (ISO code); empty shows each source's own currency.
     pub display_currency: String,
+    /// How long distributor search results are reused, in minutes; unset is a day, 0 turns the cache off.
+    pub cache_ttl_minutes: Option<u64>,
 }
 
 fn path() -> Option<PathBuf> {

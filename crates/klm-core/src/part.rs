@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 /// Everything known about one real part, plus the local files that came with it.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Part {
     pub mpn: String,
     pub manufacturer: String,

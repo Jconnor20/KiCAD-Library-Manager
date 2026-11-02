@@ -1,6 +1,7 @@
 //! KiCad Library Manager core: no UI code lives here, so any front end can drive it.
 
 pub mod batch;
+pub mod cache;
 pub mod categories;
 pub mod checks;
 pub mod convert;

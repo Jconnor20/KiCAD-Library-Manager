@@ -110,6 +110,9 @@ fn run_import(cx: &mut AppCtx, index: usize, part: Part, category: String, targe
             match root.add_part(&part, &category, true) {
                 Ok(new_lib) => {
                     notes.push(format!("Imported {} into {nick}", part.mpn));
+                    if let Some(store) = klm_core::store::Store::default_path().and_then(|p| klm_core::store::Store::open(&p).ok()) {
+                        let _ = store.log("import", &part.mpn);
+                    }
                     if new_lib {
                         notes.push(format!("Added library {nick} to KiCad"));
                     }

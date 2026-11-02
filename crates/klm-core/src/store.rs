@@ -194,6 +194,53 @@ impl Store {
         Ok(rows.next().transpose()?)
     }
 
+    // --- Search history, saved searches, favourites, recent imports (W3.4). They reuse `history` and
+    // `tags`, so no schema change; `parts` can be rebuilt without touching them.
+
+    /// Newest first, each query once.
+    pub fn recent_searches(&self, limit: usize) -> Result<Vec<String>> {
+        let mut q = self.db.prepare(
+            "SELECT details FROM history WHERE action = 'search' GROUP BY details ORDER BY MAX(id) DESC LIMIT ?1",
+        )?;
+        Ok(q.query_map(params![limit as i64], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn set_saved_search(&self, query: &str, saved: bool) -> Result<()> {
+        self.db.execute("DELETE FROM history WHERE action = 'saved_search' AND details = ?1", [query])?;
+        if saved {
+            self.log("saved_search", query)?;
+        }
+        Ok(())
+    }
+
+    /// Oldest saved first.
+    pub fn saved_searches(&self) -> Result<Vec<String>> {
+        let mut q = self.db.prepare("SELECT details FROM history WHERE action = 'saved_search' ORDER BY id")?;
+        Ok(q.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn set_favourite(&self, mpn: &str, on: bool) -> Result<()> {
+        if on {
+            self.add_tag(mpn, "favourite")
+        } else {
+            self.db.execute("DELETE FROM tags WHERE part_mpn = ?1 AND tag = 'favourite'", [mpn])?;
+            Ok(())
+        }
+    }
+
+    pub fn favourites(&self) -> Result<Vec<String>> {
+        let mut q = self.db.prepare("SELECT part_mpn FROM tags WHERE tag = 'favourite' ORDER BY part_mpn")?;
+        Ok(q.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// MPNs logged with `log("import", mpn)`, newest first, each once.
+    pub fn recent_imports(&self, limit: usize) -> Result<Vec<String>> {
+        let mut q = self.db.prepare(
+            "SELECT details FROM history WHERE action = 'import' GROUP BY details ORDER BY MAX(id) DESC LIMIT ?1",
+        )?;
+        Ok(q.query_map(params![limit as i64], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn log(&self, action: &str, details: &str) -> Result<()> {
         self.db.execute("INSERT INTO history (action, details) VALUES (?1, ?2)", [action, details])?;
         Ok(())
@@ -272,5 +319,27 @@ mod tests {
         assert_eq!(s.tags("TP-1").unwrap(), ["favourite"]);
         assert_eq!(s.cache_get("LCSC", "tp-1").unwrap().unwrap().0, "{}");
         assert_eq!(s.history().unwrap()[0].1, "import");
+    }
+
+    #[test]
+    fn searches_and_favourites_round_trip() {
+        let path = crate::test_dir("store_w34").join("parts.db");
+        let s = Store::open(&path).unwrap();
+        for q in ["a", "b", "a"] {
+            s.log("search", q).unwrap();
+        }
+        s.log("import", "X1").unwrap();
+        s.set_saved_search("b", true).unwrap();
+        s.set_saved_search("b", true).unwrap();
+        s.set_favourite("X1", true).unwrap();
+        s.set_favourite("X2", true).unwrap();
+        s.set_favourite("X2", false).unwrap();
+        let s = Store::open(&path).unwrap(); // survives reopening
+        assert_eq!(s.recent_searches(10).unwrap(), ["a", "b"]);
+        assert_eq!(s.saved_searches().unwrap(), ["b"]);
+        assert_eq!(s.favourites().unwrap(), ["X1"]);
+        assert_eq!(s.recent_imports(10).unwrap(), ["X1"]);
+        s.set_saved_search("b", false).unwrap();
+        assert!(s.saved_searches().unwrap().is_empty());
     }
 }
