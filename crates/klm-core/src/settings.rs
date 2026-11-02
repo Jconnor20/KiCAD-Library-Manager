@@ -20,6 +20,8 @@ pub struct Settings {
     pub rules: crate::rules::Rules,
     /// Which standardise rules run, and their values; KLC's when unset.
     pub standards: crate::standardise::Rules,
+    /// How long distributor search results are reused, in minutes; unset is a day, 0 turns the cache off.
+    pub cache_ttl_minutes: Option<u64>,
 }
 
 fn path() -> Option<PathBuf> {

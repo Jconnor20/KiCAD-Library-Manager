@@ -2,6 +2,7 @@
 
 pub mod alternatives;
 pub mod batch;
+pub mod cache;
 pub mod categories;
 pub mod checks;
 pub mod convert;

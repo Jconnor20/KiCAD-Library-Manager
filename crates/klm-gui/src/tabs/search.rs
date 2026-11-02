@@ -1,6 +1,8 @@
 use super::import;
 use crate::{AppCtx, Msg as AppMsg, new_work_dir};
 use eframe::egui::{self, RichText};
+use klm_core::cache;
+use klm_core::store::Store;
 use klm_core::currency::{Rates, display_price, price_in};
 use klm_core::part::Part;
 use klm_core::search_filter::{Filter, SortKey, view};
@@ -19,6 +21,31 @@ enum Action {
     Search(String),
     /// Fetch result `i` (an index into the unsorted, unfiltered results).
     Get(usize),
+    /// Pin (true) or unpin a search.
+    Save(String, bool),
+    /// Star (true) or unstar a part by MPN.
+    Star(String, bool),
+}
+
+/// The side panel's lists, read from the part store.
+#[derive(Default)]
+struct Side {
+    loaded: bool,
+    recent: Vec<String>,
+    saved: Vec<String>,
+    favourites: Vec<String>,
+    imported: Vec<String>,
+}
+
+impl Side {
+    fn load(&mut self) {
+        self.loaded = true;
+        let Some(store) = Store::default_path().and_then(|p| Store::open(&p).ok()) else { return };
+        self.recent = store.recent_searches(15).unwrap_or_default();
+        self.saved = store.saved_searches().unwrap_or_default();
+        self.favourites = store.favourites().unwrap_or_default();
+        self.imported = store.recent_imports(15).unwrap_or_default();
+    }
 }
 
 /// One search box over every enabled source; results from all of them in one table.
@@ -33,6 +60,7 @@ pub struct SearchTab {
     rates: Option<Rates>,
     /// A rates load was started since the currency was last changed; don't retry every frame.
     rates_tried: bool,
+    side: Side,
 }
 
 impl SearchTab {
@@ -56,6 +84,22 @@ impl SearchTab {
             Action::None => {}
             Action::Search(q) => self.run_search(q, cx),
             Action::Get(i) => self.get_result(i, cx),
+            Action::Save(q, on) => {
+                self.with_store(cx, |s| s.set_saved_search(&q, on));
+                self.side.load();
+            }
+            Action::Star(mpn, on) => {
+                self.with_store(cx, |s| s.set_favourite(&mpn, on));
+                self.side.load();
+            }
+        }
+    }
+
+    /// The store is only a convenience, so a failure is logged and nothing else happens.
+    fn with_store(&self, cx: &mut AppCtx, f: impl FnOnce(&Store) -> anyhow::Result<()>) {
+        let r = Store::default_path().ok_or_else(|| anyhow::anyhow!("no config directory")).and_then(|p| Store::open(&p)).and_then(|s| f(&s));
+        if let Err(e) = r {
+            cx.log.push(format!("Part store: {e:#}"));
         }
     }
 
@@ -80,6 +124,12 @@ impl SearchTab {
             ui.label("No search sources are enabled yet.");
             return action;
         }
+        if !self.side.loaded {
+            self.side.load();
+        }
+        egui::Panel::right("search_side").default_size(190.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| self.side_ui(ui, busy, &mut action));
+        });
         ui.horizontal(|ui| {
             let edit = ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("MPN, LCSC/DigiKey number or keywords").desired_width(320.0));
             let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -131,14 +181,77 @@ impl SearchTab {
                     } else if target.is_some() && !p.unit_price.is_empty() {
                         price.on_hover_text("Not converted: unknown currency or no exchange rates");
                     }
-                    if ui.add_enabled(!busy, egui::Button::new("Get…")).clicked() {
-                        action = Action::Get(i);
-                    }
+                    ui.horizontal(|ui| {
+                        let starred = self.side.favourites.contains(&p.mpn);
+                        if ui.small_button(if starred { "★" } else { "☆" }).on_hover_text("Favourite").clicked() {
+                            action = Action::Star(p.mpn.clone(), !starred);
+                        }
+                        if ui.add_enabled(!busy, egui::Button::new("Get…")).clicked() {
+                            action = Action::Get(i);
+                        }
+                    });
                     ui.end_row();
                 }
             });
         });
         action
+    }
+
+    fn side_ui(&mut self, ui: &mut egui::Ui, busy: bool, action: &mut Action) {
+        let can = !self.searching && !busy;
+        ui.strong("Saved searches");
+        for q in &self.side.saved {
+            ui.horizontal(|ui| {
+                if ui.small_button("📌").on_hover_text("Unpin").clicked() {
+                    *action = Action::Save(q.clone(), false);
+                }
+                if ui.add_enabled(can, egui::Link::new(q)).clicked() {
+                    self.query = q.clone();
+                    *action = Action::Search(q.clone());
+                }
+            });
+        }
+        ui.add_space(6.0);
+        ui.strong("Recent searches");
+        for q in &self.side.recent {
+            ui.horizontal(|ui| {
+                let saved = self.side.saved.contains(q);
+                if ui.add_enabled(!saved, egui::Button::new("📌").small()).on_hover_text("Save this search").clicked() {
+                    *action = Action::Save(q.clone(), true);
+                }
+                if ui.add_enabled(can, egui::Link::new(q)).clicked() {
+                    self.query = q.clone();
+                    *action = Action::Search(q.clone());
+                }
+            });
+        }
+        ui.add_space(6.0);
+        ui.strong("Favourites");
+        for mpn in &self.side.favourites {
+            ui.horizontal(|ui| {
+                if ui.small_button("★").on_hover_text("Unstar").clicked() {
+                    *action = Action::Star(mpn.clone(), false);
+                }
+                if ui.add_enabled(can, egui::Link::new(mpn)).on_hover_text("Search for this part").clicked() {
+                    self.query = mpn.clone();
+                    *action = Action::Search(mpn.clone());
+                }
+            });
+        }
+        ui.add_space(6.0);
+        ui.strong("Recently imported");
+        for mpn in &self.side.imported {
+            ui.horizontal(|ui| {
+                let starred = self.side.favourites.contains(mpn);
+                if ui.small_button(if starred { "★" } else { "☆" }).clicked() {
+                    *action = Action::Star(mpn.clone(), !starred);
+                }
+                if ui.add_enabled(can, egui::Link::new(mpn)).clicked() {
+                    self.query = mpn.clone();
+                    *action = Action::Search(mpn.clone());
+                }
+            });
+        }
     }
 
     fn filters_ui(&mut self, ui: &mut egui::Ui, source_names: &[&str], currency: &mut String) {
@@ -211,12 +324,15 @@ impl SearchTab {
     fn run_search(&mut self, query: String, cx: &mut AppCtx) {
         self.searching = true;
         self.results.clear();
+        self.with_store(cx, |s| s.log("search", &query));
+        self.side.load();
+        let ttl = cx.settings.cache_ttl_minutes.unwrap_or(cache::DEFAULT_TTL_MINUTES) as i64 * 60;
         let (tx, sources, ctx) = (cx.tx.clone(), cx.sources.clone(), cx.ctx.clone());
         std::thread::spawn(move || {
             let mut results = vec![];
             let query = &query;
             std::thread::scope(|s| {
-                let handles: Vec<_> = sources.iter().enumerate().map(|(i, src)| s.spawn(move || (i, src.name(), src.search(&query)))).collect();
+                let handles: Vec<_> = sources.iter().enumerate().map(|(i, src)| s.spawn(move || (i, src.name(), search_cached(src.as_ref(), query, ttl)))).collect();
                 for h in handles {
                     match h.join() {
                         Ok((i, _, Ok(parts))) => results.extend(parts.into_iter().map(|p| (i, p))),
@@ -244,4 +360,10 @@ impl SearchTab {
             });
         });
     }
+}
+
+/// One source's results, from the part store if fresh enough (each thread opens its own connection).
+fn search_cached(src: &dyn klm_core::sources::Source, query: &str, ttl_secs: i64) -> anyhow::Result<Vec<Part>> {
+    let store = Store::default_path().and_then(|p| Store::open(&p).ok());
+    cache::search(store.as_ref(), src.name(), query, ttl_secs, || src.search(query))
 }
