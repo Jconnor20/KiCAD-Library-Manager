@@ -121,27 +121,27 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
 
 ## Wave 3: Library quality (4 in parallel)
 
-- [ ] **W3.1 Standardise to KLC + overrides (R4)** (L) ⚑
+- [x] **W3.1 Standardise to KLC + overrides (R4)** (L) ⚑
   - **Owns:** `core/standardise/` (new), the "Standards" section of Settings
   - Automatic fixes for symbols: text sizes, pin length, line widths, field positions.
   - Automatic fixes for footprints: silkscreen/fab/courtyard line widths, reference and value placement, origin, pin-1 marking.
   - Each rule can be switched off or changed in Settings.
   - Always runs as a dry run first and takes a W2.4 snapshot.
   - **Needs:** W1.2, W2.4
-- [ ] **W3.2 Alternatives and duplicates (R7; Rev "dedup")** (L) ⚑
+- [x] **W3.2 Alternatives and duplicates (R7; Rev "dedup")** (L) ⚑
   - **Owns:** `core/alternatives.rs` (new), the "Alternatives" panel
   - Find likely-equivalent parts by normalised MPN, package and value.
   - You confirm each grouping. Nothing is ever merged automatically, because footprints may differ.
   - Mark parts as preferred, substitute or obsolete; stored in the part store.
   - Write the `MPN_AltN` and supplier fields into the symbol.
   - **Needs:** W0.3, W1.2
-- [ ] **W3.3 Naming and category rules (Rev)** (M)
+- [x] **W3.3 Naming and category rules (Rev)** (M)
   - **Owns:** `core/rules.rs` (new), the "Naming" section of Settings
   - Your own rules for choosing a category (keyword or package → category).
   - Name templates such as `{Manufacturer}_{MPN}`, and MPN case normalisation.
   - Used by import, the metadata editor and standardise.
   - **Needs:** W1.5
-- [ ] **W3.4 Search cache, history and favourites (Rev)** (M)
+- [x] **W3.4 Search cache, history and favourites (Rev)** (M)
   - **Owns:** `core/cache.rs` (new) and the history/favourites side panel in `tabs/search.rs`
   - Cache distributor results for a set time to save API calls.
   - Recent searches, saved searches, favourite parts, recently imported.
