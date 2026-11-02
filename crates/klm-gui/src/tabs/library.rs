@@ -9,6 +9,8 @@ pub enum Msg {
     /// Copy a global part into the project library; `overwrite` replaces an existing copy.
     CopyToProject { category: String, name: String, overwrite: bool },
     Attach { from: LibraryRoot, targets: Vec<LibraryRoot>, category: String, name: String, path: PathBuf },
+    /// The datasheet download worker has finished.
+    DownloadDone,
 }
 
 /// Something the user asked for on a row; `ui` carries it out and refreshes the view.
@@ -16,6 +18,7 @@ enum Action {
     None,
     Attach { scope: Scope, category: String, name: String, path: PathBuf },
     CopyToProject { category: String, name: String, overwrite: bool },
+    DownloadDatasheets(LibraryRoot),
 }
 
 /// Table of the parts in the global or project library, with what each one is missing.
@@ -26,11 +29,13 @@ pub struct LibraryTab {
     /// Cached listing; `None` means re-read from disk on the next frame.
     parts: Option<Vec<PartStatus>>,
     attach_dialog: Option<AttachDialog>,
+    /// A worker is downloading datasheets.
+    downloading: bool,
 }
 
 impl Default for LibraryTab {
     fn default() -> Self {
-        Self { scope: Scope::Global, filter: String::new(), only_incomplete: false, parts: None, attach_dialog: None }
+        Self { scope: Scope::Global, filter: String::new(), only_incomplete: false, parts: None, attach_dialog: None, downloading: false }
     }
 }
 
@@ -55,6 +60,7 @@ impl LibraryTab {
         let (global, project) = (cx.global_root(), cx.project_root());
         match self.show(ui, global.as_ref(), project.as_ref()) {
             Action::None => {}
+            Action::DownloadDatasheets(root) => self.download_datasheets(root, cx),
             Action::Attach { scope, category, name, path } => self.attach_dialog = Some(AttachDialog::new(scope, category, name, path)),
             Action::CopyToProject { category, name, overwrite } => {
                 // Only a library new to the project touches KiCad's tables.
@@ -70,6 +76,10 @@ impl LibraryTab {
     pub fn handle(&mut self, msg: Msg, cx: &mut AppCtx) {
         match msg {
             Msg::Refresh => self.parts = None,
+            Msg::DownloadDone => {
+                self.downloading = false;
+                self.parts = None;
+            }
             Msg::CopyToProject { category, name, overwrite } => self.copy_to_project(&category, &name, overwrite, cx),
             Msg::Attach { from, targets, category, name, path } => self.attach(&from, &targets, &category, &name, &path, cx),
         }
@@ -126,6 +136,28 @@ impl LibraryTab {
         self.parts = None;
     }
 
+    /// Downloads a PDF for every part in `root` whose datasheet is only a web link, logging each result.
+    fn download_datasheets(&mut self, root: LibraryRoot, cx: &mut AppCtx) {
+        self.downloading = true;
+        let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
+        cx.log.push("Downloading datasheets for parts that only have a link…".into());
+        std::thread::spawn(move || {
+            let results = root.download_missing_datasheets();
+            if results.is_empty() {
+                let _ = tx.send(AppMsg::Log("No parts with a link-only datasheet".into()));
+            }
+            for (mpn, result) in results {
+                let line = match result {
+                    Ok(()) => format!("Downloaded the datasheet for {mpn}"),
+                    Err(e) => format!("Could not download the datasheet for {mpn} (link kept): {e:#}"),
+                };
+                let _ = tx.send(AppMsg::Log(line));
+            }
+            let _ = tx.send(AppMsg::Library(Msg::DownloadDone));
+            ctx.request_repaint();
+        });
+    }
+
     fn copy_to_project(&mut self, category: &str, name: &str, overwrite: bool, cx: &mut AppCtx) {
         let (Some(global), Some(project)) = (cx.global_root(), cx.project_root()) else { return };
         match global.copy_part_to(category, name, &project, overwrite) {
@@ -141,6 +173,7 @@ impl LibraryTab {
     }
 
     fn show(&mut self, ui: &mut egui::Ui, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> Action {
+        let mut download = false;
         ui.horizontal(|ui| {
             let before = self.scope;
             ui.add_enabled_ui(global.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Global, "Global"));
@@ -154,6 +187,10 @@ impl LibraryTab {
             if ui.button("Refresh").clicked() {
                 self.parts = None;
             }
+            download = ui
+                .add_enabled(!self.downloading, egui::Button::new("Download missing datasheets"))
+                .on_hover_text("Save a local PDF for every part whose datasheet is only a web link")
+                .clicked();
         });
 
         let root = match self.scope {
@@ -180,7 +217,7 @@ impl LibraryTab {
             .filter(|p| needle.is_empty() || [&p.mpn, &p.manufacturer, &p.category, &p.description].iter().any(|f| f.to_lowercase().contains(&needle)))
             .collect();
 
-        let mut action = Action::None;
+        let mut action = if download { Action::DownloadDatasheets(root.clone()) } else { Action::None };
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             egui::Grid::new("library").striped(true).num_columns(9).spacing([14.0, 4.0]).show(ui, |ui| {
                 for h in ["Category", "MPN", "Manufacturer", "Footprint", "3D model", "Datasheet", "Sim model", "In KiCad", ""] {

@@ -4,6 +4,7 @@
 
 use super::Source;
 use crate::convert::easyeda;
+use crate::download::download_pdf;
 use crate::part::Part;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
@@ -36,19 +37,19 @@ impl Lcsc {
         Ok(resp.bytes()?.to_vec())
     }
 
-    /// Saves the first candidate that really is a PDF (some "datasheet" links are HTML viewer pages);
-    /// the error lists why each one failed.
-    fn download_pdf(&self, candidates: &[&str], dest: &Path) -> Result<()> {
-        let mut why = vec![];
-        for url in candidates.iter().filter(|u| u.starts_with("http")) {
-            match self.get_bytes(url) {
-                Ok(b) if b.starts_with(b"%PDF") => return Ok(std::fs::write(dest, b)?),
-                Ok(_) => why.push(format!("{url} is not a PDF")),
-                Err(e) => why.push(format!("{e:#}")),
-            }
+}
+
+/// Saves the first candidate that really is a PDF (some "datasheet" links are HTML viewer pages);
+/// the error lists why each one failed.
+fn download_first_pdf(candidates: &[&str], dest: &Path) -> Result<()> {
+    let mut why = vec![];
+    for url in candidates.iter().filter(|u| u.starts_with("http")) {
+        match download_pdf(url, dest) {
+            Ok(()) => return Ok(()),
+            Err(e) => why.push(format!("{e:#}")),
         }
-        bail!("{}", if why.is_empty() { "no datasheet link".into() } else { why.join("; ") })
     }
+    bail!("{}", if why.is_empty() { "no datasheet link".into() } else { why.join("; ") })
 }
 
 impl Default for Lcsc {
@@ -142,7 +143,7 @@ impl Source for Lcsc {
 
         let pdf = work.join(format!("{id}.pdf"));
         let links = [part.datasheet_url.as_str(), c.datasheet_url.as_str()];
-        match self.download_pdf(&links, &pdf) {
+        match download_first_pdf(&links, &pdf) {
             Ok(()) => out.datasheet_file = Some(pdf),
             Err(e) => {
                 if out.datasheet_url.is_empty() {
