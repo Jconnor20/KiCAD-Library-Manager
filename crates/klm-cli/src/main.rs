@@ -67,10 +67,12 @@ fn parse(args: &[String]) -> Result<Command> {
 }
 
 fn settings() -> Result<Settings> {
-    match std::env::var_os("KLM_SETTINGS") {
-        Some(p) => Ok(serde_json::from_str(&std::fs::read_to_string(&p).with_context(|| format!("reading {}", Path::new(&p).display()))?)?),
-        None => Ok(Settings::load()),
-    }
+    let s: Settings = match std::env::var_os("KLM_SETTINGS") {
+        Some(p) => serde_json::from_str(&std::fs::read_to_string(&p).with_context(|| format!("reading {}", Path::new(&p).display()))?)?,
+        None => Settings::load(),
+    };
+    kicad_env::set_kicad_cli_override(s.kicad_cli.clone());
+    Ok(s)
 }
 
 fn kicad_config() -> Result<PathBuf> {

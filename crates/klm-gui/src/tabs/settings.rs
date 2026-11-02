@@ -2,6 +2,7 @@ use super::{import, search};
 use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui;
 use klm_core::credentials::{self, SOURCES};
+use klm_core::kicad_env;
 use klm_core::settings::Settings;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -19,6 +20,9 @@ enum Action {
     Test(&'static str),
     /// New Downloads folder to watch (`None` = the OS default).
     Downloads(Option<PathBuf>),
+    /// New `kicad-cli` to use (`None` = find it automatically).
+    KicadCli(Option<PathBuf>),
+    TestCli,
     Note(String),
 }
 
@@ -72,7 +76,27 @@ impl SettingsTab {
                 cx.save_settings();
                 cx.send(AppMsg::Import(import::Msg::RestartWatcher));
             }
+            Action::KicadCli(path) => {
+                kicad_env::set_kicad_cli_override(path.clone());
+                cx.settings.kicad_cli = path;
+                cx.save_settings();
+            }
+            Action::TestCli => self.test_cli(cx),
         }
+    }
+
+    fn test_cli(&mut self, cx: &mut AppCtx) {
+        self.testing = true;
+        let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
+        std::thread::spawn(move || {
+            let line = match kicad_env::kicad_cli_version() {
+                Ok(v) => format!("kicad-cli: test OK, version {v}"),
+                Err(e) => format!("kicad-cli: test failed: {e:#}"),
+            };
+            let _ = tx.send(AppMsg::Log(line));
+            let _ = tx.send(AppMsg::Settings(Msg::TestDone));
+            ctx.request_repaint();
+        });
     }
 
     /// Saves the settings and rebuilds the source list from them and the stored credentials.
@@ -183,6 +207,24 @@ impl SettingsTab {
                 }
                 if settings.downloads_dir.is_some() && ui.button("Use default").clicked() {
                     action = Action::Downloads(None);
+                }
+            });
+
+            ui.add_space(16.0);
+            ui.strong("kicad-cli");
+            ui.weak("Used to upgrade imported parts to your KiCad's format. Set it if KiCad isn't installed in the usual place.");
+            ui.horizontal(|ui| {
+                ui.label(kicad_env::kicad_cli().map_or("none found".into(), |p| p.display().to_string()));
+                if ui.button("Browse…").clicked() {
+                    if let Some(f) = rfd::FileDialog::new().set_title("kicad-cli executable").pick_file() {
+                        action = Action::KicadCli(Some(f));
+                    }
+                }
+                if settings.kicad_cli.is_some() && ui.button("Use default").clicked() {
+                    action = Action::KicadCli(None);
+                }
+                if ui.add_enabled(!testing, egui::Button::new("Test")).on_hover_text("Runs kicad-cli version").clicked() {
+                    action = Action::TestCli;
                 }
             });
         });

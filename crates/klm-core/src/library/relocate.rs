@@ -3,6 +3,7 @@
 use super::{LibraryRoot, Scope, has_ext};
 use crate::kicad_env::{self, write_atomic};
 use anyhow::{Context, Result, bail};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Prefix older KLM versions wrote for global paths; KiCad lost the variable whenever it saved its settings.
@@ -73,12 +74,109 @@ impl LibraryRoot {
             if let Some(parent) = new_dir.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            // shortcut: rename only works on the same drive; across drives the user moves it by hand and picks the new folder.
-            std::fs::rename(&self.dir, new_dir).with_context(|| {
-                format!("could not move the library to {} (to move it to another drive, move the folder yourself, then choose its new location)", new_dir.display())
-            })?;
+            match std::fs::rename(&self.dir, new_dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => move_across(&self.dir, new_dir, copy_tree)?,
+                Err(e) => return Err(e).with_context(|| format!("could not move the library to {}", new_dir.display())),
+            }
         }
         moved.rewrite_prefix(&self.var())?;
         Ok(moved)
+    }
+}
+
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        let dest = to.join(e.file_name());
+        if e.file_type()?.is_dir() {
+            copy_tree(&e.path(), &dest)?;
+        } else {
+            std::fs::copy(e.path(), dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// Every file under `dir` with its size, keyed by path relative to `dir`.
+fn file_sizes(dir: &Path) -> std::io::Result<BTreeMap<PathBuf, u64>> {
+    fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<PathBuf, u64>) -> std::io::Result<()> {
+        for e in std::fs::read_dir(dir)? {
+            let e = e?;
+            if e.file_type()?.is_dir() {
+                walk(root, &e.path(), out)?;
+            } else {
+                out.insert(e.path().strip_prefix(root).unwrap_or(&e.path()).to_path_buf(), e.metadata()?.len());
+            }
+        }
+        Ok(())
+    }
+    let mut out = BTreeMap::new();
+    walk(dir, dir, &mut out)?;
+    Ok(out)
+}
+
+/// Moves `from` to `to` by copying (rename can't cross drives), deleting the original only once the
+/// copy has the same files and sizes. On any failure the original stays and the partial copy goes.
+/// `to` must not hold anything worth keeping: the caller has checked it is new or empty.
+fn move_across(from: &Path, to: &Path, copy: impl Fn(&Path, &Path) -> std::io::Result<()>) -> Result<()> {
+    let copied = copy(from, to).context("copying the library").and_then(|()| {
+        if file_sizes(from)? == file_sizes(to)? { Ok(()) } else { bail!("the copy doesn't match the original") }
+    });
+    if let Err(e) = copied {
+        let _ = std::fs::remove_dir_all(to);
+        return Err(e.context(format!("could not copy the library to {}; the original is untouched", to.display())));
+    }
+    std::fs::remove_dir_all(from).with_context(|| {
+        format!("the library was copied to {}, but the original at {} could not be fully deleted; delete it yourself", to.display(), from.display())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(name: &str) -> (PathBuf, PathBuf) {
+        let dir = crate::test_dir(name);
+        let from = dir.join("old");
+        std::fs::create_dir_all(from.join("symbols")).unwrap();
+        std::fs::create_dir_all(from.join("footprints/R.pretty")).unwrap();
+        std::fs::write(from.join("symbols/R.kicad_sym"), "sym").unwrap();
+        std::fs::write(from.join("footprints/R.pretty/R.kicad_mod"), "footprint").unwrap();
+        (from, dir.join("new"))
+    }
+
+    #[test]
+    fn move_across_copies_verifies_then_deletes_original() {
+        let (from, to) = sample("move_across");
+        move_across(&from, &to, copy_tree).unwrap();
+        assert!(!from.exists());
+        assert_eq!(std::fs::read_to_string(to.join("footprints/R.pretty/R.kicad_mod")).unwrap(), "footprint");
+        assert_eq!(std::fs::read_to_string(to.join("symbols/R.kicad_sym")).unwrap(), "sym");
+    }
+
+    #[test]
+    fn failed_copy_leaves_original_and_removes_partial() {
+        let (from, to) = sample("move_across_fail");
+        let err = move_across(&from, &to, |a, b| {
+            copy_tree(a, b)?;
+            Err(std::io::Error::other("disk full"))
+        });
+        assert!(err.is_err());
+        assert!(from.join("symbols/R.kicad_sym").is_file() && from.join("footprints/R.pretty/R.kicad_mod").is_file());
+        assert!(!to.exists());
+    }
+
+    #[test]
+    fn copy_that_does_not_match_is_not_trusted() {
+        let (from, to) = sample("move_across_short");
+        let err = move_across(&from, &to, |a, b| {
+            copy_tree(a, b)?;
+            std::fs::remove_file(b.join("symbols/R.kicad_sym"))
+        });
+        assert!(format!("{:#}", err.unwrap_err()).contains("doesn't match"));
+        assert!(from.join("symbols/R.kicad_sym").is_file());
+        assert!(!to.exists());
     }
 }

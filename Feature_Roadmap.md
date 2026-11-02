@@ -76,7 +76,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
     - the model's size roughly matches the footprint's fab/courtyard outline
   - Results go into a "Checks" column with a list of issues on hover. Also add the `klm-cli check --deep` command.
   - **Done when:** each check has a test using a deliberately broken part.
-- [ ] **W1.3 Small fixes** (S)
+- [x] **W1.3 Small fixes** (S)
   - **Owns:** `core/kicad_env.rs`, `core/library/relocate.rs`, `tabs/settings.rs`
   - A Settings field for the `kicad-cli` path, for when KiCad isn't installed in the usual place.
   - Moving the library to another drive from inside the app (copy, verify, then delete the original).
