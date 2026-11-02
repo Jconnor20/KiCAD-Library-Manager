@@ -112,6 +112,8 @@ impl Source for Lcsc {
         let data: Value = serde_json::from_slice(&self.get_bytes(&url)?).context("EasyEDA sent something that is not JSON")?;
         let c = easyeda::convert(&data).with_context(|| format!("converting {id}"))?;
 
+        // The GUI passes a fresh path, not an existing folder.
+        std::fs::create_dir_all(work).with_context(|| format!("creating {}", work.display()))?;
         let mut out = part.clone();
         let sym = work.join(format!("{id}.kicad_sym"));
         std::fs::write(&sym, &c.symbol)?;

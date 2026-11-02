@@ -59,7 +59,7 @@ fn c2040_live_import_renders_in_kicad() {
     let found = lcsc.search("C2040").unwrap_or_else(|e| panic!("LCSC search failed: {e:#}"));
     let part = found.into_iter().find(|p| p.supplier_ids[0].1 == "C2040").expect("C2040 in the results");
     assert_eq!(part.mpn, "RP2040");
-    let work = fresh("lcsc-work");
+    let work = fresh("lcsc-work").join("not-created-yet"); // the GUI hands over a path that does not exist
     let part = lcsc.fetch(&part, &work).unwrap_or_else(|e| panic!("LCSC fetch failed: {e:#}")).expect("LCSC has CAD");
     assert!(part.warnings.is_empty(), "fetch reported problems: {:?}", part.warnings);
     assert!(part.symbol_file.is_some() && part.footprint_files.len() == 1);
