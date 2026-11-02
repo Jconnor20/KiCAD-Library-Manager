@@ -204,6 +204,25 @@ impl Store {
         let mut q = self.db.prepare("SELECT ts, action, details FROM history ORDER BY id DESC")?;
         Ok(q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?)
     }
+
+    // --- Alternative groups (W3.2, used by `crate::alternatives`) ---
+
+    /// Every (part_mpn, alternative) row.
+    pub fn all_alternatives(&self) -> Result<Vec<(String, Alternative)>> {
+        let mut q = self.db.prepare("SELECT DISTINCT part_mpn FROM alternatives ORDER BY part_mpn")?;
+        let parts: Vec<String> = q.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let mut out = vec![];
+        for p in parts {
+            out.extend(self.alternatives(&p)?.into_iter().map(|a| (p.clone(), a)));
+        }
+        Ok(out)
+    }
+
+    /// Deletes every alternative of `part_mpn`.
+    pub fn remove_alternatives(&self, part_mpn: &str) -> Result<()> {
+        self.db.execute("DELETE FROM alternatives WHERE part_mpn = ?1", [part_mpn])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

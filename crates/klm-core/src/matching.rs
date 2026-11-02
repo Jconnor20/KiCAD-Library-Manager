@@ -3,7 +3,7 @@
 use crate::part::Part;
 
 /// Case, `/`, spaces and `-` differ between distributors and vendor ZIPs for the same MPN.
-fn key(mpn: &str) -> String {
+pub fn key(mpn: &str) -> String {
     mpn.chars().filter(|c| !matches!(c, '/' | ' ' | '-')).flat_map(char::to_lowercase).collect()
 }
 
