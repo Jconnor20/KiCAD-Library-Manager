@@ -188,8 +188,4 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
 
 ## Test pass (you, any time)
 
-- [ ] Install the KiCad plugin from `dist\klm-pcm-0.1.0.zip` and click the toolbar button in the PCB editor.
-- [ ] Add DigiKey, Mouser and Nexar keys in Settings and use **Test** on each.
-- [ ] Retry attaching the TE switch datasheet.
-- [ ] LCSC imports of a connector, a multi-unit op-amp and a part with odd-shaped pads.
-- [ ] One Ultra Librarian ZIP.
+The full checklist of what's built but not yet checked by hand is in [TESTING.md](TESTING.md).
