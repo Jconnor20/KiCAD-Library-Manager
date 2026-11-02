@@ -4,11 +4,10 @@ use eframe::egui::{self, RichText};
 use klm_core::currency::{Rates, display_price, price_in};
 use klm_core::part::Part;
 use klm_core::search_filter::{Filter, SortKey, view};
+use klm_core::sources::combine;
 
 pub enum Msg {
     Done(Vec<(usize, Part)>),
-    /// A download started by "Get…" has finished (or failed).
-    FetchDone,
     /// The sources were rebuilt, so the indexes in the results no longer match.
     ClearResults,
     /// Exchange rates for the display currency (`None` if they could not be loaded).
@@ -70,7 +69,6 @@ impl SearchTab {
                     self.filter.manufacturer.clear();
                 }
             }
-            Msg::FetchDone => cx.busy = false,
             Msg::ClearResults => self.results.clear(),
             Msg::Rates(rates) => self.rates = rates.or(self.rates.take()),
         }
@@ -232,41 +230,18 @@ impl SearchTab {
         });
     }
 
-    /// Downloads a search result's CAD, or opens its CAD page if the source has none to download.
+    /// Opens the import dialog for a search result and asks every source for its files; each
+    /// source's answer reaches the dialog as it arrives.
     fn get_result(&mut self, i: usize, cx: &mut AppCtx) {
         let Some((src, part)) = self.results.get(i).cloned() else { return };
-        cx.busy = true;
+        let work = new_work_dir();
+        cx.send(AppMsg::Import(import::Msg::Gather { part: part.clone(), work: work.clone(), waiting: cx.sources.len() }));
         let (tx, sources, ctx) = (cx.tx.clone(), cx.sources.clone(), cx.ctx.clone());
         std::thread::spawn(move || {
-            let source = &sources[src];
-            let work = new_work_dir();
-            // Sources write their files straight into `work`.
-            let _ = std::fs::create_dir_all(&work);
-            match source.fetch(&part, &work) {
-                Ok(Some(p)) => {
-                    for w in &p.warnings {
-                        let _ = tx.send(AppMsg::Log(format!("{}: {}: {w}", source.name(), p.mpn)));
-                    }
-                    let _ = tx.send(AppMsg::Import(import::Msg::Fetched(p, work)));
-                }
-                Ok(None) => {
-                    let _ = std::fs::remove_dir_all(&work);
-                    match source.cad_page_url(&part) {
-                        Some(url) => {
-                            let _ = open::that(&url);
-                            let _ = tx.send(AppMsg::Import(import::Msg::CadOpened(part.clone())));
-                            let _ = tx.send(AppMsg::Log(format!("Opened {url}. Download the KiCad ZIP and it will appear under Import.")));
-                        }
-                        None => drop(tx.send(AppMsg::Log(format!("{} has no CAD files for {}", source.name(), part.mpn)))),
-                    }
-                }
-                Err(e) => {
-                    let _ = std::fs::remove_dir_all(&work);
-                    let _ = tx.send(AppMsg::Log(format!("{}: could not get {}: {e:#}", source.name(), part.mpn)));
-                }
-            }
-            let _ = tx.send(AppMsg::Search(Msg::FetchDone));
-            ctx.request_repaint();
+            combine::gather(&sources, &part, src, &work, |source, found| {
+                let _ = tx.send(AppMsg::Import(import::Msg::Answer { work: work.clone(), source: source.to_string(), found }));
+                ctx.request_repaint();
+            });
         });
     }
 }
