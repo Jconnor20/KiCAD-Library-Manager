@@ -19,7 +19,8 @@ const USAGE: &str = "usage:
   klm-cli history [--project <dir>]
   klm-cli rollback <id> [--project <dir>]
   klm-cli standardise [--project <dir>] [--dry-run]
-  klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]";
+  klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
+  klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]";
 
 #[derive(Debug, PartialEq)]
 enum Command {
@@ -29,6 +30,7 @@ enum Command {
     Rollback { id: String, project: Option<PathBuf> },
     Standardise { project: Option<PathBuf>, dry_run: bool },
     Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
+    Export { zip: PathBuf, parts: Vec<String>, category: Option<String>, project: Option<PathBuf> },
 }
 
 fn parse(args: &[String]) -> Result<Command> {
@@ -90,6 +92,12 @@ fn parse(args: &[String]) -> Result<Command> {
                 bail!("import needs a ZIP file");
             }
             Ok(Command::Import { zips, category, to, project, overwrite, dry_run })
+        }
+        "export" => {
+            only_for(to.is_none() && !overwrite && !json && !deep && !dry_run, "that option")?;
+            let mut it = zips.into_iter();
+            let zip = it.next().context("export needs an output ZIP path")?;
+            Ok(Command::Export { zip, parts: it.map(|p| p.to_string_lossy().into()).collect(), category, project })
         }
         _ => bail!("unknown command {name}"),
     }
@@ -280,6 +288,20 @@ fn import(zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Opt
     Ok(if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
+/// Exports the named parts (all of them, or all in `category`, when none are named) from the project's library if one is given, else the global one.
+fn export(zip: &Path, names: Vec<String>, category: Option<String>, project: Option<&Path>) -> Result<()> {
+    let root = roots(&settings()?, project)?.pop().context("no library")?;
+    let parts: Vec<_> = root
+        .list_parts()
+        .into_iter()
+        .filter(|p| category.as_deref().is_none_or(|c| c == p.category) && (names.is_empty() || names.contains(&p.name)))
+        .map(|p| (p.category, p.name))
+        .collect();
+    let n = klm_core::export::export_zip(&root, &parts, zip)?;
+    println!("Exported {n} part(s) to {}", zip.display());
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = parse(&args).and_then(|cmd| match cmd {
@@ -289,6 +311,7 @@ fn main() -> ExitCode {
         Command::Rollback { id, project } => rollback(&id, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Standardise { project, dry_run } => standardise(project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
+        Command::Export { zip, parts, category, project } => export(&zip, parts, category, project.as_deref()).map(|_| ExitCode::SUCCESS),
     });
     result.unwrap_or_else(|e| {
         eprintln!("error: {e:#}\n{USAGE}");
@@ -323,6 +346,10 @@ mod tests {
         assert_eq!(
             parse(&args("import --to global a.zip")).unwrap(),
             Command::Import { zips: vec!["a.zip".into()], category: None, to: Target::Global, project: None, overwrite: false, dry_run: false }
+        );
+        assert_eq!(
+            parse(&args("export out.zip A B --category ICs")).unwrap(),
+            Command::Export { zip: "out.zip".into(), parts: vec!["A".into(), "B".into()], category: Some("ICs".into()), project: None }
         );
         assert_eq!(
             parse(&args("import a.zip b.zip --to both --dry-run")).unwrap(),
