@@ -163,18 +163,20 @@ pub fn parse_bom(csv: &str) -> Vec<Line> {
             continue;
         }
         let mpn = cell(r, "MPN");
-        let group = if mpn.is_empty() { format!("v:{}|{footprint}", value.to_lowercase()) } else { format!("m:{}|{footprint}", key(&mpn)) };
+        let maker = cell(r, "Manufacturer");
+        // The same MPN from two makers is two parts.
+        let group = if mpn.is_empty() { format!("v:{}|{footprint}", value.to_lowercase()) } else { format!("m:{}|{}|{footprint}", key(&mpn), maker.to_lowercase()) };
         let i = *index.entry(group).or_insert_with(|| {
-            lines.push(Line {
-                value,
-                footprint,
-                mpn,
-                manufacturer: cell(r, "Manufacturer"),
-                supplier_ids: SUPPLIER_FIELDS.iter().map(|s| (s.to_string(), cell(r, s))).filter(|(_, v)| !v.is_empty()).collect(),
-                ..Line::default()
-            });
+            lines.push(Line { value, footprint, mpn, manufacturer: maker, ..Line::default() });
             lines.len() - 1
         });
+        // A number set on only some of the placed parts still counts for the line.
+        for s in SUPPLIER_FIELDS {
+            let id = cell(r, s);
+            if !id.is_empty() && !lines[i].supplier_ids.iter().any(|(k, _)| k == s) {
+                lines[i].supplier_ids.push((s.to_string(), id));
+            }
+        }
         lines[i].refs.push(cell(r, "Reference"));
     }
     for l in &mut lines {
@@ -292,8 +294,10 @@ pub fn price(q: &Quote, need: u64) -> Option<Priced> {
     let floor = need.max(q.moq).max(first);
     let unit_at = |n: u64| q.breaks.iter().take_while(|b| b.0 <= n).last().map_or(q.breaks[0].1, |b| b.1);
     // Buying up to the next break can cost less than the exact quantity.
+    // Only round up past stock when the exact quantity is already out of stock.
+    let cap = q.stock.filter(|&s| s >= floor).unwrap_or(u64::MAX);
     let bought = std::iter::once(floor)
-        .chain(q.breaks.iter().map(|b| b.0).filter(|&n| n > floor))
+        .chain(q.breaks.iter().map(|b| b.0).filter(|&n| n > floor && n <= cap))
         .min_by(|a, b| (unit_at(*a) * *a as f64).total_cmp(&(unit_at(*b) * *b as f64)))?;
     let unit = unit_at(bought);
     Some(Priced { bought, unit, ext: unit * bought as f64, in_stock: q.stock.is_some_and(|s| s >= bought) })
@@ -381,6 +385,8 @@ pub fn fetch_quotes(lines: &[Line], dist: &[Distributor], store: Option<&Store>,
     let mut problems = vec![];
     // (distributor, query) -> results and whether they came from an expired entry; one request per distinct query.
     let mut done: HashMap<(usize, String), Option<(Vec<Part>, bool)>> = HashMap::new();
+    // Distributors that failed once: later queries use the cache only, so being offline costs one timeout.
+    let mut failed: Vec<usize> = vec![];
     let quotes = lines
         .iter()
         .map(|line| {
@@ -391,18 +397,16 @@ pub fn fetch_quotes(lines: &[Line], dist: &[Distributor], store: Option<&Store>,
                 if query.is_empty() {
                     continue;
                 }
-                let res = done.entry((di, query.to_lowercase())).or_insert_with(|| match cache::search(store, &d.cache_name, &query, ttl_secs, || d.source.search(&query)) {
+                let skip = failed.contains(&di);
+                let res = done.entry((di, query.to_lowercase())).or_insert_with(|| match cache::search(store, &d.cache_name, &query, ttl_secs, || if skip { bail!("skipped") } else { d.source.search(&query) }) {
                     Ok(r) => Some((r, false)),
-                    Err(e) => match store.and_then(|s| cache::get(s, &d.cache_name, &query, i64::MAX, 0)) {
-                        Some(old) => {
-                            problems.push(format!("{name}: {e:#}; showing older cached data"));
-                            Some((old, true))
+                    Err(e) => {
+                        if !skip {
+                            failed.push(di);
+                            problems.push(format!("{name}: {e:#}; using older cached data where there is some"));
                         }
-                        None => {
-                            problems.push(format!("{name}: {e:#}"));
-                            None
-                        }
-                    },
+                        store.and_then(|s| cache::get(s, &d.cache_name, &query, i64::MAX, 0)).map(|old| (old, true))
+                    }
                 });
                 if let Some((results, stale)) = res {
                     if let Some(p) = pick(results, line, name) {
@@ -559,6 +563,9 @@ C1,100n,C_0603,,,,,,\n";
         assert_eq!(l[1].refs, ["R1", "R2", "R10"]);
         assert_eq!((l[1].qty(), l[1].supplier_ids.clone()), (3, vec![("LCSC".to_string(), "C25804".to_string())]));
         assert_eq!(l[2].manufacturer, "Texas, Instruments");
+        // A supplier number on only the later placed part still counts; another maker is another line.
+        let g = parse_bom("Reference,Value,Footprint,MPN,Manufacturer,LCSC\nR1,a,f,X1,A,\nR2,a,f,X1,A,C9\nR3,a,f,X1,B,\n");
+        assert_eq!((g.len(), g[0].supplier_ids.clone()), (2, vec![("LCSC".to_string(), "C9".to_string())]));
         assert_eq!(l[2].supplier_ids, vec![("DigiKey".to_string(), "296-1395-5-ND".to_string())]);
     }
 
@@ -613,6 +620,13 @@ C1,100n,C_0603,,,,,,\n";
         assert_eq!((p.bought, p.in_stock), (5000, false), "MOQ is bought, and stock 9 doesn't cover it");
         assert!((p.ext - 10.0).abs() < 1e-9);
         assert!(price(&Quote::default(), 1).is_none());
+    }
+
+    #[test]
+    fn rounding_up_to_a_break_stays_within_stock() {
+        let q = quote("D", &[(1, 0.10), (100, 0.01)], "USD", 80, 1, None);
+        let p = price(&q, 60).unwrap();
+        assert_eq!((p.bought, p.in_stock), (60, true), "100 would exceed the 80 in stock");
     }
 
     #[test]
@@ -699,6 +713,7 @@ C1,100n,C_0603,,,,,,\n";
         // Expired (ttl 0 skips the cache) and offline: the old entry is used and marked stale.
         let (q, problems) = fetch_quotes(&lines, &d(true), Some(&store), 0);
         assert!(q[0][0].stale && problems.len() == 1, "{problems:?}");
+        assert!(q[1][0].stale, "second line shares the cached query");
         // Offline with nothing cached: no quote, a problem, no panic.
         let (q, problems) = fetch_quotes(&lines, &d(true), None, 60);
         assert!(q[0].is_empty() && problems.len() == 1);

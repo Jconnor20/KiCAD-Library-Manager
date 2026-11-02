@@ -14,6 +14,7 @@ pub enum Msg {
 
 /// What the worker thread found; pricing for a board count is worked out from this on the UI thread.
 pub struct Loaded {
+    project: std::path::PathBuf,
     lines: Vec<Line>,
     quotes: Vec<Vec<Quote>>,
     lib: Vec<LibPart>,
@@ -27,6 +28,8 @@ pub struct BomTab {
     settings: ProjectBom,
     loaded: Option<Loaded>,
     rows: Vec<Row>,
+    /// Currency the rows were priced in.
+    priced_in: String,
     running: bool,
 }
 
@@ -35,6 +38,7 @@ impl BomTab {
         let Msg::Loaded(res) = msg;
         self.running = false;
         match res {
+            Ok(l) if self.project.as_ref() != Some(&l.project) => cx.log.push("BOM: dropped the result for another project".into()),
             Ok(l) => {
                 cx.log.extend(l.notes.iter().map(|n| format!("BOM: {n}")));
                 self.loaded = Some(l);
@@ -51,7 +55,8 @@ impl BomTab {
     fn reprice(&mut self, cx: &AppCtx) {
         let Some(l) = &self.loaded else { return };
         let store = Store::default_path().and_then(|p| Store::open(&p).ok());
-        self.rows = bom::build_rows(l.lines.clone(), &l.lib, store.as_ref(), l.quotes.clone(), self.settings.boards, &Self::target(cx), l.rates.as_ref());
+        self.priced_in = Self::target(cx);
+        self.rows = bom::build_rows(l.lines.clone(), &l.lib, store.as_ref(), l.quotes.clone(), self.settings.boards, &self.priced_in, l.rates.as_ref());
     }
 
     fn load(&mut self, cx: &mut AppCtx, project: std::path::PathBuf) {
@@ -69,7 +74,7 @@ impl BomTab {
                 if !region.is_empty() {
                     notes.push(format!("Shipping region {region}: used by DigiKey (site and currency). LCSC and Mouser prices do not change with it."));
                 }
-                Ok(Loaded { lines, quotes, lib: bom::lib_parts(&roots), rates: Rates::load().ok(), notes })
+                Ok(Loaded { project: project.clone(), lines, quotes, lib: bom::lib_parts(&roots), rates: Rates::load().ok(), notes })
             })()
             .map_err(|e| format!("{e:#}"));
             let _ = tx.send(AppMsg::Bom(Msg::Loaded(res)));
@@ -94,7 +99,9 @@ impl BomTab {
                 self.load(cx, project.clone());
             }
             ui.label("Boards");
-            reprice |= ui.add(egui::DragValue::new(&mut self.settings.boards).range(1..=1_000_000)).changed();
+            let boards = ui.add(egui::DragValue::new(&mut self.settings.boards).range(1..=1_000_000));
+            reprice |= boards.changed();
+            save |= boards.drag_stopped() || boards.lost_focus();
             ui.label("Region");
             let hint = if cx.settings.shipping_region.is_empty() { "default".to_string() } else { format!("{} (default)", cx.settings.shipping_region) };
             save |= ui
@@ -103,7 +110,7 @@ impl BomTab {
                 .lost_focus();
             if ui.add_enabled(!self.rows.is_empty(), egui::Button::new("Export CSV...")).clicked() {
                 if let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom.csv").save_file() {
-                    let csv = bom::to_csv(&self.rows, self.settings.boards, &Self::target(cx));
+                    let csv = bom::to_csv(&self.rows, self.settings.boards, &self.priced_in);
                     cx.log.push(match std::fs::write(&path, csv) {
                         Ok(()) => format!("Wrote {}", path.display()),
                         Err(e) => format!("Could not write {}: {e}", path.display()),
@@ -114,10 +121,10 @@ impl BomTab {
                 ui.spinner();
             }
         });
-        if reprice {
+        if reprice || (self.priced_in != Self::target(cx) && self.loaded.is_some()) {
             self.reprice(cx);
         }
-        if save || reprice {
+        if save {
             if let Err(e) = self.settings.save(&project) {
                 cx.log.push(format!("BOM: {e:#}"));
             }
@@ -126,7 +133,7 @@ impl BomTab {
             ui.weak("Nothing read yet.");
             return;
         }
-        let (t, cur) = (bom::totals(&self.rows), Self::target(cx));
+        let (t, cur) = (bom::totals(&self.rows), self.priced_in.clone());
         let lead = t.longest_lead_days.map_or("unknown".into(), |d| format!("{d} days")) + &if t.unknown_lead > 0 { format!(" (+{} unknown)", t.unknown_lead) } else { String::new() };
         ui.label(format!(
             "{} lines, {} priced ({} without a price). Per board {:.2} {cur}, order {:.2} {cur}. Longest lead time: {lead}.",
