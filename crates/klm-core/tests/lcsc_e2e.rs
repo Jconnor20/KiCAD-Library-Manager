@@ -18,7 +18,7 @@ fn fresh(name: &str) -> PathBuf {
 
 fn fixture(id: &str) -> easyeda::Converted {
     let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/easyeda_{id}.json"))).unwrap();
-    easyeda::convert(&serde_json::from_str(&text).unwrap()).unwrap()
+    easyeda::convert(&serde_json::from_str(&text).unwrap(), "12bit 133MHz test part", "https://example.com/ds.pdf").unwrap()
 }
 
 fn kicad_cli() -> Option<PathBuf> {
@@ -46,6 +46,8 @@ fn recorded_parts_convert_to_the_expected_pins_and_pads() {
         let fp = sexpr::parse(&c.footprint).unwrap();
         assert_eq!(count(&fp, "pad"), pads, "{id} pads");
         assert!(c.model_uuid.is_some() && fp.child("model").is_some(), "{id} model");
+        assert_eq!(fp.child("descr").unwrap().arg(0), Some("12bit 133MHz test part"));
+        assert!(fp.child("tags").unwrap().arg(0).unwrap().contains(id), "{id} tags");
     }
 }
 
@@ -71,6 +73,14 @@ fn c2040_live_import_renders_in_kicad() {
     let status = &root.list_parts()[0];
     use klm_core::library::Check;
     assert_eq!([status.footprint, status.model, status.datasheet], [Check::Ok; 3]);
+
+    // What KiCad's footprint chooser shows must survive the upgrade into the library.
+    let fp_file = std::fs::read_dir(root.dir.join("footprints/ICs.pretty")).unwrap().next().unwrap().unwrap().path();
+    let fp = sexpr::parse(&std::fs::read_to_string(fp_file).unwrap()).unwrap();
+    assert!(fp.child("descr").unwrap().arg(0).unwrap().contains("LQFN-56"), "description from the search result");
+    assert!(fp.child("tags").unwrap().arg(0).unwrap().contains("C2040"));
+    let datasheet = fp.children("property").find(|p| p.arg(0) == Some("Datasheet")).and_then(|p| p.arg(1));
+    assert!(datasheet.is_some_and(|d| d.starts_with("http")), "documentation link: {datasheet:?}");
 
     let out = fresh("lcsc-svg");
     export_svg(&cli, "sym", &root.dir.join("symbols/ICs.kicad_sym"), &out);

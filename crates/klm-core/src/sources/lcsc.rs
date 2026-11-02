@@ -110,7 +110,7 @@ impl Source for Lcsc {
         let id = part.supplier_ids.iter().find(|(k, _)| k == "LCSC").map(|(_, v)| v.as_str()).context("not an LCSC part")?;
         let url = COMPONENT_URL.replace("{id}", id);
         let data: Value = serde_json::from_slice(&self.get_bytes(&url)?).context("EasyEDA sent something that is not JSON")?;
-        let c = easyeda::convert(&data).with_context(|| format!("converting {id}"))?;
+        let c = easyeda::convert(&data, &part.description, &part.datasheet_url).with_context(|| format!("converting {id}"))?;
 
         // The GUI passes a fresh path, not an existing folder.
         std::fs::create_dir_all(work).with_context(|| format!("creating {}", work.display()))?;

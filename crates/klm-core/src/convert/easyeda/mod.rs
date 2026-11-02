@@ -18,8 +18,10 @@ pub struct Converted {
     pub datasheet_url: String,
 }
 
-/// `response` is the body of EasyEDA's `products/<LCSC id>/components` call.
-pub fn convert(response: &Value) -> Result<Converted> {
+/// `response` is the body of EasyEDA's `products/<LCSC id>/components` call. `description` and
+/// `datasheet` (from the search result, which is richer) fill the footprint's chooser entry;
+/// pass "" to fall back to what EasyEDA itself has.
+pub fn convert(response: &Value, description: &str, datasheet: &str) -> Result<Converted> {
     if response["success"] == false {
         bail!("EasyEDA: {}", response["message"].as_str().unwrap_or("request failed"));
     }
@@ -36,12 +38,19 @@ pub fn convert(response: &Value) -> Result<Converted> {
         Some(parts) => parts.iter().map(|p| &p["dataStr"]).collect(),
         None => vec![sym_ds],
     };
-    let fp = footprint::convert(fp_name, r["description"].as_str().unwrap_or(""), &pkg["dataStr"]);
+    let pkg_link = pkg["dataStr"]["head"]["c_para"]["link"].as_str().unwrap_or("");
+    let pick = |a: &'_ str, b: &'_ str| if a.is_empty() { b.to_string() } else { a.to_string() };
+    let docs = footprint::Docs {
+        description: &pick(description, r["description"].as_str().filter(|d| !d.is_empty()).unwrap_or(name)),
+        tags: &format!("{name} {fp_name} {} {}", para["Supplier"].as_str().unwrap_or(""), para["Supplier Part"].as_str().unwrap_or("")).trim().to_string(),
+        datasheet: &pick(datasheet, pkg_link),
+    };
+    let fp = footprint::convert(fp_name, &docs, &pkg["dataStr"]);
     Ok(Converted {
         symbol: symbol::convert(name, prefix, fp_name, &units),
         footprint: fp.text,
         footprint_name: fp_name.to_string(),
         model_uuid: fp.model_uuid,
-        datasheet_url: pkg["dataStr"]["head"]["c_para"]["link"].as_str().unwrap_or("").to_string(),
+        datasheet_url: pkg_link.to_string(),
     })
 }

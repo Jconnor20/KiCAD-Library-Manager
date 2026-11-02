@@ -202,7 +202,14 @@ fn model(ds: &Value) -> Option<(String, String)> {
     Some((uuid, text))
 }
 
-pub fn convert(name: &str, description: &str, ds: &Value) -> Footprint {
+/// What KiCad's footprint chooser shows next to the drawing.
+pub struct Docs<'a> {
+    pub description: &'a str,
+    pub tags: &'a str,
+    pub datasheet: &'a str,
+}
+
+pub fn convert(name: &str, docs: &Docs, ds: &Value) -> Footprint {
     let num_of = |v: &Value| v.as_f64().or_else(|| v.as_str().map(num)).unwrap_or(0.0);
     let mut ctx = Ctx { ox: num_of(&ds["head"]["x"]), oy: num_of(&ds["head"]["y"]), bbox: None, pad_bbox: None };
     let (mut pads, mut gfx) = (String::new(), String::new());
@@ -227,12 +234,12 @@ pub fn convert(name: &str, description: &str, ds: &Value) -> Footprint {
     let [_, y0, _, y1] = ctx.bbox.unwrap_or([-1.0, -1.0, 1.0, 1.0]);
     let mut out = String::new();
     let _ = writeln!(out, "(footprint {name:?} (version 20240108) (generator \"klm\") (generator_version \"1.0\") (layer \"F.Cu\")");
-    if !description.is_empty() {
-        let _ = writeln!(out, "(descr {description:?})");
-    }
+    let _ = writeln!(out, "(descr {:?})
+(tags {:?})", docs.description, docs.tags);
     let text = |k: &str, v: &str, y: f64, layer: &str| format!("(property {k:?} {v:?} (at 0 {}) (layer {layer:?}) (effects (font (size 1 1) (thickness 0.15))))\n", fmt(y));
     out += &text("Reference", "REF**", y0 - 1.0, "F.SilkS");
     out += &text("Value", name, y1 + 1.0, "F.Fab");
+    let _ = writeln!(out, "(property \"Datasheet\" {:?} (at 0 0 0) (layer \"F.Fab\") (hide yes) (effects (font (size 1 1) (thickness 0.15))))", docs.datasheet);
     let _ = writeln!(out, "(attr {})", if through_hole { "through_hole" } else { "smd" });
     out += &gfx;
     if let Some([px0, py0, px1, py1]) = ctx.pad_bbox {
@@ -256,7 +263,7 @@ mod tests {
 
     fn fp(shapes: &[&str]) -> sexpr::Sexpr {
         let ds = json!({"head": {"x": "4000", "y": "3000"}, "shape": shapes});
-        sexpr::parse(&convert("T", "", &ds).text).unwrap()
+        sexpr::parse(&convert("T", &Docs { description: "", tags: "", datasheet: "" }, &ds).text).unwrap()
     }
 
     fn atts(x: &sexpr::Sexpr, head: &str) -> Vec<String> {
@@ -290,10 +297,20 @@ mod tests {
     }
 
     #[test]
+    fn chooser_documentation_is_written() {
+        let ds = json!({"head": {"x": 0, "y": 0}, "shape": []});
+        let x = sexpr::parse(&convert("T", &Docs { description: "A part", tags: "a b", datasheet: "https://x/y.pdf" }, &ds).text).unwrap();
+        assert_eq!(x.child("descr").unwrap().arg(0), Some("A part"));
+        assert_eq!(x.child("tags").unwrap().arg(0), Some("a b"));
+        let ds = x.children("property").find(|p| p.arg(0) == Some("Datasheet")).unwrap();
+        assert_eq!(ds.arg(1), Some("https://x/y.pdf"));
+    }
+
+    #[test]
     fn model_z_rotation_is_negated_and_offsets_ignored() {
         let node = r#"SVGNODE~{"attrs":{"c_etype":"outline3D","uuid":"abc123","c_rotation":"270,0,270","c_origin":"4006.5,3011.2","z":"-11.8"}}"#;
         let ds = json!({"head": {"x": 4000, "y": 3000}, "shape": [node]});
-        let f = convert("T", "", &ds);
+        let f = convert("T", &Docs { description: "", tags: "", datasheet: "" }, &ds);
         assert_eq!(f.model_uuid.as_deref(), Some("abc123"));
         let x = sexpr::parse(&f.text).unwrap();
         let m = x.child("model").unwrap();
