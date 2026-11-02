@@ -40,9 +40,10 @@ pub fn convert(response: &Value, description: &str, datasheet: &str) -> Result<C
     };
     let pkg_link = pkg["dataStr"]["head"]["c_para"]["link"].as_str().unwrap_or("");
     let pick = |a: &'_ str, b: &'_ str| if a.is_empty() { b.to_string() } else { a.to_string() };
+    let tags = format!("{name} {fp_name} {} {}", para["Supplier"].as_str().unwrap_or(""), para["Supplier Part"].as_str().unwrap_or(""));
     let docs = footprint::Docs {
         description: &pick(description, r["description"].as_str().filter(|d| !d.is_empty()).unwrap_or(name)),
-        tags: &format!("{name} {fp_name} {} {}", para["Supplier"].as_str().unwrap_or(""), para["Supplier Part"].as_str().unwrap_or("")).trim().to_string(),
+        tags: tags.trim(),
         datasheet: &pick(datasheet, pkg_link),
     };
     let fp = footprint::convert(fp_name, &docs, &pkg["dataStr"]);
