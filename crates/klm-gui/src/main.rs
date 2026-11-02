@@ -2,10 +2,14 @@
 
 mod import_dialog;
 mod library_view;
+mod search_view;
 
 use eframe::egui::{self, RichText};
 use import_dialog::{DialogAction, ImportDialog};
 use library_view::LibraryView;
+use search_view::{SearchAction, SearchView};
+use klm_core::sources::Source;
+use std::sync::Arc;
 use klm_core::library::LibraryRoot;
 use klm_core::part::Part;
 use klm_core::settings::Settings;
@@ -20,6 +24,10 @@ enum Msg {
     Log(String),
     Imported { index: usize, notes: Vec<String> },
     ImportFailed(String),
+    SearchDone(Vec<(usize, Part)>),
+    /// A search result's files, downloaded and ready for the import dialog.
+    Fetched(Part, PathBuf),
+    FetchDone,
 }
 
 /// An action that edits KiCad's library tables, held until KiCad is closed.
@@ -31,6 +39,7 @@ enum Blocked {
 
 #[derive(PartialEq)]
 enum Tab {
+    Search,
     Import,
     Library,
 }
@@ -52,6 +61,8 @@ struct App {
     still_open: bool,
     tab: Tab,
     library: LibraryView,
+    search: SearchView,
+    sources: Arc<Vec<Box<dyn Source>>>,
     busy: bool,
     log: Vec<String>,
     tx: Sender<Msg>,
@@ -104,6 +115,7 @@ impl App {
             settings.last_project = Some(project_dir(p));
         }
         let (tx, rx) = channel();
+        let sources = Arc::new(klm_core::sources::all(&settings));
         let mut app = Self {
             kicad_config: kicad_env::config_dir().map_err(|e| format!("{e:#}")),
             project: settings.last_project.clone().filter(|p| p.is_dir()),
@@ -117,6 +129,8 @@ impl App {
             still_open: false,
             tab: Tab::Import,
             library: LibraryView::default(),
+            search: SearchView::default(),
+            sources,
             busy: false,
             log: vec![],
             tx,
@@ -309,6 +323,68 @@ impl App {
         });
     }
 
+    fn run_search(&mut self, query: String, ctx: egui::Context) {
+        self.search.searching = true;
+        self.search.results.clear();
+        let (tx, sources) = (self.tx.clone(), self.sources.clone());
+        std::thread::spawn(move || {
+            let mut results = vec![];
+            let query = &query;
+            std::thread::scope(|s| {
+                let handles: Vec<_> = sources.iter().enumerate().map(|(i, src)| s.spawn(move || (i, src.name(), src.search(&query)))).collect();
+                for h in handles {
+                    match h.join() {
+                        Ok((i, _, Ok(parts))) => results.extend(parts.into_iter().map(|p| (i, p))),
+                        Ok((_, name, Err(e))) => drop(tx.send(Msg::Log(format!("{name} search failed: {e:#}")))),
+                        Err(_) => drop(tx.send(Msg::Log("A search source crashed".into()))),
+                    }
+                }
+            });
+            let _ = tx.send(Msg::SearchDone(results));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Downloads a search result's CAD, or opens its CAD page if the source has none to download.
+    fn get_result(&mut self, i: usize, ctx: egui::Context) {
+        let Some((src, part)) = self.search.results.get(i).cloned() else { return };
+        self.busy = true;
+        let (tx, sources) = (self.tx.clone(), self.sources.clone());
+        std::thread::spawn(move || {
+            let source = &sources[src];
+            let work = new_work_dir();
+            match source.fetch(&part, &work) {
+                Ok(Some(p)) => drop(tx.send(Msg::Fetched(p, work))),
+                Ok(None) => {
+                    let _ = std::fs::remove_dir_all(&work);
+                    match source.cad_page_url(&part) {
+                        Some(url) => {
+                            let _ = open::that(&url);
+                            let _ = tx.send(Msg::Log(format!("Opened {url}. Download the KiCad ZIP and it will appear under Import.")));
+                        }
+                        None => drop(tx.send(Msg::Log(format!("{} has no CAD files for {}", source.name(), part.mpn)))),
+                    }
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_dir_all(&work);
+                    let _ = tx.send(Msg::Log(format!("{}: could not get {}: {e:#}", source.name(), part.mpn)));
+                }
+            }
+            let _ = tx.send(Msg::FetchDone);
+            ctx.request_repaint();
+        });
+    }
+
+    fn open_dialog(&mut self, i: usize) {
+        let mut categories: Vec<String> = klm_core::categories::DEFAULT.iter().map(|s| s.to_string()).collect();
+        for root in self.roots() {
+            categories.extend(root.categories());
+        }
+        categories.sort();
+        categories.dedup();
+        self.dialog = Some(ImportDialog::new(i, &self.pending[i].part, categories, self.global_root().is_some(), self.project.is_some()));
+    }
+
     fn handle_messages(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
@@ -330,6 +406,17 @@ impl App {
                     self.busy = false;
                     self.log.push(format!("Import failed: {e}"));
                 }
+                Msg::SearchDone(results) => {
+                    self.search.searching = false;
+                    self.log.push(format!("{} search results", results.len()));
+                    self.search.results = results;
+                }
+                Msg::Fetched(part, work) => {
+                    self.pending.push(Pending { part, work });
+                    self.tab = Tab::Import;
+                    self.open_dialog(self.pending.len() - 1);
+                }
+                Msg::FetchDone => self.busy = false,
             }
         }
     }
@@ -438,13 +525,7 @@ impl App {
             }
         });
         if let Some(i) = open {
-            let mut categories: Vec<String> = klm_core::categories::DEFAULT.iter().map(|s| s.to_string()).collect();
-            for root in self.global_root().into_iter().chain(self.project_root()) {
-                categories.extend(root.categories());
-            }
-            categories.sort();
-            categories.dedup();
-            self.dialog = Some(ImportDialog::new(i, &self.pending[i].part, categories, self.global_root().is_some(), self.project.is_some()));
+            self.open_dialog(i);
         }
         if let Some(i) = dismiss {
             let p = self.pending.remove(i);
@@ -472,11 +553,20 @@ impl eframe::App for App {
         });
         egui::CentralPanel::default_margins().show(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.tab, Tab::Search, RichText::new("Search").heading());
                 ui.selectable_value(&mut self.tab, Tab::Import, RichText::new("Import").heading());
                 ui.selectable_value(&mut self.tab, Tab::Library, RichText::new("Library").heading());
             });
             ui.separator();
             match self.tab {
+                Tab::Search => {
+                    let names: Vec<&str> = self.sources.iter().map(|s| s.name()).collect();
+                    match self.search.show(ui, &names, self.busy) {
+                        SearchAction::None => {}
+                        SearchAction::Search(q) => self.run_search(q, ctx.clone()),
+                        SearchAction::Get(i) => self.get_result(i, ctx.clone()),
+                    }
+                }
                 Tab::Import => {
                     if self.settings.global_root.is_none() {
                         self.setup_screen(ui);

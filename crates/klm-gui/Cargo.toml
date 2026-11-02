@@ -13,4 +13,5 @@ anyhow = "1.0.104"
 dirs = "7.0.0"
 eframe = "0.37.0"
 klm-core = { version = "0.1.0", path = "../klm-core" }
+open = "5.4.5"
 rfd = "0.17.2"

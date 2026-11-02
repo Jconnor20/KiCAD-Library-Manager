@@ -13,6 +13,11 @@ pub struct Part {
     /// Supplier part numbers written as symbol fields, e.g. ("LCSC", "C2040").
     pub supplier_ids: Vec<(String, String)>,
     pub datasheet_url: String,
+    /// Search-result details for display; not written to the library.
+    pub package: String,
+    pub stock: Option<u64>,
+    /// Display text, e.g. "$0.0123 @100".
+    pub unit_price: String,
     pub symbol_file: Option<PathBuf>,
     pub footprint_files: Vec<PathBuf>,
     pub model_files: Vec<PathBuf>,
