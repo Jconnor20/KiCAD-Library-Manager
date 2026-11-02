@@ -4,10 +4,11 @@
 //! ones; tests use them so they never touch the user's files.
 
 use anyhow::{Context, Result, bail};
+use klm_core::batch::{self, Op, Target};
 use klm_core::checks::{self, Severity};
 use klm_core::library::{Check, LibraryRoot, PartStatus, Scope};
 use klm_core::settings::Settings;
-use klm_core::{categories, kicad_env};
+use klm_core::kicad_env;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,19 +16,19 @@ use std::process::ExitCode;
 const USAGE: &str = "usage:
   klm-cli check [--json] [--deep] [--project <dir>]
   klm-cli relink [--project <dir>]
-  klm-cli import <zip> [--category <c>] [--to global|project] [--project <dir>] [--overwrite]";
+  klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]";
 
 #[derive(Debug, PartialEq)]
 enum Command {
     Check { json: bool, deep: bool, project: Option<PathBuf> },
     Relink { project: Option<PathBuf> },
-    Import { zip: PathBuf, category: Option<String>, to_project: bool, project: Option<PathBuf>, overwrite: bool },
+    Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
 }
 
 fn parse(args: &[String]) -> Result<Command> {
     let (name, rest) = args.split_first().context("missing command")?;
-    let (mut json, mut deep, mut overwrite) = (false, false, false);
-    let (mut project, mut category, mut to, mut zip) = (None, None, None, None);
+    let (mut json, mut deep, mut overwrite, mut dry_run) = (false, false, false, false);
+    let (mut project, mut category, mut to, mut zips) = (None, None, None, vec![]);
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         let mut value = |flag: &str| it.next().cloned().with_context(|| format!("{flag} needs a value"));
@@ -35,19 +36,19 @@ fn parse(args: &[String]) -> Result<Command> {
             "--json" => json = true,
             "--deep" => deep = true,
             "--overwrite" => overwrite = true,
+            "--dry-run" => dry_run = true,
             "--project" => project = Some(PathBuf::from(value(a)?)),
             "--category" => category = Some(value(a)?),
             "--to" => to = Some(value(a)?),
             _ if a.starts_with("--") => bail!("unknown option {a}"),
-            _ if zip.is_none() => zip = Some(PathBuf::from(a)),
-            _ => bail!("unexpected argument {a}"),
+            _ => zips.push(PathBuf::from(a)),
         }
     }
     // Options only some commands take are rejected on the others, so a typo doesn't silently do nothing.
     let only_for = |ok: bool, what: &str| if ok { Ok(()) } else { bail!("{what} is not valid for {name}") };
     match name.as_str() {
         "check" | "relink" => {
-            only_for(zip.is_none() && category.is_none() && to.is_none() && !overwrite, "that argument")?;
+            only_for(zips.is_empty() && category.is_none() && to.is_none() && !overwrite && !dry_run, "that argument")?;
             if name == "check" {
                 Ok(Command::Check { json, deep, project })
             } else {
@@ -57,12 +58,16 @@ fn parse(args: &[String]) -> Result<Command> {
         }
         "import" => {
             only_for(!json && !deep, "--json or --deep")?;
-            let to_project = match to.as_deref() {
-                None | Some("global") => false,
-                Some("project") => true,
-                Some(other) => bail!("--to must be global or project, not {other}"),
+            let to = match to.as_deref() {
+                None | Some("global") => Target::Global,
+                Some("project") => Target::Project,
+                Some("both") => Target::Both,
+                Some(other) => bail!("--to must be global, project or both, not {other}"),
             };
-            Ok(Command::Import { zip: zip.context("import needs a ZIP file")?, category, to_project, project, overwrite })
+            if zips.is_empty() {
+                bail!("import needs a ZIP file");
+            }
+            Ok(Command::Import { zips, category, to, project, overwrite, dry_run })
         }
         _ => bail!("unknown command {name}"),
     }
@@ -188,29 +193,31 @@ fn relink(project: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-fn import(zip: &Path, category: Option<String>, to_project: bool, project: Option<PathBuf>, overwrite: bool) -> Result<()> {
+/// Imports each ZIP, or with `dry_run` only prints what that would change. Exits non-zero if any ZIP fails.
+fn import(zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool) -> Result<ExitCode> {
     let s = settings()?;
-    let root = if to_project {
-        let dir = project.or(s.last_project.clone()).context("no project: pass --project <dir>")?;
-        LibraryRoot::project(&dir)
-    } else {
-        global_root(&s)?
-    };
-    let work = std::env::temp_dir().join(format!("klm-cli-{}", std::process::id()));
-    let result = import_in(&root, zip, category, overwrite, &work);
-    let _ = std::fs::remove_dir_all(&work);
-    result
-}
-
-fn import_in(root: &LibraryRoot, zip: &Path, category: Option<String>, overwrite: bool, work: &Path) -> Result<()> {
-    let part = klm_core::sources::zip_import::read_zip(zip, work)?.with_context(|| format!("{} holds no KiCad symbol", zip.display()))?;
-    let category = category.unwrap_or_else(|| categories::guess(&part.category_hint).to_string());
-    if root.needs_link(&category) {
+    let global = (to != Target::Project).then(|| global_root(&s)).transpose()?;
+    let project = (to != Target::Global)
+        .then(|| project.or(s.last_project.clone()).map(|dir| LibraryRoot::project(&dir)).context("no project: pass --project <dir>"))
+        .transpose()?;
+    let ops = zips.into_iter().map(|zip| Op::ImportZip { zip, category: category.clone(), target: to, overwrite }).collect();
+    let plan = batch::plan(ops, global.as_ref(), project.as_ref());
+    if dry_run {
+        print!("{plan}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    if plan.touches_kicad_tables() {
         ensure_kicad_closed()?;
     }
-    root.add_part(&part, &category, overwrite)?;
-    println!("Imported {} into {}", part.mpn, root.nickname(&category));
-    Ok(())
+    let mut failed = false;
+    for r in batch::apply(&plan, |_, _| {}) {
+        r.notes.iter().for_each(|n| println!("{n}"));
+        if let Some(e) = &r.error {
+            eprintln!("error: {}: {e}", r.label);
+            failed = true;
+        }
+    }
+    Ok(if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
 fn main() -> ExitCode {
@@ -218,9 +225,7 @@ fn main() -> ExitCode {
     let result = parse(&args).and_then(|cmd| match cmd {
         Command::Check { json, deep, project } => check(json, deep, project.as_deref()),
         Command::Relink { project } => relink(project.as_deref()).map(|_| ExitCode::SUCCESS),
-        Command::Import { zip, category, to_project, project, overwrite } => {
-            import(&zip, category, to_project, project, overwrite).map(|_| ExitCode::SUCCESS)
-        }
+        Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
     });
     result.unwrap_or_else(|e| {
         eprintln!("error: {e:#}\n{USAGE}");
@@ -246,17 +251,21 @@ mod tests {
         assert_eq!(parse(&args("relink --project D:/p")).unwrap(), Command::Relink { project: Some("D:/p".into()) });
         assert_eq!(
             parse(&args("import a.zip --category ICs --to project --overwrite")).unwrap(),
-            Command::Import { zip: "a.zip".into(), category: Some("ICs".into()), to_project: true, project: None, overwrite: true }
+            Command::Import { zips: vec!["a.zip".into()], category: Some("ICs".into()), to: Target::Project, project: None, overwrite: true, dry_run: false }
         );
         assert_eq!(
             parse(&args("import --to global a.zip")).unwrap(),
-            Command::Import { zip: "a.zip".into(), category: None, to_project: false, project: None, overwrite: false }
+            Command::Import { zips: vec!["a.zip".into()], category: None, to: Target::Global, project: None, overwrite: false, dry_run: false }
+        );
+        assert_eq!(
+            parse(&args("import a.zip b.zip --to both --dry-run")).unwrap(),
+            Command::Import { zips: vec!["a.zip".into(), "b.zip".into()], category: None, to: Target::Both, project: None, overwrite: false, dry_run: true }
         );
     }
 
     #[test]
     fn rejects_bad_arguments() {
-        for bad in ["", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "import a.zip b.zip"] {
+        for bad in ["", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "check --dry-run", "relink --dry-run"] {
             assert!(parse(&args(bad)).is_err(), "{bad:?} should fail");
         }
     }

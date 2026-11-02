@@ -1,3 +1,4 @@
+pub mod batch_dialog;
 pub mod edit_dialog;
 pub mod import;
 pub mod library;

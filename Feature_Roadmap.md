@@ -107,7 +107,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - The dialog shows where each file comes from and lets you swap any of them.
   - It refuses a symbol/footprint mix that fails the pin/pad check.
   - **Needs:** W1.2, W2.1 (the import dialog is shared, so merge W2.1 first or agree the panel layout)
-- [ ] **W2.3 Batch operations and dry run (Rev)** (M)
+- [x] **W2.3 Batch operations and dry run (Rev)** (M)
   - **Owns:** `core/batch.rs` (new) and multi-select in `tabs/library.rs`
   - Import several ZIPs at once; bulk attach; bulk copy to project; bulk relink.
   - Every batch can run as a dry run first, showing exactly what would change.
