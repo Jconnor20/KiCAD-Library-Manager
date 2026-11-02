@@ -6,11 +6,11 @@ mod search_view;
 
 use eframe::egui::{self, RichText};
 use import_dialog::{DialogAction, ImportDialog};
-use library_view::LibraryView;
+use library_view::{LibraryAction, LibraryView};
 use search_view::{SearchAction, SearchView};
 use klm_core::sources::Source;
 use std::sync::Arc;
-use klm_core::library::LibraryRoot;
+use klm_core::library::{AttachKind, LibraryRoot, Scope};
 use klm_core::part::Part;
 use klm_core::settings::Settings;
 use klm_core::sources::{watcher::Watcher, zip_import};
@@ -35,6 +35,7 @@ enum Blocked {
     Import { index: usize, part: Part, category: String, targets: Vec<LibraryRoot> },
     Relink,
     MoveGlobal(PathBuf),
+    CopyToProject { category: String, name: String, overwrite: bool },
 }
 
 #[derive(PartialEq)]
@@ -199,6 +200,7 @@ impl App {
             Blocked::Import { index, part, category, targets } => self.run_import(index, part, category, targets, ctx.clone()),
             Blocked::Relink => self.relink(),
             Blocked::MoveGlobal(dir) => self.move_global(&dir),
+            Blocked::CopyToProject { category, name, overwrite } => self.copy_to_project(&category, &name, overwrite),
         }
     }
 
@@ -215,6 +217,36 @@ impl App {
             }
             Err(e) => self.log.push(format!("Could not move the global library: {e:#}")),
         }
+    }
+
+    fn attach(&mut self, scope: Scope, category: &str, name: &str, path: &Path) {
+        let root = match scope {
+            Scope::Global => self.global_root(),
+            Scope::Project => self.project_root(),
+        };
+        let result = root.ok_or_else(|| anyhow::anyhow!("library not available")).and_then(|r| match AttachKind::of(path) {
+            Some(kind) => r.attach_file(category, name, kind, path),
+            None => Err(anyhow::anyhow!("don't know what kind of file {} is", path.display())),
+        });
+        match result {
+            Ok(()) => self.log.push(format!("Added {} to {name}", path.file_name().unwrap_or_default().to_string_lossy())),
+            Err(e) => self.log.push(format!("Could not add the file to {name}: {e:#}")),
+        }
+        self.library.refresh();
+    }
+
+    fn copy_to_project(&mut self, category: &str, name: &str, overwrite: bool) {
+        let (Some(global), Some(project)) = (self.global_root(), self.project_root()) else { return };
+        match global.copy_part_to(category, name, &project, overwrite) {
+            Ok(new_lib) => {
+                self.log.push(format!("Copied {name} into {}", project.nickname(category)));
+                if new_lib {
+                    self.log.push(format!("Added library {} to KiCad", project.nickname(category)));
+                }
+            }
+            Err(e) => self.log.push(format!("Could not copy {name}: {e:#}")),
+        }
+        self.library.refresh();
     }
 
     fn kicad_open_prompt(&mut self, ctx: &egui::Context) {
@@ -576,7 +608,18 @@ impl eframe::App for App {
                 }
                 Tab::Library => {
                     let (global, project) = (self.global_root(), self.project_root());
-                    self.library.show(ui, global.as_ref(), project.as_ref());
+                    match self.library.show(ui, global.as_ref(), project.as_ref()) {
+                        LibraryAction::None => {}
+                        LibraryAction::Attach { scope, category, name, path } => self.attach(scope, &category, &name, &path),
+                        LibraryAction::CopyToProject { category, name, overwrite } => {
+                            // Only a library new to the project touches KiCad's tables.
+                            if project.as_ref().is_some_and(|p| p.needs_link(&category)) {
+                                self.when_kicad_closed(Blocked::CopyToProject { category, name, overwrite }, &ctx);
+                            } else {
+                                self.copy_to_project(&category, &name, overwrite);
+                            }
+                        }
+                    }
                 }
             }
         });

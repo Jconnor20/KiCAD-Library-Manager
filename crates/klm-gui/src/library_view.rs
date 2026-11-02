@@ -1,5 +1,14 @@
 use eframe::egui::{self, Color32, RichText};
-use klm_core::library::{Check, LibraryRoot, PartStatus, Scope};
+use klm_core::library::{ATTACH_EXTENSIONS, Check, LibraryRoot, PartStatus, Scope};
+use std::path::PathBuf;
+
+/// Something the user asked for on a row; `main` carries it out and refreshes the view.
+pub enum LibraryAction {
+    None,
+    Attach { scope: Scope, category: String, name: String, path: PathBuf },
+    /// Copy a global part into the project library; `overwrite` replaces an existing copy.
+    CopyToProject { category: String, name: String, overwrite: bool },
+}
 
 /// Table of the parts in the global or project library, with what each one is missing.
 pub struct LibraryView {
@@ -38,7 +47,7 @@ impl LibraryView {
         self.parts = None;
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) {
+    pub fn show(&mut self, ui: &mut egui::Ui, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> LibraryAction {
         ui.horizontal(|ui| {
             let before = self.scope;
             ui.add_enabled_ui(global.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Global, "Global"));
@@ -63,7 +72,7 @@ impl LibraryView {
                 Scope::Global => "Set up a global library first.",
                 Scope::Project => "Choose a project first.",
             });
-            return;
+            return LibraryAction::None;
         };
         let parts = self.parts.get_or_insert_with(|| root.list_parts());
 
@@ -78,9 +87,10 @@ impl LibraryView {
             .filter(|p| needle.is_empty() || [&p.mpn, &p.manufacturer, &p.category, &p.description].iter().any(|f| f.to_lowercase().contains(&needle)))
             .collect();
 
+        let mut action = LibraryAction::None;
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-            egui::Grid::new("library").striped(true).num_columns(8).spacing([14.0, 4.0]).show(ui, |ui| {
-                for h in ["Category", "MPN", "Manufacturer", "Footprint", "3D model", "Datasheet", "Sim model", "In KiCad"] {
+            egui::Grid::new("library").striped(true).num_columns(9).spacing([14.0, 4.0]).show(ui, |ui| {
+                for h in ["Category", "MPN", "Manufacturer", "Footprint", "3D model", "Datasheet", "Sim model", "In KiCad", ""] {
                     ui.strong(h);
                 }
                 ui.end_row();
@@ -96,9 +106,30 @@ impl LibraryView {
                     check_cell(ui, p.datasheet, "Datasheet");
                     check_cell(ui, p.sim, "Sim model");
                     check_cell(ui, if p.in_kicad { Check::Ok } else { Check::Missing }, "KiCad library entry");
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Attach…").on_hover_text("Add a datasheet (PDF), SPICE model or 3D model (STEP/WRL)").clicked() {
+                            let picked = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
+                            if let Some(path) = picked {
+                                action = LibraryAction::Attach { scope: self.scope, category: p.category.clone(), name: p.name.clone(), path };
+                            }
+                        }
+                        if self.scope == Scope::Global {
+                            let copy = ui.add_enabled(project.is_some(), egui::Button::new("Copy to project").small());
+                            if copy.on_hover_text("Copy this part into the project's library. Shift-click to replace a copy already there.").clicked() {
+                                let overwrite = ui.input(|i| i.modifiers.shift);
+                                action = LibraryAction::CopyToProject { category: p.category.clone(), name: p.name.clone(), overwrite };
+                            }
+                        }
+                        if let Some(target) = &p.datasheet_target {
+                            if ui.small_button("Open datasheet").clicked() {
+                                let _ = open::that(target);
+                            }
+                        }
+                    });
                     ui.end_row();
                 }
             });
         });
+        action
     }
 }
