@@ -2,6 +2,7 @@ use super::import;
 use crate::{AppCtx, Msg as AppMsg, new_work_dir};
 use eframe::egui::{self, RichText};
 use klm_core::part::Part;
+use klm_core::search_filter::{Filter, SortKey, view};
 
 pub enum Msg {
     Done(Vec<(usize, Part)>),
@@ -14,7 +15,7 @@ pub enum Msg {
 enum Action {
     None,
     Search(String),
-    /// Fetch result `i` (an index into the results).
+    /// Fetch result `i` (an index into the unsorted, unfiltered results).
     Get(usize),
 }
 
@@ -25,6 +26,8 @@ pub struct SearchTab {
     searching: bool,
     /// (index into the app's source list, result)
     results: Vec<(usize, Part)>,
+    filter: Filter,
+    sort: Option<(SortKey, bool)>,
 }
 
 impl SearchTab {
@@ -43,6 +46,9 @@ impl SearchTab {
                 self.searching = false;
                 cx.log.push(format!("{} search results", results.len()));
                 self.results = results;
+                if !self.results.iter().any(|(_, p)| p.manufacturer == self.filter.manufacturer) {
+                    self.filter.manufacturer.clear();
+                }
             }
             Msg::FetchDone => cx.busy = false,
             Msg::ClearResults => self.results.clear(),
@@ -68,13 +74,27 @@ impl SearchTab {
             ui.weak(format!("Searching: {}", source_names.join(", ")));
         });
         ui.add_space(4.0);
+        self.filters_ui(ui, source_names);
+        let rows = view(&self.results, &self.filter, self.sort);
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             egui::Grid::new("results").striped(true).num_columns(8).spacing([14.0, 4.0]).show(ui, |ui| {
-                for h in ["Source", "MPN", "Manufacturer", "Description", "Package", "Stock", "Price", ""] {
-                    ui.strong(h);
+                for (h, key) in [("Source", SortKey::Source), ("MPN", SortKey::Mpn), ("Manufacturer", SortKey::Manufacturer), ("Description", SortKey::Description), ("Package", SortKey::Package), ("Stock", SortKey::Stock), ("Price", SortKey::Price)] {
+                    let arrow = match self.sort {
+                        Some((k, asc)) if k == key => if asc { " ▲" } else { " ▼" },
+                        _ => "",
+                    };
+                    if ui.add(egui::Button::new(RichText::new(format!("{h}{arrow}")).strong()).frame(false)).clicked() {
+                        self.sort = match self.sort {
+                            Some((k, asc)) if k == key => Some((key, !asc)),
+                            _ => Some((key, true)),
+                        };
+                    }
                 }
+                ui.label("");
                 ui.end_row();
-                for (i, (src, p)) in self.results.iter().enumerate() {
+                // `i` indexes `self.results`, not the sorted rows, so "Get…" survives any sort or filter.
+                for i in rows {
+                    let (src, p) = &self.results[i];
                     ui.label(source_names.get(*src).copied().unwrap_or("?"));
                     ui.label(RichText::new(&p.mpn).strong());
                     ui.label(&p.manufacturer);
@@ -91,6 +111,47 @@ impl SearchTab {
             });
         });
         action
+    }
+
+    fn filters_ui(&mut self, ui: &mut egui::Ui, source_names: &[&str]) {
+        if self.results.is_empty() {
+            return;
+        }
+        let mut sources: Vec<usize> = self.results.iter().map(|(s, _)| *s).collect();
+        sources.sort_unstable();
+        sources.dedup();
+        let mut manufacturers: Vec<&str> = self.results.iter().map(|(_, p)| p.manufacturer.as_str()).filter(|m| !m.is_empty()).collect();
+        manufacturers.sort_unstable_by_key(|m| m.to_lowercase());
+        manufacturers.dedup();
+        let f = &mut self.filter;
+        ui.horizontal_wrapped(|ui| {
+            for s in sources {
+                let mut shown = !f.hidden_sources.contains(&s);
+                if ui.checkbox(&mut shown, source_names.get(s).copied().unwrap_or("?")).changed() {
+                    f.hidden_sources.retain(|h| *h != s);
+                    if !shown {
+                        f.hidden_sources.push(s);
+                    }
+                }
+            }
+            ui.checkbox(&mut f.in_stock, "In stock");
+            egui::ComboBox::from_id_salt("manufacturer_filter").selected_text(if f.manufacturer.is_empty() { "Any manufacturer" } else { &f.manufacturer }).show_ui(ui, |ui| {
+                ui.selectable_value(&mut f.manufacturer, String::new(), "Any manufacturer");
+                for m in manufacturers {
+                    ui.selectable_value(&mut f.manufacturer, m.to_string(), m);
+                }
+            });
+            ui.add(egui::TextEdit::singleline(&mut f.package).hint_text("Package contains").desired_width(110.0));
+            ui.add(egui::TextEdit::singleline(&mut f.max_price).hint_text("Max unit price").desired_width(90.0));
+            ui.add(egui::TextEdit::singleline(&mut f.text).hint_text("MPN, manufacturer, description").desired_width(190.0));
+        });
+        ui.horizontal(|ui| {
+            ui.weak(format!("{} of {} results", view(&self.results, &self.filter, None).len(), self.results.len()));
+            if ui.add_enabled(!self.filter.is_empty(), egui::Button::new("Clear filters")).clicked() {
+                self.filter = Filter::default();
+            }
+        });
+        ui.add_space(4.0);
     }
 
     fn run_search(&mut self, query: String, cx: &mut AppCtx) {

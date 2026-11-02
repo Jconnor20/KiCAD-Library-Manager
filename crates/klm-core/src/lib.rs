@@ -7,6 +7,7 @@ pub mod kicad_env;
 pub mod library;
 pub mod matching;
 pub mod part;
+pub mod search_filter;
 pub mod settings;
 pub mod sexpr;
 pub mod sources;
