@@ -235,6 +235,13 @@ impl SettingsTab {
                 }
             });
 
+            ui.add_space(16.0);
+            ui.strong("Shipping region");
+            ui.weak("Country code (US, DE, ...) used for BOM stock and prices; each project can override it. Only DigiKey uses it so far.");
+            if ui.add(egui::TextEdit::singleline(&mut settings.shipping_region).hint_text("e.g. DE").desired_width(80.0)).lost_focus() {
+                action = Action::SaveNaming;
+            }
+
             if naming_section(ui, &mut settings.rules) {
                 action = Action::SaveNaming;
             }

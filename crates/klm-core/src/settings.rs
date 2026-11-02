@@ -22,6 +22,8 @@ pub struct Settings {
     pub standards: crate::standardise::Rules,
     /// How long distributor search results are reused, in minutes; unset is a day, 0 turns the cache off.
     pub cache_ttl_minutes: Option<u64>,
+    /// Default shipping region (ISO country, e.g. "DE") for BOM stock and prices; a project can override it.
+    pub shipping_region: String,
 }
 
 fn path() -> Option<PathBuf> {

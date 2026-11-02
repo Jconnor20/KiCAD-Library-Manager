@@ -24,7 +24,7 @@ use klm_core::sources::Source;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use tabs::{history, import, library, search, settings};
+use tabs::{bom, history, import, library, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
@@ -36,6 +36,7 @@ enum Msg {
     Import(import::Msg),
     Library(library::Msg),
     History(history::Msg),
+    Bom(bom::Msg),
     Settings(settings::Msg),
 }
 
@@ -44,6 +45,7 @@ enum Tab {
     Search,
     Import,
     Library,
+    Bom,
     History,
 }
 
@@ -108,6 +110,7 @@ struct App {
     import_tab: import::ImportTab,
     library_tab: library::LibraryTab,
     history_tab: history::HistoryTab,
+    bom_tab: bom::BomTab,
     settings_tab: settings::SettingsTab,
 }
 
@@ -167,6 +170,7 @@ impl App {
             search_tab: search::SearchTab::default(),
             library_tab: library::LibraryTab::default(),
             history_tab: history::HistoryTab::default(),
+            bom_tab: bom::BomTab::default(),
             settings_tab: settings::SettingsTab::new(),
             cx,
             rx,
@@ -239,6 +243,7 @@ impl App {
                 Msg::Import(m) => self.import_tab.handle(m, &mut self.cx),
                 Msg::Library(m) => self.library_tab.handle(m, &mut self.cx),
                 Msg::History(m) => self.history_tab.handle(m, &mut self.cx),
+                Msg::Bom(m) => self.bom_tab.handle(m, &mut self.cx),
                 Msg::Settings(m) => self.settings_tab.handle(m, &mut self.cx),
             }
         }
@@ -343,6 +348,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.cx.tab, Tab::Search, RichText::new("Search").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::Import, RichText::new("Import").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::Library, RichText::new("Library").heading());
+                ui.selectable_value(&mut self.cx.tab, Tab::Bom, RichText::new("BOM").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::History, RichText::new("History").heading());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Settings…").clicked() {
@@ -355,6 +361,7 @@ impl eframe::App for App {
                 Tab::Search => self.search_tab.ui(ui, &mut self.cx),
                 Tab::Import => self.import_tab.ui(ui, &mut self.cx),
                 Tab::Library => self.library_tab.ui(ui, &mut self.cx),
+                Tab::Bom => self.bom_tab.ui(ui, &mut self.cx),
                 Tab::History => self.history_tab.ui(ui, &mut self.cx),
             }
         });

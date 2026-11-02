@@ -11,6 +11,8 @@ use std::path::Path;
 
 pub struct DigiKey {
     http: Client,
+    /// `X-DIGIKEY-Locale-Site` and `-Currency`.
+    locale: (&'static str, &'static str),
     client_id: String,
     token: TokenCache,
 }
@@ -21,9 +23,32 @@ impl DigiKey {
         let secret = credentials::get("DigiKey", "client_secret")?;
         Some(Self {
             http: http::client(),
+            locale: ("US", "USD"),
             token: TokenCache::new("https://api.digikey.com/v1/oauth2/token", id.clone(), secret),
             client_id: id,
         })
+    }
+
+    /// Prices and stock for a shipping region (ISO country); regions DigiKey has no site for stay US/USD.
+    pub fn with_region(mut self, region: &str) -> Self {
+        self.locale = locale(region);
+        self
+    }
+}
+
+/// DigiKey site and currency for a country.
+// shortcut: a few common sites only; the rest fall back to US/USD, add rows as users ask.
+pub fn locale(region: &str) -> (&'static str, &'static str) {
+    match region.trim().to_ascii_uppercase().as_str() {
+        "CA" => ("CA", "CAD"),
+        "GB" | "UK" => ("UK", "GBP"),
+        "DE" => ("DE", "EUR"),
+        "FR" => ("FR", "EUR"),
+        "IT" => ("IT", "EUR"),
+        "NL" => ("NL", "EUR"),
+        "AU" => ("AU", "AUD"),
+        "JP" => ("JP", "JPY"),
+        _ => ("US", "USD"),
     }
 }
 
@@ -38,11 +63,15 @@ impl Source for DigiKey {
             .post("https://api.digikey.com/products/v4/search/keyword")
             .bearer_auth(self.token.token(&self.http)?)
             .header("X-DIGIKEY-Client-Id", &self.client_id)
-            .header("X-DIGIKEY-Locale-Site", "US")
+            .header("X-DIGIKEY-Locale-Site", self.locale.0)
             .header("X-DIGIKEY-Locale-Language", "en")
-            .header("X-DIGIKEY-Locale-Currency", "USD")
+            .header("X-DIGIKEY-Locale-Currency", self.locale.1)
             .json(&json!({ "Keywords": query, "Limit": 10, "Offset": 0 }));
-        Ok(parse(&http::send(req)?))
+        let mut parts = parse(&http::send(req)?);
+        for p in &mut parts {
+            p.price_currency = self.locale.1.into();
+        }
+        Ok(parts)
     }
 
     fn fetch(&self, _part: &Part, _work: &Path) -> Result<Option<Part>> {
@@ -88,6 +117,10 @@ fn parse(v: &Value) -> Vec<Part> {
             if !id.is_empty() {
                 part.supplier_ids.push(("DigiKey".into(), id));
             }
+            // shortcut: only the first packaging variation is read (may be tape & reel); pick per MOQ if BOMs need it.
+            part.price_breaks = variation["StandardPricing"].as_array().into_iter().flatten().filter_map(|b| Some((b["BreakQuantity"].as_u64()?, b["UnitPrice"].as_f64()?))).collect();
+            part.moq = variation["MinimumOrderQuantity"].as_u64();
+            part.lead_time_days = p["ManufacturerLeadWeeks"].as_str().and_then(|w| w.trim().parse::<u32>().ok()).map(|w| w * 7);
             if let Some(b) = variation["StandardPricing"].get(0) {
                 part.unit_price = format!("${} @{}", b["UnitPrice"], b["BreakQuantity"]);
             } else if let Some(price) = p["UnitPrice"].as_f64() {
@@ -137,6 +170,7 @@ mod tests {
         assert_eq!(p.package, "0603 (1608 Metric)");
         assert_eq!(p.stock, Some(4510000));
         assert_eq!(p.unit_price, "$0.1 @1");
+        assert_eq!((p.price_breaks.clone(), p.moq), (vec![(1, 0.1), (10, 0.012)], Some(1)));
         assert_eq!(p.datasheet_url, "https://www.yageo.com/upload/media/product/RC_L.pdf");
         assert_eq!(p.category_hint, "Resistors Chip Resistor - Surface Mount");
         assert_eq!(p.supplier_ids, vec![("DigiKey".to_string(), "311-10.0KHRCT-ND".to_string())]);
