@@ -10,6 +10,8 @@ pub struct Settings {
     /// Folder watched for vendor ZIPs; the OS Downloads folder when unset.
     pub downloads_dir: Option<PathBuf>,
     pub last_project: Option<PathBuf>,
+    /// `kicad-cli` to use when KiCad isn't installed in the usual place; found automatically when unset.
+    pub kicad_cli: Option<PathBuf>,
     /// Per-source switch by source name; a source not listed is on (it still needs credentials).
     pub source_enabled: BTreeMap<String, bool>,
     /// Currency search prices are converted to (ISO code); empty shows each source's own currency.

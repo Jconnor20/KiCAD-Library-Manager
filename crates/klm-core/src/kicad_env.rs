@@ -4,6 +4,7 @@ use crate::sexpr;
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
 /// Highest `x.y` sub-directory of `dir` (KiCad keeps one per major version).
 fn newest_version_dir(dir: &Path) -> Option<PathBuf> {
@@ -25,21 +26,48 @@ pub fn config_dir() -> Result<PathBuf> {
     newest_version_dir(&base).with_context(|| format!("no KiCad config found in {}", base.display()))
 }
 
+/// The Settings override for `kicad-cli`. Process-wide so the GUI, the CLI and the core all honour it
+/// without every function that runs `kicad-cli` taking a parameter; set at startup and when it changes.
+static CLI_OVERRIDE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+pub fn set_kicad_cli_override(path: Option<PathBuf>) {
+    *CLI_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = path;
+}
+
 pub fn kicad_cli() -> Result<PathBuf> {
+    let over = CLI_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    Ok(resolve_cli(over.as_deref()))
+}
+
+/// `over` when it points at a file, else wherever KiCad is installed, else `kicad-cli` on PATH.
+fn resolve_cli(over: Option<&Path>) -> PathBuf {
+    if let Some(p) = over.filter(|p| p.is_file()) {
+        return p.to_path_buf();
+    }
     if cfg!(windows) {
         let pf = std::env::var_os("ProgramFiles").map(PathBuf::from).unwrap_or("C:/Program Files".into());
         if let Some(v) = newest_version_dir(&pf.join("KiCad")) {
             let p = v.join("bin/kicad-cli.exe");
             if p.exists() {
-                return Ok(p);
+                return p;
             }
         }
     }
     let mac = PathBuf::from("/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli");
     if mac.exists() {
-        return Ok(mac);
+        return mac;
     }
-    Ok("kicad-cli".into()) // shortcut: relies on PATH elsewhere; add a Settings override if users hit it.
+    "kicad-cli".into()
+}
+
+/// Output of `kicad-cli version`, for the Settings "Test" button.
+pub fn kicad_cli_version() -> Result<String> {
+    let cli = kicad_cli()?;
+    let out = quiet(&cli).arg("version").output().with_context(|| format!("could not run {}", cli.display()))?;
+    if !out.status.success() {
+        bail!("{} failed: {}", cli.display(), String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 fn quiet(program: &Path) -> Command {
@@ -169,4 +197,13 @@ mod tests {
         assert_eq!(t.child("lib").unwrap().child("uri").unwrap().arg(0), Some("${KIPRJMOD}/lib/footprints/ICs.pretty"));
     }
 
+    #[test]
+    fn cli_override_is_used_only_when_the_file_exists() {
+        let dir = crate::test_dir("cli_override");
+        let fake = dir.join("my-kicad-cli");
+        std::fs::write(&fake, "").unwrap();
+        assert_eq!(resolve_cli(Some(&fake)), fake);
+        // A stale setting falls back to the normal search instead of breaking every import.
+        assert_eq!(resolve_cli(Some(&dir.join("gone"))), resolve_cli(None));
+    }
 }

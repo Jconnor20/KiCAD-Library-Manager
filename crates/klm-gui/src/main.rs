@@ -132,6 +132,7 @@ fn new_work_dir() -> PathBuf {
 impl App {
     fn new(ctx: &egui::Context, project_arg: Option<PathBuf>) -> Self {
         let mut settings = Settings::load();
+        kicad_env::set_kicad_cli_override(settings.kicad_cli.clone());
         if let Some(p) = &project_arg {
             settings.last_project = Some(project_dir(p));
         }
