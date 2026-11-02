@@ -129,6 +129,8 @@ pub struct Plan {
     pub items: Vec<Item>,
     pub warnings: Vec<String>,
     scratch: PathBuf,
+    /// Libraries the batch may change; each gets one snapshot for the whole batch.
+    roots: Vec<LibraryRoot>,
 }
 
 impl Plan {
@@ -176,7 +178,8 @@ fn act(exists: bool, what: String) -> Change {
 /// scratch folder that lives as long as the returned plan.
 pub fn plan(ops: Vec<Op>, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> Plan {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-    let mut plan = Plan { items: vec![], warnings: vec![], scratch: std::env::temp_dir().join(format!("klm-batch-{}-{nanos}", std::process::id())) };
+    let roots = global.into_iter().chain(project).cloned().collect();
+    let mut plan = Plan { items: vec![], warnings: vec![], scratch: std::env::temp_dir().join(format!("klm-batch-{}-{nanos}", std::process::id())), roots };
     for op in ops {
         match op {
             Op::ImportZip { zip, category, target, overwrite } => {
@@ -341,8 +344,18 @@ pub struct ItemResult {
 /// Does the plan, one item at a time, calling `progress(done, total)` before each. A failed item is
 /// reported in its result and the rest still run.
 pub fn apply(plan: &Plan, mut progress: impl FnMut(usize, usize)) -> Vec<ItemResult> {
-    // W2.4: take the snapshot guard here, so the whole batch is one snapshot.
     let total = plan.items.len();
+    // One snapshot per library for the whole batch; without it there'd be no way back, so don't start.
+    // A library that doesn't exist yet is skipped so a global-only batch doesn't create the project's;
+    // if the batch does create it, each change there is snapshotted on its own.
+    let label = format!("batch of {total}");
+    let guards: anyhow::Result<Vec<_>> = plan.roots.iter().filter(|r| r.dir.is_dir()).map(|r| crate::snapshot::guard(r, &label)).collect();
+    let _guards = match guards {
+        Ok(g) => g,
+        Err(e) => {
+            return vec![ItemResult { label, notes: vec![], error: Some(format!("could not take a snapshot first, so nothing was changed: {e:#}")) }];
+        }
+    };
     let results = plan
         .items
         .iter()
@@ -462,8 +475,10 @@ mod tests {
             Op::RelinkAll,
         ];
         let plan = plan(ops, Some(&global), Some(&project));
+        let snapshots_before = crate::snapshot::list(&global).len();
         let mut steps = vec![];
         let results = apply(&plan, |done, total| steps.push((done, total)));
+        assert_eq!(crate::snapshot::list(&global).len(), snapshots_before + 1, "the whole batch is one snapshot of the global library");
 
         assert!(results.iter().all(|r| r.error.is_none()), "{:?}", results.iter().map(|r| &r.error).collect::<Vec<_>>());
         assert_eq!(results.iter().map(|r| &r.label).collect::<Vec<_>>(), plan.items.iter().map(|i| &i.label).collect::<Vec<_>>());
