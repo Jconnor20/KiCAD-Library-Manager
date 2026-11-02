@@ -1,51 +1,41 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod attach_dialog;
-mod import_dialog;
-mod library_view;
-mod search_view;
-mod settings_view;
+//! The app shell: shared state, top bar, log, the "close KiCad first" prompt and tab switching.
+//!
+//! Everything else lives in `tabs/<name>.rs`, one file per tab, so a feature in one tab edits only that file:
+//! - Each tab owns its state (`SearchTab`, `ImportTab`, …), its UI, the actions it starts and its own
+//!   message enum (`tabs::<name>::Msg`). Worker threads report back by sending `Msg::<Tab>(…)` on `AppCtx::tx`;
+//!   `App::handle_messages` hands each one to that tab's `handle`.
+//! - State shared by all tabs (settings, KiCad config dir, project, sources, log, `busy`) is in `AppCtx`,
+//!   passed to every tab method as `cx`. Tabs never reach into each other's state; to affect another tab
+//!   they send it one of its messages (`cx.send(Msg::Library(library::Msg::Refresh))`).
+//! - An action that edits KiCad's library tables is requested with `cx.when_kicad_closed(msg)`: the shell
+//!   delivers `msg` at once, or after the user closes KiCad.
+//! - Adding a feature to a tab: add its state and `Msg` variants in that tab's file. Adding a new tab:
+//!   a file in `tabs/`, a `Msg` variant, a `Tab` variant and one line each in `App` for `ui`/`handle`.
+
+mod tabs;
 
 use eframe::egui::{self, RichText};
-use attach_dialog::{AttachAction, AttachDialog};
-use import_dialog::{DialogAction, ImportDialog};
-use library_view::{LibraryAction, LibraryView};
-use search_view::{SearchAction, SearchView};
-use settings_view::{SettingsAction, SettingsView};
-use klm_core::sources::Source;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use klm_core::library::{AttachKind, LibraryRoot, Scope};
-use klm_core::part::Part;
-use klm_core::settings::Settings;
-use klm_core::sources::{watcher::Watcher, zip_import};
 use klm_core::kicad_env;
-use klm_core::matching;
+use klm_core::library::LibraryRoot;
+use klm_core::settings::Settings;
+use klm_core::sources::Source;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use tabs::{import, library, search, settings};
 
-/// Results sent back from worker threads.
+/// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
-    Found(Part, PathBuf),
     Log(String),
-    Imported { index: usize, notes: Vec<String> },
-    ImportFailed(String),
-    SearchDone(Vec<(usize, Part)>),
-    /// A search result's files, downloaded and ready for the import dialog.
-    Fetched(Part, PathBuf),
-    FetchDone,
-    /// A CAD page was opened for this search result; a matching ZIP may follow.
-    CadOpened(Part),
-    TestDone,
-}
-
-/// An action that edits KiCad's library tables, held until KiCad is closed.
-enum Blocked {
-    Import { index: usize, part: Part, category: String, targets: Vec<LibraryRoot> },
+    /// Re-add KLM libraries missing from KiCad's tables.
     Relink,
     MoveGlobal(PathBuf),
-    CopyToProject { category: String, name: String, overwrite: bool },
-    Attach { from: LibraryRoot, targets: Vec<LibraryRoot>, category: String, name: String, path: PathBuf },
+    Search(search::Msg),
+    Import(import::Msg),
+    Library(library::Msg),
+    Settings(settings::Msg),
 }
 
 #[derive(PartialEq)]
@@ -55,37 +45,67 @@ enum Tab {
     Library,
 }
 
-struct Pending {
-    part: Part,
-    /// Extracted files; removed once the part is imported or dismissed.
-    work: PathBuf,
-}
-
-struct App {
+/// State every tab can read and change.
+struct AppCtx {
+    ctx: egui::Context,
     settings: Settings,
     kicad_config: Result<PathBuf, String>,
     project: Option<PathBuf>,
-    setup_path: String,
-    pending: Vec<Pending>,
-    dialog: Option<ImportDialog>,
-    attach_dialog: Option<AttachDialog>,
-    blocked: Option<Blocked>,
-    still_open: bool,
-    tab: Tab,
-    library: LibraryView,
-    search: SearchView,
     sources: Arc<Vec<Box<dyn Source>>>,
+    /// A download or import is running; buttons that start another are disabled.
     busy: bool,
-    settings_view: SettingsView,
-    settings_open: bool,
-    testing: bool,
-    /// Search results whose CAD page was opened, waiting for their vendor ZIP.
-    awaiting_cad: Vec<Part>,
-    /// Set to stop the current Downloads watcher thread.
-    watch_stop: Arc<AtomicBool>,
+    tab: Tab,
     log: Vec<String>,
     tx: Sender<Msg>,
+    /// An action that edits KiCad's library tables, held until KiCad is closed.
+    blocked: Option<Msg>,
+    still_open: bool,
+}
+
+impl AppCtx {
+    /// Queues a message for the shell or a tab, handled on the next pass of `handle_messages`.
+    fn send(&self, msg: Msg) {
+        let _ = self.tx.send(msg);
+        self.ctx.request_repaint();
+    }
+
+    /// Sends `msg` now, or holds it behind the "close KiCad" prompt if KiCad is open.
+    fn when_kicad_closed(&mut self, msg: Msg) {
+        if kicad_env::kicad_running() {
+            self.still_open = false;
+            self.blocked = Some(msg);
+        } else {
+            self.send(msg);
+        }
+    }
+
+    fn global_root(&self) -> Option<LibraryRoot> {
+        let cfg = self.kicad_config.as_ref().ok()?;
+        Some(LibraryRoot::global(self.settings.global_root.clone()?, cfg.clone()))
+    }
+
+    fn project_root(&self) -> Option<LibraryRoot> {
+        self.project.as_deref().map(LibraryRoot::project)
+    }
+
+    fn roots(&self) -> Vec<LibraryRoot> {
+        self.global_root().into_iter().chain(self.project_root()).collect()
+    }
+
+    fn save_settings(&mut self) {
+        if let Err(e) = self.settings.save() {
+            self.log.push(format!("Could not save settings: {e:#}"));
+        }
+    }
+}
+
+struct App {
+    cx: AppCtx,
     rx: Receiver<Msg>,
+    search_tab: search::SearchTab,
+    import_tab: import::ImportTab,
+    library_tab: library::LibraryTab,
+    settings_tab: settings::SettingsTab,
 }
 
 fn main() -> eframe::Result {
@@ -103,28 +123,10 @@ fn project_dir(p: &Path) -> PathBuf {
     if p.is_dir() { p.to_path_buf() } else { p.parent().map(Path::to_path_buf).unwrap_or_default() }
 }
 
+/// A fresh path in the temp folder for extracted or downloaded part files.
 fn new_work_dir() -> PathBuf {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     std::env::temp_dir().join(format!("klm-zip-{}-{nanos}", std::process::id()))
-}
-
-/// Reads one ZIP on the calling thread and reports what it found.
-fn scan_zip(zip: &Path, tx: &Sender<Msg>) {
-    let work = new_work_dir();
-    let name = zip.file_name().unwrap_or_default().to_string_lossy().into_owned();
-    match zip_import::read_zip(zip, &work) {
-        Ok(Some(part)) => {
-            let _ = tx.send(Msg::Found(part, work));
-        }
-        Ok(None) => {
-            let _ = std::fs::remove_dir_all(&work);
-            let _ = tx.send(Msg::Log(format!("{name}: no KiCad symbol inside, ignored")));
-        }
-        Err(e) => {
-            let _ = std::fs::remove_dir_all(&work);
-            let _ = tx.send(Msg::Log(format!("{name}: {e:#}")));
-        }
-    }
 }
 
 impl App {
@@ -135,164 +137,119 @@ impl App {
         }
         let (tx, rx) = channel();
         let sources = Arc::new(klm_core::sources::all(&settings));
-        let mut app = Self {
+        let mut cx = AppCtx {
+            ctx: ctx.clone(),
             kicad_config: kicad_env::config_dir().map_err(|e| format!("{e:#}")),
             project: settings.last_project.clone().filter(|p| p.is_dir()),
-            setup_path: dirs::document_dir()
-                .map(|d| d.join("KiCad").join("KLM-Library").display().to_string())
-                .unwrap_or_default(),
             settings,
-            pending: vec![],
-            dialog: None,
-            attach_dialog: None,
-            blocked: None,
-            still_open: false,
-            tab: Tab::Import,
-            library: LibraryView::default(),
-            search: SearchView::default(),
             sources,
             busy: false,
-            settings_view: SettingsView::new(),
-            settings_open: false,
-            testing: false,
-            awaiting_cad: vec![],
-            watch_stop: Arc::new(AtomicBool::new(false)),
+            tab: Tab::Import,
             log: vec![],
             tx,
+            blocked: None,
+            still_open: false,
+        };
+        if let Err(e) = &cx.kicad_config {
+            cx.log.push(format!("KiCad not found: {e}"));
+        }
+        if let Some(g) = cx.settings.global_root.clone().filter(|g| !g.is_dir()) {
+            cx.log.push(format!("Global library not found at {}. If you moved it, click \"Change location…\" and choose its new folder.", g.display()));
+        }
+        let import_tab = import::ImportTab::new(&mut cx);
+        let mut app = Self {
+            import_tab,
+            search_tab: search::SearchTab::default(),
+            library_tab: library::LibraryTab::default(),
+            settings_tab: settings::SettingsTab::new(),
+            cx,
             rx,
         };
-        if let Err(e) = &app.kicad_config {
-            app.log.push(format!("KiCad not found: {e}"));
-        }
-        if let Some(g) = app.settings.global_root.clone().filter(|g| !g.is_dir()) {
-            app.log.push(format!("Global library not found at {}. If you moved it, click \"Change location…\" and choose its new folder.", g.display()));
-        }
-        app.start_watcher(ctx.clone());
         app.check_links();
         app
     }
 
-    fn roots(&self) -> Vec<LibraryRoot> {
-        self.global_root().into_iter().chain(self.project_root()).collect()
-    }
-
     /// Re-adds KLM libraries that KiCad dropped from its tables (e.g. it saved over them while open).
     fn check_links(&mut self) {
-        if self.roots().iter().all(|r| r.unlinked().is_empty() && !r.has_old_paths()) {
+        if self.cx.roots().iter().all(|r| r.unlinked().is_empty() && !r.has_old_paths()) {
             return;
         }
         if kicad_env::kicad_running() {
-            self.log.push("Some KLM libraries are missing from KiCad's library list. Close KiCad, then click \"Re-link libraries\".".into());
+            self.cx.log.push("Some KLM libraries are missing from KiCad's library list. Close KiCad, then click \"Re-link libraries\".".into());
         } else {
             self.relink();
         }
     }
 
     fn relink(&mut self) {
+        let cx = &mut self.cx;
         let mut any = false;
-        for root in self.roots() {
+        for root in cx.roots() {
             match root.fix_old_paths() {
                 Ok(0) => {}
                 Ok(n) => {
-                    self.log.push(format!("Replaced ${{KLM_LIB}} with {} in {n} files", root.dir.display()));
+                    cx.log.push(format!("Replaced ${{KLM_LIB}} with {} in {n} files", root.dir.display()));
                     any = true;
                 }
-                Err(e) => self.log.push(format!("Could not update old paths: {e:#}")),
+                Err(e) => cx.log.push(format!("Could not update old paths: {e:#}")),
             }
             for cat in root.unlinked() {
                 match root.link(&cat) {
-                    Ok(_) => self.log.push(format!("Re-linked {} in KiCad", root.nickname(&cat))),
-                    Err(e) => self.log.push(format!("Could not re-link {}: {e:#}", root.nickname(&cat))),
+                    Ok(_) => cx.log.push(format!("Re-linked {} in KiCad", root.nickname(&cat))),
+                    Err(e) => cx.log.push(format!("Could not re-link {}: {e:#}", root.nickname(&cat))),
                 }
                 any = true;
             }
         }
         if !any {
-            self.log.push("All KLM libraries are already in KiCad's library list.".into());
+            cx.log.push("All KLM libraries are already in KiCad's library list.".into());
         }
-        self.library.refresh();
-    }
-
-    /// Runs `action` now, or holds it behind the "close KiCad" prompt if KiCad is open.
-    fn when_kicad_closed(&mut self, action: Blocked, ctx: &egui::Context) {
-        if kicad_env::kicad_running() {
-            self.still_open = false;
-            self.blocked = Some(action);
-            return;
-        }
-        match action {
-            Blocked::Import { index, part, category, targets } => self.run_import(index, part, category, targets, ctx.clone()),
-            Blocked::Relink => self.relink(),
-            Blocked::MoveGlobal(dir) => self.move_global(&dir),
-            Blocked::CopyToProject { category, name, overwrite } => self.copy_to_project(&category, &name, overwrite),
-            Blocked::Attach { from, targets, category, name, path } => self.attach(&from, &targets, &category, &name, &path),
-        }
+        cx.send(Msg::Library(library::Msg::Refresh));
     }
 
     /// Moves the global library (or adopts it where the user moved it) and fixes every path.
     fn move_global(&mut self, dir: &Path) {
-        let Some(root) = self.global_root() else { return };
+        let cx = &mut self.cx;
+        let Some(root) = cx.global_root() else { return };
         match root.relocate(dir) {
             Ok(moved) => {
-                self.settings.global_root = Some(moved.dir.clone());
-                self.save_settings();
-                self.library.refresh();
-                self.log.push(format!("Global library is now at {}; KiCad's library list and all paths updated.", moved.dir.display()));
-                self.log.push("Boards placed before the move keep the old 3D paths until you run Tools → Update Footprints from Library.".into());
+                cx.settings.global_root = Some(moved.dir.clone());
+                cx.save_settings();
+                cx.send(Msg::Library(library::Msg::Refresh));
+                cx.log.push(format!("Global library is now at {}; KiCad's library list and all paths updated.", moved.dir.display()));
+                cx.log.push("Boards placed before the move keep the old 3D paths until you run Tools → Update Footprints from Library.".into());
             }
-            Err(e) => self.log.push(format!("Could not move the global library: {e:#}")),
+            Err(e) => cx.log.push(format!("Could not move the global library: {e:#}")),
         }
     }
 
-    /// Copies `path` into each target library's folder and points the part there. A target without the
-    /// part gets it copied over from `from` first.
-    fn attach(&mut self, from: &LibraryRoot, targets: &[LibraryRoot], category: &str, name: &str, path: &Path) {
-        let file = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-        for target in targets {
-            let nick = target.nickname(category);
-            let result = (|| -> anyhow::Result<()> {
-                let kind = AttachKind::of(path).ok_or_else(|| anyhow::anyhow!("don't know what kind of file {} is", path.display()))?;
-                if !target.has_part(category, name) {
-                    if from.copy_part_to(category, name, target, false)? {
-                        self.log.push(format!("Added library {nick} to KiCad"));
-                    }
-                    self.log.push(format!("Copied {name} into {nick}"));
-                }
-                target.attach_file(category, name, kind, path)
-            })();
-            match result {
-                Ok(()) => self.log.push(format!("Added {file} to {name} in {nick}")),
-                Err(e) => self.log.push(format!("Could not add {file} to {name} in {nick}: {e:#}")),
+    fn handle_messages(&mut self) {
+        while let Ok(msg) = self.rx.try_recv() {
+            match msg {
+                Msg::Log(s) => self.cx.log.push(s),
+                Msg::Relink => self.relink(),
+                Msg::MoveGlobal(dir) => self.move_global(&dir),
+                Msg::Search(m) => self.search_tab.handle(m, &mut self.cx),
+                Msg::Import(m) => self.import_tab.handle(m, &mut self.cx),
+                Msg::Library(m) => self.library_tab.handle(m, &mut self.cx),
+                Msg::Settings(m) => self.settings_tab.handle(m, &mut self.cx),
             }
         }
-        self.library.refresh();
     }
 
-    fn copy_to_project(&mut self, category: &str, name: &str, overwrite: bool) {
-        let (Some(global), Some(project)) = (self.global_root(), self.project_root()) else { return };
-        match global.copy_part_to(category, name, &project, overwrite) {
-            Ok(new_lib) => {
-                self.log.push(format!("Copied {name} into {}", project.nickname(category)));
-                if new_lib {
-                    self.log.push(format!("Added library {} to KiCad", project.nickname(category)));
-                }
-            }
-            Err(e) => self.log.push(format!("Could not copy {name}: {e:#}")),
-        }
-        self.library.refresh();
-    }
-
-    fn kicad_open_prompt(&mut self, ctx: &egui::Context) {
-        if self.blocked.is_none() {
+    fn kicad_open_prompt(&mut self) {
+        let cx = &mut self.cx;
+        if cx.blocked.is_none() {
             return;
         }
         let mut proceed = false;
         let mut cancel = false;
-        egui::Modal::new(egui::Id::unique("kicad_open")).show(ctx, |ui| {
+        let ctx = cx.ctx.clone();
+        egui::Modal::new(egui::Id::unique("kicad_open")).show(&ctx, |ui| {
             ui.set_width(420.0);
             ui.heading("Close KiCad first");
             ui.label("This changes KiCad's library list. KiCad keeps those in memory while it's open and writes them back over any outside changes, so please close every KiCad window, then click Continue.");
-            if self.still_open {
+            if cx.still_open {
                 ui.colored_label(ui.visuals().warn_fg_color, "KiCad is still open.");
             }
             ui.add_space(8.0);
@@ -302,371 +259,65 @@ impl App {
             });
         });
         if cancel {
-            self.blocked = None;
+            cx.blocked = None;
         } else if proceed {
             if kicad_env::kicad_running() {
-                self.still_open = true;
-            } else if let Some(action) = self.blocked.take() {
-                self.when_kicad_closed(action, ctx);
-            }
-        }
-    }
-
-    fn start_watcher(&mut self, ctx: egui::Context) {
-        let Some(dir) = self.settings.downloads() else {
-            self.log.push("No Downloads folder found; use \"Import ZIP…\" instead.".into());
-            return;
-        };
-        self.log.push(format!("Watching {} for part ZIPs", dir.display()));
-        let tx = self.tx.clone();
-        self.watch_stop = Arc::new(AtomicBool::new(false));
-        let stop = self.watch_stop.clone();
-        std::thread::spawn(move || {
-            let mut w = Watcher::new(dir);
-            while !stop.load(Ordering::Relaxed) {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                for zip in w.poll() {
-                    scan_zip(&zip, &tx);
-                    ctx.request_repaint();
-                }
-            }
-        });
-    }
-
-    fn global_root(&self) -> Option<LibraryRoot> {
-        let cfg = self.kicad_config.as_ref().ok()?;
-        Some(LibraryRoot::global(self.settings.global_root.clone()?, cfg.clone()))
-    }
-
-    fn project_root(&self) -> Option<LibraryRoot> {
-        self.project.as_deref().map(LibraryRoot::project)
-    }
-
-    fn save_settings(&mut self) {
-        if let Err(e) = self.settings.save() {
-            self.log.push(format!("Could not save settings: {e:#}"));
-        }
-    }
-
-    fn create_global_library(&mut self) {
-        let dir = PathBuf::from(self.setup_path.trim());
-        let result = (|| -> anyhow::Result<()> {
-            let cfg = self.kicad_config.clone().map_err(anyhow::Error::msg)?;
-            LibraryRoot::global(dir.clone(), cfg).ensure_layout()
-        })();
-        match result {
-            Ok(()) => {
-                self.settings.global_root = Some(dir.clone());
-                self.save_settings();
-                self.log.push(format!("Global library created at {}", dir.display()));
-            }
-            Err(e) => self.log.push(format!("Could not create global library: {e:#}")),
-        }
-    }
-
-    fn run_import(&mut self, index: usize, part: Part, category: String, targets: Vec<LibraryRoot>, ctx: egui::Context) {
-        self.busy = true;
-        let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            let mut notes = vec![];
-            for root in &targets {
-                let nick = root.nickname(&category);
-                match root.add_part(&part, &category, true) {
-                    Ok(new_lib) => {
-                        notes.push(format!("Imported {} into {nick}", part.mpn));
-                        if new_lib {
-                            notes.push(format!("Added library {nick} to KiCad"));
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Msg::ImportFailed(format!("{nick}: {e:#}")));
-                        ctx.request_repaint();
-                        return;
-                    }
-                }
-            }
-            let _ = tx.send(Msg::Imported { index, notes });
-            ctx.request_repaint();
-        });
-    }
-
-    fn run_search(&mut self, query: String, ctx: egui::Context) {
-        self.search.searching = true;
-        self.search.results.clear();
-        let (tx, sources) = (self.tx.clone(), self.sources.clone());
-        std::thread::spawn(move || {
-            let mut results = vec![];
-            let query = &query;
-            std::thread::scope(|s| {
-                let handles: Vec<_> = sources.iter().enumerate().map(|(i, src)| s.spawn(move || (i, src.name(), src.search(&query)))).collect();
-                for h in handles {
-                    match h.join() {
-                        Ok((i, _, Ok(parts))) => results.extend(parts.into_iter().map(|p| (i, p))),
-                        Ok((_, name, Err(e))) => drop(tx.send(Msg::Log(format!("{name} search failed: {e:#}")))),
-                        Err(_) => drop(tx.send(Msg::Log("A search source crashed".into()))),
-                    }
-                }
-            });
-            let _ = tx.send(Msg::SearchDone(results));
-            ctx.request_repaint();
-        });
-    }
-
-    /// Downloads a search result's CAD, or opens its CAD page if the source has none to download.
-    fn get_result(&mut self, i: usize, ctx: egui::Context) {
-        let Some((src, part)) = self.search.results.get(i).cloned() else { return };
-        self.busy = true;
-        let (tx, sources) = (self.tx.clone(), self.sources.clone());
-        std::thread::spawn(move || {
-            let source = &sources[src];
-            let work = new_work_dir();
-            // Sources write their files straight into `work`.
-            let _ = std::fs::create_dir_all(&work);
-            match source.fetch(&part, &work) {
-                Ok(Some(p)) => {
-                    for w in &p.warnings {
-                        let _ = tx.send(Msg::Log(format!("{}: {}: {w}", source.name(), p.mpn)));
-                    }
-                    let _ = tx.send(Msg::Fetched(p, work));
-                }
-                Ok(None) => {
-                    let _ = std::fs::remove_dir_all(&work);
-                    match source.cad_page_url(&part) {
-                        Some(url) => {
-                            let _ = open::that(&url);
-                            let _ = tx.send(Msg::CadOpened(part.clone()));
-                            let _ = tx.send(Msg::Log(format!("Opened {url}. Download the KiCad ZIP and it will appear under Import.")));
-                        }
-                        None => drop(tx.send(Msg::Log(format!("{} has no CAD files for {}", source.name(), part.mpn)))),
-                    }
-                }
-                Err(e) => {
-                    let _ = std::fs::remove_dir_all(&work);
-                    let _ = tx.send(Msg::Log(format!("{}: could not get {}: {e:#}", source.name(), part.mpn)));
-                }
-            }
-            let _ = tx.send(Msg::FetchDone);
-            ctx.request_repaint();
-        });
-    }
-
-    /// Saves the settings and rebuilds the source list from them and the stored credentials.
-    fn apply_sources(&mut self) {
-        self.save_settings();
-        self.sources = Arc::new(klm_core::sources::all(&self.settings));
-        self.search.results.clear();
-    }
-
-    fn test_source(&mut self, name: &'static str, ctx: egui::Context) {
-        self.testing = true;
-        let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            let result = klm_core::sources::build(name).ok_or_else(|| anyhow::anyhow!("keys missing")).and_then(|s| s.search("LM358"));
-            let line = match result {
-                Ok(parts) => format!("{name}: test OK, {} results for LM358", parts.len()),
-                Err(e) => format!("{name}: test failed: {e:#}"),
-            };
-            let _ = tx.send(Msg::Log(line));
-            let _ = tx.send(Msg::TestDone);
-            ctx.request_repaint();
-        });
-    }
-
-    fn settings_dialog(&mut self, ctx: &egui::Context) {
-        if !self.settings_open {
-            return;
-        }
-        let mut action = SettingsAction::None;
-        let modal = egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
-            ui.set_width(560.0);
-            ui.set_max_height(520.0);
-            action = self.settings_view.show(ui, &mut self.settings, self.testing);
-        });
-        if modal.should_close() {
-            self.settings_open = false;
-        }
-        match action {
-            SettingsAction::None => {}
-            SettingsAction::Rebuild => self.apply_sources(),
-            SettingsAction::Test(name) => self.test_source(name, ctx.clone()),
-            SettingsAction::Note(n) => self.log.push(n),
-            SettingsAction::Downloads(dir) => {
-                self.settings.downloads_dir = dir;
-                self.save_settings();
-                self.watch_stop.store(true, Ordering::Relaxed);
-                self.start_watcher(ctx.clone());
-            }
-        }
-    }
-
-    fn open_dialog(&mut self, i: usize) {
-        let mut categories: Vec<String> = klm_core::categories::DEFAULT.iter().map(|s| s.to_string()).collect();
-        for root in self.roots() {
-            categories.extend(root.categories());
-        }
-        categories.sort();
-        categories.dedup();
-        self.dialog = Some(ImportDialog::new(i, &self.pending[i].part, categories, self.global_root().is_some(), self.project.is_some()));
-    }
-
-    fn handle_messages(&mut self) {
-        while let Ok(msg) = self.rx.try_recv() {
-            match msg {
-                Msg::Found(mut part, work) => {
-                    if let Some(i) = self.awaiting_cad.iter().position(|a| matching::same_mpn(&a.mpn, &part.mpn)) {
-                        matching::merge(&mut part, &self.awaiting_cad.remove(i));
-                    }
-                    self.log.push(format!("Found {} ({})", part.mpn, part.source));
-                    self.pending.push(Pending { part, work });
-                }
-                Msg::Log(s) => self.log.push(s),
-                Msg::Imported { index, notes } => {
-                    self.busy = false;
-                    self.log.extend(notes);
-                    self.library.refresh();
-                    if index < self.pending.len() {
-                        let p = self.pending.remove(index);
-                        let _ = std::fs::remove_dir_all(p.work);
-                    }
-                }
-                Msg::ImportFailed(e) => {
-                    self.busy = false;
-                    self.log.push(format!("Import failed: {e}"));
-                }
-                Msg::SearchDone(results) => {
-                    self.search.searching = false;
-                    self.log.push(format!("{} search results", results.len()));
-                    self.search.results = results;
-                }
-                Msg::Fetched(part, work) => {
-                    self.pending.push(Pending { part, work });
-                    self.tab = Tab::Import;
-                    self.open_dialog(self.pending.len() - 1);
-                }
-                Msg::FetchDone => self.busy = false,
-                Msg::CadOpened(part) => self.awaiting_cad.push(part),
-                Msg::TestDone => self.testing = false,
+                cx.still_open = true;
+            } else if let Some(msg) = cx.blocked.take() {
+                cx.when_kicad_closed(msg);
             }
         }
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
+        let cx = &mut self.cx;
         egui::Grid::new("roots").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
             ui.strong("Global library");
-            match &self.settings.global_root {
+            match &cx.settings.global_root {
                 Some(g) => ui.label(g.display().to_string()),
                 None => ui.weak("not set up"),
             };
             ui.horizontal(|ui| {
-                if self.global_root().is_some()
+                if cx.global_root().is_some()
                     && ui.button("Change location…").on_hover_text("Move the library, or point KLM at where you moved it").clicked()
                 {
                     if let Some(d) = rfd::FileDialog::new().set_title("New location for the global library").pick_folder() {
-                        self.when_kicad_closed(Blocked::MoveGlobal(d), &ui.ctx().clone());
+                        cx.when_kicad_closed(Msg::MoveGlobal(d));
                     }
                 }
                 if ui.button("Re-link libraries").on_hover_text("Add any KLM libraries missing from KiCad's library list").clicked() {
-                    self.when_kicad_closed(Blocked::Relink, &ui.ctx().clone());
+                    cx.when_kicad_closed(Msg::Relink);
                 }
             });
             ui.end_row();
 
             ui.strong("Project");
-            match &self.project {
+            match &cx.project {
                 Some(p) => ui.label(p.display().to_string()),
                 None => ui.weak("none chosen"),
             };
             ui.horizontal(|ui| {
                 if ui.button("Choose project…").clicked() {
                     if let Some(f) = rfd::FileDialog::new().add_filter("KiCad project", &["kicad_pro"]).pick_file() {
-                        self.project = Some(project_dir(&f));
-                        self.settings.last_project = self.project.clone();
-                        self.save_settings();
-                        self.library.refresh();
+                        cx.project = Some(project_dir(&f));
+                        cx.settings.last_project = cx.project.clone();
+                        cx.save_settings();
+                        cx.send(Msg::Library(library::Msg::Refresh));
                     }
                 }
-                if self.project.is_some() && ui.button("Clear").clicked() {
-                    self.project = None;
-                    self.library.refresh();
+                if cx.project.is_some() && ui.button("Clear").clicked() {
+                    cx.project = None;
+                    cx.send(Msg::Library(library::Msg::Refresh));
                 }
             });
             ui.end_row();
         });
-    }
-
-    fn setup_screen(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Set up your global library");
-        ui.label("Parts imported to \"Global\" go here, available in every KiCad project.");
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.setup_path).desired_width(480.0));
-            if ui.button("Browse…").clicked() {
-                if let Some(d) = rfd::FileDialog::new().pick_folder() {
-                    self.setup_path = d.display().to_string();
-                }
-            }
-        });
-        ui.add_space(8.0);
-        let can = self.kicad_config.is_ok() && !self.setup_path.trim().is_empty();
-        if ui.add_enabled(can, egui::Button::new("Create global library")).clicked() {
-            self.create_global_library();
-        }
-    }
-
-    fn parts_screen(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.horizontal(|ui| {
-            ui.strong("Parts to import");
-            if ui.button("Import ZIP…").clicked() {
-                if let Some(f) = rfd::FileDialog::new().add_filter("Vendor ZIP", &["zip"]).pick_file() {
-                    let tx = self.tx.clone();
-                    let ctx = ctx.clone();
-                    std::thread::spawn(move || {
-                        scan_zip(&f, &tx);
-                        ctx.request_repaint();
-                    });
-                }
-            }
-            if self.busy {
-                ui.spinner();
-            }
-        });
-        ui.weak("Download a part's KiCad ZIP from SnapMagic, Ultra Librarian or SamacSys and it appears here.");
-        ui.add_space(6.0);
-        if self.pending.is_empty() {
-            ui.label("Nothing waiting.");
-        }
-        let mut open = None;
-        let mut dismiss = None;
-        egui::Grid::new("pending").striped(true).num_columns(4).spacing([16.0, 6.0]).show(ui, |ui| {
-            for (i, p) in self.pending.iter().enumerate() {
-                ui.strong(&p.part.mpn);
-                ui.label(&p.part.manufacturer);
-                ui.weak(&p.part.source);
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(!self.busy, egui::Button::new("Import…")).clicked() {
-                        open = Some(i);
-                    }
-                    if ui.add_enabled(!self.busy, egui::Button::new("Dismiss")).clicked() {
-                        dismiss = Some(i);
-                    }
-                });
-                ui.end_row();
-            }
-        });
-        if let Some(i) = open {
-            self.open_dialog(i);
-        }
-        if let Some(i) = dismiss {
-            let p = self.pending.remove(i);
-            let _ = std::fs::remove_dir_all(p.work);
-        }
     }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_messages();
-        let ctx = ui.ctx().clone();
 
         egui::Panel::top("top").show(ui, |ui| {
             ui.add_space(6.0);
@@ -675,98 +326,33 @@ impl eframe::App for App {
         });
         egui::Panel::bottom("log").resizable(true).default_size(120.0).show(ui, |ui| {
             egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink(false).show(ui, |ui| {
-                for line in &self.log {
+                for line in &self.cx.log {
                     ui.label(line);
                 }
             });
         });
         egui::CentralPanel::default_margins().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Search, RichText::new("Search").heading());
-                ui.selectable_value(&mut self.tab, Tab::Import, RichText::new("Import").heading());
-                ui.selectable_value(&mut self.tab, Tab::Library, RichText::new("Library").heading());
+                ui.selectable_value(&mut self.cx.tab, Tab::Search, RichText::new("Search").heading());
+                ui.selectable_value(&mut self.cx.tab, Tab::Import, RichText::new("Import").heading());
+                ui.selectable_value(&mut self.cx.tab, Tab::Library, RichText::new("Library").heading());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Settings…").clicked() {
-                        self.settings_open = true;
+                        self.settings_tab.open();
                     }
                 });
             });
             ui.separator();
-            match self.tab {
-                Tab::Search => {
-                    let names: Vec<&str> = self.sources.iter().map(|s| s.name()).collect();
-                    match self.search.show(ui, &names, self.busy) {
-                        SearchAction::None => {}
-                        SearchAction::Search(q) => self.run_search(q, ctx.clone()),
-                        SearchAction::Get(i) => self.get_result(i, ctx.clone()),
-                    }
-                }
-                Tab::Import => {
-                    if self.settings.global_root.is_none() {
-                        self.setup_screen(ui);
-                        ui.separator();
-                    }
-                    self.parts_screen(ui, &ctx);
-                }
-                Tab::Library => {
-                    let (global, project) = (self.global_root(), self.project_root());
-                    match self.library.show(ui, global.as_ref(), project.as_ref()) {
-                        LibraryAction::None => {}
-                        LibraryAction::Attach { scope, category, name, path } => self.attach_dialog = Some(AttachDialog::new(scope, category, name, path)),
-                        LibraryAction::CopyToProject { category, name, overwrite } => {
-                            // Only a library new to the project touches KiCad's tables.
-                            if project.as_ref().is_some_and(|p| p.needs_link(&category)) {
-                                self.when_kicad_closed(Blocked::CopyToProject { category, name, overwrite }, &ctx);
-                            } else {
-                                self.copy_to_project(&category, &name, overwrite);
-                            }
-                        }
-                    }
-                }
+            match self.cx.tab {
+                Tab::Search => self.search_tab.ui(ui, &mut self.cx),
+                Tab::Import => self.import_tab.ui(ui, &mut self.cx),
+                Tab::Library => self.library_tab.ui(ui, &mut self.cx),
             }
         });
 
-        let (global, project) = (self.global_root(), self.project_root());
-        if let Some(dialog) = &mut self.dialog {
-            match dialog.show(&ctx, global.as_ref(), project.as_ref()) {
-                DialogAction::None => {}
-                DialogAction::Cancel => self.dialog = None,
-                DialogAction::Import { part, category, targets } => {
-                    let index = dialog.index;
-                    self.dialog = None;
-                    let action = Blocked::Import { index, part, category: category.clone(), targets: targets.clone() };
-                    // Only new libraries touch KiCad's tables; adding to a linked one is safe while it's open.
-                    if targets.iter().any(|r| r.needs_link(&category)) {
-                        self.when_kicad_closed(action, &ctx);
-                    } else if let Blocked::Import { index, part, category, targets } = action {
-                        self.run_import(index, part, category, targets, ctx.clone());
-                    }
-                }
-            }
-        }
-        if let Some(dialog) = &mut self.attach_dialog {
-            match dialog.show(&ctx, global.as_ref(), project.as_ref()) {
-                AttachAction::None => {}
-                AttachAction::Cancel => self.attach_dialog = None,
-                AttachAction::Attach { targets } => {
-                    let (scope, category, name, path) = (dialog.from, dialog.category.clone(), dialog.name.clone(), dialog.path.clone());
-                    self.attach_dialog = None;
-                    let from = match scope {
-                        Scope::Global => global.clone(),
-                        Scope::Project => project.clone(),
-                    };
-                    match from {
-                        // Only a library that doesn't hold the part yet can be new to KiCad's tables.
-                        Some(from) if targets.iter().any(|t| !t.has_part(&category, &name) && t.needs_link(&category)) => {
-                            self.when_kicad_closed(Blocked::Attach { from, targets, category, name, path }, &ctx);
-                        }
-                        Some(from) => self.attach(&from, &targets, &category, &name, &path),
-                        None => self.log.push(format!("Could not add the file to {name}: its library is not available")),
-                    }
-                }
-            }
-        }
-        self.settings_dialog(&ctx);
-        self.kicad_open_prompt(&ctx);
+        self.import_tab.dialogs(&mut self.cx);
+        self.library_tab.dialogs(&mut self.cx);
+        self.settings_tab.dialogs(&mut self.cx);
+        self.kicad_open_prompt();
     }
 }
