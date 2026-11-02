@@ -1,0 +1,13 @@
+{
+  "$schema": "https://go.kicad.org/pcm/schemas/v2",
+  "name": "KiCad Library Manager",
+  "description": "Toolbar button that opens KiCad Library Manager for the current project",
+  "description_full": "Adds a Library Manager button to the PCB editor toolbar. It starts the bundled klm.exe on the open board's project, where you can import parts (symbol, footprint, 3D model, datasheet, sim model) into a global or project library. Needs KiCad's API enabled (Preferences > Plugins).",
+  "identifier": "com.github.jconnor20.kicad-library-manager",
+  "type": "plugin",
+  "author": { "name": "Jconnor20" },
+  "license": "GPL-3.0-or-later",
+  "versions": [
+    { "version": "0.0.0", "status": "stable", "kicad_version": "9.0", "runtime": "ipc" }
+  ]
+}

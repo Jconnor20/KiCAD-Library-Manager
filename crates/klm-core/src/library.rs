@@ -29,6 +29,28 @@ pub enum Check {
     Broken,
 }
 
+/// What [`LibraryRoot::attach_file`] adds to a part.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AttachKind {
+    Datasheet,
+    Sim,
+    Model,
+}
+
+/// Extensions [`AttachKind::of`] recognises (for file pickers).
+pub const ATTACH_EXTENSIONS: &[&str] = &["pdf", "lib", "cir", "sub", "sp", "spi", "ibs", "step", "stp", "wrl"];
+
+impl AttachKind {
+    pub fn of(path: &Path) -> Option<Self> {
+        match path.extension()?.to_str()?.to_lowercase().as_str() {
+            "pdf" => Some(Self::Datasheet),
+            "lib" | "cir" | "sub" | "sp" | "spi" | "ibs" => Some(Self::Sim),
+            "step" | "stp" | "wrl" => Some(Self::Model),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PartStatus {
     pub category: String,
@@ -41,6 +63,8 @@ pub struct PartStatus {
     pub model: Check,
     pub datasheet: Check,
     pub sim: Check,
+    /// What "open datasheet" opens: a URL, or the local PDF if it exists.
+    pub datasheet_target: Option<String>,
     /// The category library is listed in KiCad's tables.
     pub in_kicad: bool,
 }
@@ -197,6 +221,7 @@ impl LibraryRoot {
                 let field = |k: &str| property(sym, k).unwrap_or("").trim().to_string();
                 let name = sym.arg(0).unwrap_or_default().to_string();
                 let (footprint, model) = self.check_footprint(&cat, &field("Footprint"));
+                let datasheet = self.check_file(&field("Datasheet"));
                 out.push(PartStatus {
                     category: cat.clone(),
                     mpn: Some(field("MPN")).filter(|m| !m.is_empty()).unwrap_or_else(|| name.clone()),
@@ -205,13 +230,23 @@ impl LibraryRoot {
                     description: field("Description"),
                     footprint,
                     model,
-                    datasheet: self.check_file(&field("Datasheet")),
+                    datasheet_target: match datasheet {
+                        Check::Ok => Some(self.resolve(&field("Datasheet"))),
+                        Check::Link if field("Datasheet").starts_with("http") => Some(field("Datasheet")),
+                        _ => None,
+                    },
+                    datasheet,
                     sim: self.check_file(&field("Sim.Library")),
                     in_kicad,
                 });
             }
         }
         out
+    }
+
+    /// A path from a KiCad file with `${KIPRJMOD}` filled in.
+    fn resolve(&self, value: &str) -> String {
+        value.replace("${KIPRJMOD}", &self.table_dir.to_string_lossy())
     }
 
     fn check_file(&self, value: &str) -> Check {
@@ -221,7 +256,7 @@ impl LibraryRoot {
         if value.starts_with("http") {
             return Check::Link;
         }
-        let path = value.replace("${KIPRJMOD}", &self.table_dir.to_string_lossy());
+        let path = self.resolve(value);
         if path.contains("${") {
             Check::Link // another KiCad path variable; can't resolve it here
         } else if Path::new(&path).is_file() {
@@ -368,8 +403,8 @@ impl LibraryRoot {
             set_property(&mut symbol, "Footprint", &format!("{nick}:{fp}"));
         }
         if let Some(ds) = &part.datasheet_file {
-            let name = format!("{}.pdf", sanitize(&format!("{}_{}", part.manufacturer, mpn)).trim_start_matches('_'));
-            std::fs::copy(ds, self.dir.join("datasheets").join(&name))?;
+            let name = datasheet_name(&part.manufacturer, mpn);
+            copy_file(ds, &self.dir.join("datasheets").join(&name))?;
             set_property(&mut symbol, "Datasheet", &format!("{var}/datasheets/{name}"));
         } else if !part.datasheet_url.is_empty() {
             set_property(&mut symbol, "Datasheet", &part.datasheet_url);
@@ -385,31 +420,168 @@ impl LibraryRoot {
             set_property(&mut symbol, k, v);
         }
         if let Some(sim) = part.sim_files.first() {
-            let ext = sim.extension().and_then(|e| e.to_str()).unwrap_or("lib");
-            let name = format!("{mpn}.{ext}");
-            let dest = self.dir.join("simulation").join(&name);
-            std::fs::copy(sim, &dest)?;
-            set_property(&mut symbol, "Sim.Library", &format!("{var}/simulation/{name}"));
-            if let Some((kind, model)) = spice_model_name(&std::fs::read_to_string(&dest).unwrap_or_default()) {
-                set_property(&mut symbol, "Sim.Name", &model);
-                if kind == "subckt" {
-                    set_property(&mut symbol, "Sim.Device", "SUBCKT");
+            self.attach_sim(&mut symbol, sim, mpn)?;
+        }
+
+        merge_symbol(&self.symbol_lib(cat), &vendor_lib, symbol)
+    }
+
+    /// Copies a SPICE file into `simulation/` and points the symbol's `Sim.*` fields at it.
+    fn attach_sim(&self, symbol: &mut Sexpr, src: &Path, mpn: &str) -> Result<()> {
+        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("lib");
+        let name = format!("{mpn}.{ext}");
+        let dest = self.dir.join("simulation").join(&name);
+        copy_file(src, &dest)?;
+        set_property(symbol, "Sim.Library", &format!("{}/simulation/{name}", self.var()));
+        if let Some((kind, model)) = spice_model_name(&std::fs::read_to_string(&dest).unwrap_or_default()) {
+            set_property(symbol, "Sim.Name", &model);
+            if kind == "subckt" {
+                set_property(symbol, "Sim.Device", "SUBCKT");
+            }
+        }
+        Ok(())
+    }
+
+    fn load_symbol(&self, cat: &str, name: &str) -> Result<(Sexpr, usize)> {
+        let text = std::fs::read_to_string(self.symbol_lib(cat)).with_context(|| format!("no library {}", self.nickname(cat)))?;
+        let lib = sexpr::parse(&text)?;
+        let idx = lib.items().iter().position(|c| c.head() == Some("symbol") && c.arg(0) == Some(name));
+        Ok((lib, idx.with_context(|| format!("{name} is not in {}", self.nickname(cat)))?))
+    }
+
+    fn footprint_file(&self, cat: &str, name: &str) -> PathBuf {
+        self.dir.join("footprints").join(format!("{cat}.pretty")).join(format!("{name}.kicad_mod"))
+    }
+
+    /// Adds a datasheet, SPICE model or 3D model to a part already in the library, filed like an import would.
+    /// A 3D model goes on the part's footprint, so parts sharing that footprint get it too.
+    pub fn attach_file(&self, category: &str, symbol_name: &str, kind: AttachKind, path: &Path) -> Result<()> {
+        let cat = sanitize(category);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_lowercase();
+        // Sim files may have any extension; the other two kinds must match what KiCad can read.
+        if AttachKind::of(path).map_or(kind != AttachKind::Sim, |k| k != kind) {
+            bail!("{} can't be added as that kind of file", path.display());
+        }
+        self.ensure_layout()?;
+        let (mut lib, idx) = self.load_symbol(&cat, symbol_name)?;
+        let symbol = &mut lib.items_mut()[idx];
+        let var = self.var();
+        match kind {
+            AttachKind::Datasheet => {
+                let name = datasheet_name(property(symbol, "Manufacturer").unwrap_or(""), symbol_name);
+                copy_file(path, &self.dir.join("datasheets").join(&name))?;
+                set_property(symbol, "Datasheet", &format!("{var}/datasheets/{name}"));
+            }
+            AttachKind::Sim => self.attach_sim(symbol, path, symbol_name)?,
+            AttachKind::Model => {
+                let nick = self.nickname(&cat);
+                let fp_name = property(symbol, "Footprint")
+                    .and_then(|f| f.strip_prefix(&format!("{nick}:")))
+                    .with_context(|| format!("{symbol_name} has no footprint in {nick}, so there is nothing to put the 3D model on"))?;
+                let fp_path = self.footprint_file(&cat, fp_name);
+                let mut fp = sexpr::parse(&std::fs::read_to_string(&fp_path).with_context(|| format!("reading {}", fp_path.display()))?)?;
+                let shapes = format!("3dmodels/{cat}.3dshapes/{fp_name}.{ext}");
+                copy_file(path, &self.dir.join(&shapes))?;
+                // A model re-attached in another format replaces the old one instead of leaving it behind.
+                for other in ["step", "stp", "wrl"].into_iter().filter(|e| *e != ext) {
+                    let _ = std::fs::remove_file(self.dir.join(format!("3dmodels/{cat}.3dshapes/{fp_name}.{other}")));
                 }
+                set_footprint(&mut fp, fp_name, Some(&format!("{var}/{shapes}")));
+                return write_atomic(&fp_path, &sexpr::to_string(&fp));
+            }
+        }
+        write_atomic(&self.symbol_lib(&cat), &sexpr::to_string(&lib))
+    }
+
+    /// Where the file `value` (a path inside this root) lands in `target`, as (source, destination, new value).
+    /// None for URLs, other libraries and files that aren't there.
+    fn carry(&self, value: &str, target: &LibraryRoot) -> Option<(PathBuf, PathBuf, String)> {
+        let rel = value.strip_prefix(&format!("{}/", self.var()))?;
+        let src = self.dir.join(rel);
+        src.is_file().then(|| (src, target.dir.join(rel), format!("{}/{rel}", target.var())))
+    }
+
+    /// Copies one part (symbol, footprint, 3D model, datasheet, sim model) into `target` and links the
+    /// target's category libraries in KiCad. Returns true if that library was new to KiCad's tables.
+    /// Refuses to replace a part, or a different footprint of the same name, unless `overwrite`.
+    pub fn copy_part_to(&self, category: &str, symbol_name: &str, target: &LibraryRoot, overwrite: bool) -> Result<bool> {
+        let cat = sanitize(category);
+        let (lib, idx) = self.load_symbol(&cat, symbol_name)?;
+        let mut symbol = lib.items()[idx].clone();
+        if !overwrite && target.has_part(&cat, symbol_name) {
+            bail!("{symbol_name} is already in {}", target.nickname(&cat));
+        }
+        let mut files = vec![];
+        let mut carry = |value: &str| {
+            let (src, dest, new) = self.carry(value, target)?;
+            files.push((src, dest));
+            Some(new)
+        };
+
+        let mut footprint = None;
+        let field = property(&symbol, "Footprint").unwrap_or("").to_string();
+        if let Some(fp_name) = field.strip_prefix(&format!("{}:", self.nickname(&cat))) {
+            let src = self.footprint_file(&cat, fp_name);
+            let mut fp = sexpr::parse(&std::fs::read_to_string(&src).with_context(|| format!("reading {}", src.display()))?)?;
+            for model in fp.items_mut().iter_mut().filter(|c| c.head() == Some("model")) {
+                if let Some(new) = model.arg(0).and_then(&mut carry) {
+                    model.set_arg(0, Sexpr::str(&new));
+                }
+            }
+            let (dest, text) = (target.footprint_file(&cat, fp_name), sexpr::to_string(&fp));
+            if !overwrite && dest.exists() && !same_geometry(&std::fs::read_to_string(&dest)?, &text) {
+                bail!("{} already has a different footprint called {fp_name}", target.nickname(&cat));
+            }
+            set_property(&mut symbol, "Footprint", &format!("{}:{fp_name}", target.nickname(&cat)));
+            footprint = Some((dest, text));
+        }
+        for key in ["Datasheet", "Sim.Library"] {
+            if let Some(new) = property(&symbol, key).and_then(&mut carry) {
+                set_property(&mut symbol, key, &new);
             }
         }
 
-        // Merge into the category library, replacing any older copy of this part.
-        let lib_path = self.symbol_lib(cat);
-        let mut lib = if lib_path.exists() {
-            sexpr::parse(&std::fs::read_to_string(&lib_path)?)?
-        } else {
-            // New library: reuse the vendor file's header (version, generator) so formats match.
-            Sexpr::List(vendor_lib.items().iter().filter(|c| c.head() != Some("symbol")).cloned().collect())
-        };
-        lib.items_mut().retain(|c| !(c.head() == Some("symbol") && c.arg(0) == Some(mpn)));
-        lib.items_mut().push(symbol);
-        write_atomic(&lib_path, &sexpr::to_string(&lib))
+        target.ensure_layout()?;
+        for (src, dest) in files {
+            copy_file(&src, &dest)?;
+        }
+        if let Some((dest, text)) = footprint {
+            std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")))?;
+            write_atomic(&dest, &text)?;
+        }
+        merge_symbol(&target.symbol_lib(&cat), &lib, symbol)?;
+        target.link(&cat)
     }
+}
+
+/// Adds `symbol` to the library file at `path`, replacing any symbol of that name. A new file takes
+/// its header (version, generator) from `header_from` so formats match.
+fn merge_symbol(path: &Path, header_from: &Sexpr, symbol: Sexpr) -> Result<()> {
+    let mut lib = if path.exists() {
+        sexpr::parse(&std::fs::read_to_string(path)?)?
+    } else {
+        Sexpr::List(header_from.items().iter().filter(|c| c.head() != Some("symbol")).cloned().collect())
+    };
+    let name = symbol.arg(0).unwrap_or_default().to_string();
+    lib.items_mut().retain(|c| !(c.head() == Some("symbol") && c.arg(0) == Some(name.as_str())));
+    lib.items_mut().push(symbol);
+    write_atomic(path, &sexpr::to_string(&lib))
+}
+
+fn datasheet_name(manufacturer: &str, mpn: &str) -> String {
+    format!("{}.pdf", sanitize(&format!("{manufacturer}_{mpn}")).trim_start_matches('_'))
+}
+
+/// `fs::copy` that creates the folder and does nothing when `src` already is `dest` (copying a file onto itself empties it).
+fn copy_file(src: &Path, dest: &Path) -> Result<()> {
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if dest.exists() && std::fs::canonicalize(src)? == std::fs::canonicalize(dest)? {
+        return Ok(());
+    }
+    std::fs::copy(src, dest).with_context(|| format!("copying {} to {}", src.display(), dest.display()))?;
+    Ok(())
 }
 
 fn scratch_dir() -> Result<PathBuf> {
@@ -557,6 +729,15 @@ mod tests {
         assert_eq!(models[0].arg(0), Some("${KLM_LIB}/3dmodels/ICs.3dshapes/Y.step"));
         assert!(sexpr::to_string(models[0]).contains("xyz 0 0 1"));
         assert_eq!(fp.arg(0), Some("Y"));
+    }
+
+    #[test]
+    fn attach_kind_from_extension() {
+        assert_eq!(AttachKind::of(Path::new("a/DS.PDF")), Some(AttachKind::Datasheet));
+        assert_eq!(AttachKind::of(Path::new("x.cir")), Some(AttachKind::Sim));
+        assert_eq!(AttachKind::of(Path::new("x.stp")), Some(AttachKind::Model));
+        assert_eq!(AttachKind::of(Path::new("x.txt")), None);
+        assert!(ATTACH_EXTENSIONS.iter().all(|e| AttachKind::of(Path::new(&format!("f.{e}"))).is_some()));
     }
 
     #[test]

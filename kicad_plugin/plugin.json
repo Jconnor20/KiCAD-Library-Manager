@@ -1,0 +1,19 @@
+{
+  "$schema": "https://go.kicad.org/api/schemas/v1",
+  "identifier": "com.github.jconnor20.kicad-library-manager",
+  "name": "KiCad Library Manager",
+  "description": "Opens KiCad Library Manager for the current project",
+  "runtime": { "type": "python", "min_version": "3.9" },
+  "actions": [
+    {
+      "identifier": "open-klm",
+      "name": "Library Manager",
+      "description": "Open KiCad Library Manager for this project",
+      "show-button": true,
+      "scopes": ["pcb"],
+      "entrypoint": "launch.py",
+      "icons-light": ["klm-24.png"],
+      "icons-dark": ["klm-24.png"]
+    }
+  ]
+}
