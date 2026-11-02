@@ -49,7 +49,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - Core: split `library.rs` into `library/{mod, import, status, attach, copy, relocate}.rs`. No behaviour change.
   - **Done when:** all existing tests pass unchanged and every tab works as before.
   - Layout: GUI `main.rs` (shell: `AppCtx`, top bar, log, close-KiCad prompt) + `tabs/{search,import,library,settings}.rs`, each with its own state, UI and `Msg` enum wrapped by one top-level `Msg`; core `library/{mod,import,status,attach,copy,relocate,fields}.rs` with the public API unchanged.
-- [ ] **W0.3 Part store and CLI skeleton** (M)
+- [x] **W0.3 Part store and CLI skeleton** (M)
   - `klm-core/src/store.rs`: a SQLite database (`rusqlite` with the `bundled` feature) in the user config folder. Tables for parts, alternatives, tags, search cache and history. Can be rebuilt from the libraries at any time.
   - New `crates/klm-cli` with a `klm-cli` binary and three basic commands:
     - `check`: prints the Library-tab status as text or JSON.

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/klm-core", "crates/klm-gui"]
+members = ["crates/klm-core", "crates/klm-gui", "crates/klm-cli"]
 resolver = "2"
 
 [workspace.package]

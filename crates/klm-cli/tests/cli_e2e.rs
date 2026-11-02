@@ -1,0 +1,92 @@
+//! Runs the real binary against temp settings and a temp KiCad config. Skipped when `kicad-cli`
+//! isn't installed, since importing upgrades the files through it.
+
+use klm_core::kicad_env;
+use std::io::Write;
+use std::path::Path;
+use std::process::{Command, Output};
+
+const SYMBOL_V6: &str = r#"(kicad_symbol_lib (version 20211014) (generator kicad_symbol_editor)
+  (symbol "TESTPART" (in_bom yes) (on_board yes)
+    (property "Reference" "U" (id 0) (at 0 2.54 0) (effects (font (size 1.27 1.27))))
+    (property "Value" "TESTPART" (id 1) (at 0 -2.54 0) (effects (font (size 1.27 1.27))))
+    (property "Footprint" "Vendor:SOT-23-ACME" (id 2) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))
+    (property "MF" "ACME" (id 3) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))
+    (symbol "TESTPART_1_1" (pin passive line (at -5.08 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27))))))
+  )
+)"#;
+
+const FOOTPRINT_V5: &str = r#"(module SOT-23-ACME (layer F.Cu) (tedit 5A02FF57)
+  (fp_text reference REF** (at 0 -2.5) (layer F.SilkS) (effects (font (size 1 1) (thickness 0.15))))
+  (pad 1 smd rect (at -1 0.95) (size 0.9 0.8) (layers F.Cu F.Paste F.Mask))
+  (model ${OLDVENDOR}/sot23.wrl (offset (xyz 0 0 0.5)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 90)))
+)"#;
+
+fn fresh(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join("klm-cli-e2e").join(name);
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn make_zip(path: &Path) {
+    let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    for (name, body) in [("t.kicad_sym", SYMBOL_V6), ("fp.kicad_mod", FOOTPRINT_V5), ("t.step", "ISO-10303-21;"), ("testpart.pdf", "%PDF")] {
+        z.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        z.write_all(body.as_bytes()).unwrap();
+    }
+    z.finish().unwrap();
+}
+
+fn klm(settings: &Path, config: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_klm-cli"))
+        .env("KLM_SETTINGS", settings)
+        .env("KLM_KICAD_CONFIG", config)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn import_then_check_and_relink() {
+    if !kicad_env::kicad_cli().is_ok_and(|c| Command::new(c).arg("version").output().is_ok_and(|o| o.status.success())) {
+        eprintln!("kicad-cli not found; skipping");
+        return;
+    }
+    let dir = fresh("run");
+    let (config, lib, settings, zip) = (dir.join("config"), dir.join("lib"), dir.join("settings.json"), dir.join("t.zip"));
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(&settings, format!(r#"{{"global_root": {:?}}}"#, lib.to_string_lossy().replace('\\', "/"))).unwrap();
+    make_zip(&zip);
+
+    let out = klm(&settings, &config, &["import", zip.to_str().unwrap(), "--category", "ICs"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let again = klm(&settings, &config, &["import", zip.to_str().unwrap(), "--category", "ICs"]);
+    assert!(!again.status.success(), "duplicate refused without --overwrite");
+    assert!(klm(&settings, &config, &["import", zip.to_str().unwrap(), "--category", "ICs", "--overwrite"]).status.success());
+
+    let out = klm(&settings, &config, &["check", "--json"]);
+    assert!(out.status.success(), "complete library exits 0: {}", String::from_utf8_lossy(&out.stdout));
+    let rows: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    let p = &rows[0];
+    assert_eq!((p["scope"].as_str(), p["category"].as_str(), p["mpn"].as_str()), (Some("global"), Some("ICs"), Some("TESTPART")));
+    assert_eq!([&p["footprint"], &p["model"], &p["datasheet"]], ["ok"; 3]);
+    assert_eq!(p["in_kicad"], true);
+
+    // KiCad dropping our table entries makes the part incomplete until relink restores them.
+    std::fs::write(config.join("sym-lib-table"), "(sym_lib_table\n\t(version 7)\n)\n").unwrap();
+    let out = klm(&settings, &config, &["check"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("incomplete"));
+    assert!(klm(&settings, &config, &["relink"]).status.success());
+    assert!(klm(&settings, &config, &["check"]).status.success());
+}
+
+#[test]
+fn bad_usage_fails() {
+    let dir = fresh("usage");
+    let out = klm(&dir.join("none.json"), &dir, &["check"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("usage:"));
+}

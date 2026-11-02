@@ -1,0 +1,17 @@
+[package]
+name = "klm-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "klm-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+klm-core = { version = "0.1.0", path = "../klm-core" }
+serde_json = "1.0.154"
+
+[dev-dependencies]
+zip = { version = "9.2.2", default-features = false, features = ["deflate"] }
