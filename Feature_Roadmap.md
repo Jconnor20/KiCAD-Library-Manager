@@ -65,7 +65,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - Click a column header to sort, ascending or descending.
   - Filters: source, in stock only, manufacturer, package, maximum unit price, plus a text box that filters within the results.
   - **Done when:** sorting and filtering work on mixed results from LCSC and the distributors. Price is sorted as a number, not as text.
-- [ ] **W1.2 Part checks (R10; Rev "validation")** (M)
+- [x] **W1.2 Part checks (R10; Rev "validation")** (M)
   - **Owns:** `core/checks.rs` (new) and the status columns in `tabs/library.rs`.
   - Checks:
     - every symbol pin number has a footprint pad, and the other way round

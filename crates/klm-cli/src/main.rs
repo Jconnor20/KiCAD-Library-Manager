@@ -4,6 +4,7 @@
 //! ones; tests use them so they never touch the user's files.
 
 use anyhow::{Context, Result, bail};
+use klm_core::checks::{self, Severity};
 use klm_core::library::{Check, LibraryRoot, PartStatus, Scope};
 use klm_core::settings::Settings;
 use klm_core::{categories, kicad_env};
@@ -12,26 +13,27 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  klm-cli check [--json] [--project <dir>]
+  klm-cli check [--json] [--deep] [--project <dir>]
   klm-cli relink [--project <dir>]
   klm-cli import <zip> [--category <c>] [--to global|project] [--project <dir>] [--overwrite]";
 
 #[derive(Debug, PartialEq)]
 enum Command {
-    Check { json: bool, project: Option<PathBuf> },
+    Check { json: bool, deep: bool, project: Option<PathBuf> },
     Relink { project: Option<PathBuf> },
     Import { zip: PathBuf, category: Option<String>, to_project: bool, project: Option<PathBuf>, overwrite: bool },
 }
 
 fn parse(args: &[String]) -> Result<Command> {
     let (name, rest) = args.split_first().context("missing command")?;
-    let (mut json, mut overwrite) = (false, false);
+    let (mut json, mut deep, mut overwrite) = (false, false, false);
     let (mut project, mut category, mut to, mut zip) = (None, None, None, None);
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         let mut value = |flag: &str| it.next().cloned().with_context(|| format!("{flag} needs a value"));
         match a.as_str() {
             "--json" => json = true,
+            "--deep" => deep = true,
             "--overwrite" => overwrite = true,
             "--project" => project = Some(PathBuf::from(value(a)?)),
             "--category" => category = Some(value(a)?),
@@ -47,14 +49,14 @@ fn parse(args: &[String]) -> Result<Command> {
         "check" | "relink" => {
             only_for(zip.is_none() && category.is_none() && to.is_none() && !overwrite, "that argument")?;
             if name == "check" {
-                Ok(Command::Check { json, project })
+                Ok(Command::Check { json, deep, project })
             } else {
-                only_for(!json, "--json")?;
+                only_for(!json && !deep, "--json or --deep")?;
                 Ok(Command::Relink { project })
             }
         }
         "import" => {
-            only_for(!json, "--json")?;
+            only_for(!json && !deep, "--json or --deep")?;
             let to_project = match to.as_deref() {
                 None | Some("global") => false,
                 Some("project") => true,
@@ -111,40 +113,55 @@ fn word(c: Check) -> String {
     format!("{c:?}").to_lowercase()
 }
 
-fn check(json: bool, project: Option<&Path>) -> Result<ExitCode> {
+fn check(json: bool, deep: bool, project: Option<&Path>) -> Result<ExitCode> {
     let mut rows = vec![];
-    let mut any_incomplete = false;
+    let mut failed = false;
     for root in roots(&settings()?, project)? {
+        let mut issues = if deep { checks::check_library(&root) } else { Default::default() };
         for p in root.list_parts() {
+            let issues = issues.remove(&(p.category.clone(), p.name.clone())).unwrap_or_default();
             let bad = incomplete(&p);
-            any_incomplete |= bad;
-            rows.push((root.scope, p, bad));
+            // Warnings from the heuristics don't fail a CI run; errors do.
+            failed |= bad || issues.iter().any(|i| i.severity == Severity::Error);
+            rows.push((root.scope, p, bad, issues));
         }
     }
     let scope = |s: Scope| if s == Scope::Global { "global" } else { "project" };
+    let severity = |i: &checks::Issue| if i.severity == Severity::Error { "error" } else { "warning" };
     if json {
         let out: Vec<_> = rows
             .iter()
-            .map(|(s, p, bad)| {
-                json!({
+            .map(|(s, p, bad, issues)| {
+                let mut row = json!({
                     "scope": scope(*s), "category": p.category, "name": p.name, "mpn": p.mpn, "manufacturer": p.manufacturer,
                     "footprint": word(p.footprint), "model": word(p.model), "datasheet": word(p.datasheet), "sim": word(p.sim),
                     "in_kicad": p.in_kicad, "incomplete": bad,
-                })
+                });
+                if deep {
+                    row["issues"] = issues.iter().map(|i| json!({ "severity": severity(i), "message": i.message })).collect();
+                }
+                row
             })
             .collect();
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
-        for (s, p, bad) in &rows {
+        for (s, p, bad, issues) in &rows {
             println!(
                 "{:<8} {}/{}: footprint {}, 3D {}, datasheet {}, sim {}, in KiCad {}{}",
                 scope(*s), p.category, p.mpn, word(p.footprint), word(p.model), word(p.datasheet), word(p.sim),
                 if p.in_kicad { "yes" } else { "no" }, if *bad { "  <- incomplete" } else { "" },
             );
+            for i in issues {
+                println!("           {}: {}", severity(i), i.message);
+            }
         }
         println!("{} parts, {} incomplete", rows.len(), rows.iter().filter(|r| r.2).count());
+        if deep {
+            let count = |sev| rows.iter().flat_map(|r| &r.3).filter(|i| i.severity == sev).count();
+            println!("{} errors, {} warnings from the part checks", count(Severity::Error), count(Severity::Warning));
+        }
     }
-    Ok(if any_incomplete { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+    Ok(if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
 fn relink(project: Option<&Path>) -> Result<()> {
@@ -197,7 +214,7 @@ fn import_in(root: &LibraryRoot, zip: &Path, category: Option<String>, overwrite
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = parse(&args).and_then(|cmd| match cmd {
-        Command::Check { json, project } => check(json, project.as_deref()),
+        Command::Check { json, deep, project } => check(json, deep, project.as_deref()),
         Command::Relink { project } => relink(project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Import { zip, category, to_project, project, overwrite } => {
             import(&zip, category, to_project, project, overwrite).map(|_| ExitCode::SUCCESS)
@@ -219,10 +236,10 @@ mod tests {
 
     #[test]
     fn parses_commands() {
-        assert_eq!(parse(&args("check")).unwrap(), Command::Check { json: false, project: None });
+        assert_eq!(parse(&args("check")).unwrap(), Command::Check { json: false, deep: false, project: None });
         assert_eq!(
-            parse(&args("check --json --project D:/p")).unwrap(),
-            Command::Check { json: true, project: Some("D:/p".into()) }
+            parse(&args("check --json --deep --project D:/p")).unwrap(),
+            Command::Check { json: true, deep: true, project: Some("D:/p".into()) }
         );
         assert_eq!(parse(&args("relink --project D:/p")).unwrap(), Command::Relink { project: Some("D:/p".into()) });
         assert_eq!(
@@ -237,7 +254,7 @@ mod tests {
 
     #[test]
     fn rejects_bad_arguments() {
-        for bad in ["", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "import a.zip --json", "check --project", "import a.zip b.zip"] {
+        for bad in ["", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "import a.zip b.zip"] {
             assert!(parse(&args(bad)).is_err(), "{bad:?} should fail");
         }
     }

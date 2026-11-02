@@ -1,6 +1,7 @@
 //! KiCad Library Manager core: no UI code lives here, so any front end can drive it.
 
 pub mod categories;
+pub mod checks;
 pub mod convert;
 pub mod credentials;
 pub mod currency;
