@@ -48,7 +48,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - GUI: move each tab into its own module that owns its state and its background messages: `tabs/search.rs`, `tabs/import.rs`, `tabs/library.rs`, `tabs/settings.rs`. `main.rs` keeps only the app shell: top bar, log, KiCad-closed prompt and tab switching.
   - Core: split `library.rs` into `library/{mod, import, status, attach, copy, relocate}.rs`. No behaviour change.
   - **Done when:** all existing tests pass unchanged and every tab works as before.
-- [ ] **W0.3 Part store and CLI skeleton** (M)
+- [x] **W0.3 Part store and CLI skeleton** (M)
   - `klm-core/src/store.rs`: a SQLite database (`rusqlite` with the `bundled` feature) in the user config folder. Tables for parts, alternatives, tags, search cache and history. Can be rebuilt from the libraries at any time.
   - New `crates/klm-cli` with a `klm-cli` binary and three basic commands:
     - `check`: prints the Library-tab status as text or JSON.

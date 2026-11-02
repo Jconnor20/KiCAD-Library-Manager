@@ -36,6 +36,15 @@ Install:
 
 KLM is found next to `launch.py`, else via the `KLM_EXE` environment variable, else `klm` on `PATH`.
 
+## Command line
+`klm-cli` (built by `cargo build --release`) uses the same settings and libraries as the app, for scripts and CI:
+```
+klm-cli check [--json] [--project <dir>]     # per-part footprint / 3D / datasheet / sim / in-KiCad status; exit 1 if any part is incomplete
+klm-cli relink [--project <dir>]             # re-add libraries KiCad dropped; refuses while KiCad is open
+klm-cli import <zip> [--category <c>] [--to global|project] [--project <dir>] [--overwrite]
+```
+`import` guesses the category when `--category` is not given, and refuses to add a new library to KiCad while KiCad is open. `--to project` uses `--project`, else the last project from the app. KLM also keeps a small SQLite database (`parts.db` next to `settings.json`) for alternatives, tags and cached searches. It can be rebuilt from the libraries, and deleting it never affects KiCad.
+
 ## Build and package
 ```
 cargo build --release          # target\release\klm.exe (no console window)
@@ -56,6 +65,7 @@ KiCad keeps its library list in memory and saves over outside changes, so KLM as
 
 ## Code
 - `crates/klm-core`: all logic, with no UI code (sources, KiCad file editing, library layout).
+- `crates/klm-cli`: the `klm-cli` command line.
 - `crates/klm-gui`: egui front end. It only draws and calls `klm-core`, so it can be replaced.
 
 `cargo test` runs the unit tests plus an end-to-end import that has the installed `kicad-cli` render the result.

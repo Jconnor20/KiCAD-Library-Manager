@@ -10,6 +10,7 @@ pub mod part;
 pub mod settings;
 pub mod sexpr;
 pub mod sources;
+pub mod store;
 
 /// Fresh, empty temp folder for a test.
 #[cfg(test)]
