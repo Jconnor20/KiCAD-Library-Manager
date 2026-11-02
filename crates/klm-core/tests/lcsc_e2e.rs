@@ -1,5 +1,6 @@
 //! Converts recorded EasyEDA data (offline) and, when the network and KiCad are available, fetches
-//! C2040 live, imports it into temp libraries and has KiCad render it.
+//! C2040 live, imports it into temp libraries and has KiCad render it. Network or endpoint errors
+//! fail the test with their message; only a missing kicad-cli skips it.
 
 use klm_core::convert::easyeda;
 use klm_core::library::LibraryRoot;
@@ -55,17 +56,12 @@ fn c2040_live_import_renders_in_kicad() {
         return;
     };
     let lcsc = Lcsc::new();
-    let found = match lcsc.search("C2040") {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("offline? skipping: {e:#}");
-            return;
-        }
-    };
+    let found = lcsc.search("C2040").unwrap_or_else(|e| panic!("LCSC search failed: {e:#}"));
     let part = found.into_iter().find(|p| p.supplier_ids[0].1 == "C2040").expect("C2040 in the results");
     assert_eq!(part.mpn, "RP2040");
     let work = fresh("lcsc-work");
-    let part = lcsc.fetch(&part, &work).unwrap().expect("LCSC has CAD");
+    let part = lcsc.fetch(&part, &work).unwrap_or_else(|e| panic!("LCSC fetch failed: {e:#}")).expect("LCSC has CAD");
+    assert!(part.warnings.is_empty(), "fetch reported problems: {:?}", part.warnings);
     assert!(part.symbol_file.is_some() && part.footprint_files.len() == 1);
     assert!(part.model_files.len() == 1, "STEP model");
     assert!(part.datasheet_file.is_some(), "datasheet PDF");

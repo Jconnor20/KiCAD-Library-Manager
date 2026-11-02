@@ -5,7 +5,7 @@
 use super::Source;
 use crate::convert::easyeda;
 use crate::part::Part;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::time::Duration;
@@ -30,21 +30,24 @@ impl Lcsc {
     fn get_bytes(&self, url: &str) -> Result<Vec<u8>> {
         let resp = self.http.get(url).send().with_context(|| format!("requesting {url}"))?;
         if !resp.status().is_success() {
-            bail!("{url}: HTTP {}", resp.status());
+            let hint = if matches!(resp.status().as_u16(), 403 | 429) { " (the server is refusing requests, likely rate limiting; try again in a few minutes)" } else { "" };
+            bail!("{url}: HTTP {}{hint}", resp.status());
         }
         Ok(resp.bytes()?.to_vec())
     }
 
-    /// First candidate that really is a PDF (some "datasheet" links are HTML viewer pages).
-    fn download_pdf(&self, candidates: &[&str], dest: &Path) -> bool {
+    /// Saves the first candidate that really is a PDF (some "datasheet" links are HTML viewer pages);
+    /// the error lists why each one failed.
+    fn download_pdf(&self, candidates: &[&str], dest: &Path) -> Result<()> {
+        let mut why = vec![];
         for url in candidates.iter().filter(|u| u.starts_with("http")) {
-            if let Ok(b) = self.get_bytes(url) {
-                if b.starts_with(b"%PDF") && std::fs::write(dest, b).is_ok() {
-                    return true;
-                }
+            match self.get_bytes(url) {
+                Ok(b) if b.starts_with(b"%PDF") => return Ok(std::fs::write(dest, b)?),
+                Ok(_) => why.push(format!("{url} is not a PDF")),
+                Err(e) => why.push(format!("{e:#}")),
             }
         }
-        false
+        bail!("{}", if why.is_empty() { "no datasheet link".into() } else { why.join("; ") })
     }
 }
 
@@ -115,25 +118,36 @@ impl Source for Lcsc {
         out.symbol_file = Some(sym);
 
         let mut footprint = c.footprint;
-        let model = c.model_uuid.as_deref().and_then(|u| self.get_bytes(&STEP_URL.replace("{uuid}", u)).ok()).filter(|b| b.starts_with(b"ISO-10303"));
-        match model {
-            Some(step) => {
+        let step = match c.model_uuid.as_deref() {
+            None => Err(anyhow!("EasyEDA has no 3D model for this part")),
+            Some(u) => self.get_bytes(&STEP_URL.replace("{uuid}", u)).and_then(|b| if b.starts_with(b"ISO-10303") { Ok(b) } else { bail!("response is not a STEP file") }),
+        };
+        match step {
+            Ok(step) => {
                 let path = work.join(format!("{}.step", c.footprint_name));
                 std::fs::write(&path, step)?;
                 out.model_files = vec![path];
             }
-            // add_part only repoints a model path it is given a file for.
-            None => footprint = footprint.lines().filter(|l| !l.starts_with("(model ")).collect::<Vec<_>>().join("\n"),
+            Err(e) => {
+                out.warnings.push(format!("3D model not downloaded: {e:#}"));
+                // add_part only repoints a model path it is given a file for.
+                footprint = footprint.lines().filter(|l| !l.starts_with("(model ")).collect::<Vec<_>>().join("\n");
+            }
         }
         let fp = work.join(format!("{}.kicad_mod", c.footprint_name));
         std::fs::write(&fp, footprint)?;
         out.footprint_files = vec![fp];
 
         let pdf = work.join(format!("{id}.pdf"));
-        if self.download_pdf(&[&part.datasheet_url, &c.datasheet_url], &pdf) {
-            out.datasheet_file = Some(pdf);
-        } else if out.datasheet_url.is_empty() {
-            out.datasheet_url = c.datasheet_url;
+        let links = [part.datasheet_url.as_str(), c.datasheet_url.as_str()];
+        match self.download_pdf(&links, &pdf) {
+            Ok(()) => out.datasheet_file = Some(pdf),
+            Err(e) => {
+                if out.datasheet_url.is_empty() {
+                    out.datasheet_url = c.datasheet_url;
+                }
+                out.warnings.push(format!("datasheet not downloaded (link kept): {e:#}"));
+            }
         }
         Ok(Some(out))
     }

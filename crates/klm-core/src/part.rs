@@ -23,4 +23,6 @@ pub struct Part {
     pub model_files: Vec<PathBuf>,
     pub datasheet_file: Option<PathBuf>,
     pub sim_files: Vec<PathBuf>,
+    /// Non-fatal problems while fetching (a download that failed); shown to the user.
+    pub warnings: Vec<String>,
 }

@@ -150,7 +150,7 @@ fn graphics(ctx: &mut Ctx, f: &[&str]) -> String {
             if let Some(layer) = layer_name(g(5)) {
                 let (x, y) = (num(g(1)), num(g(2)));
                 let (a, b) = (ctx.pt((x, y)), ctx.pt((x + num(g(3)), y + num(g(4)))));
-                let _ = writeln!(out, "(fp_rect (start {} {}) (end {} {}) {} (fill none) (layer {layer:?}))", fmt(a.0), fmt(a.1), fmt(b.0), fmt(b.1), stroke(0.15));
+                let _ = writeln!(out, "(fp_rect (start {} {}) (end {} {}) {} (fill none) (layer {layer:?}))", fmt(a.0), fmt(a.1), fmt(b.0), fmt(b.1), stroke(num(g(8)) * MM_PER_UNIT));
             }
         }
         "SOLIDREGION" => {
@@ -188,16 +188,17 @@ fn graphics(ctx: &mut Ctx, f: &[&str]) -> String {
 }
 
 /// 3D model placement: the SVGNODE entry whose `c_etype` is `outline3D`. Only its rotation is
-/// used: EasyEDA's STEP files come already positioned relative to the footprint origin (applying
+/// used (parts whose STEP origin is not the footprint centre, e.g. connectors modelled from pin 1, end up displaced): EasyEDA's STEP files come already positioned relative to the footprint origin (applying
 /// `c_origin` and `z` as offsets visibly displaces the body, checked against KiCad's 3D render).
 fn model(ds: &Value) -> Option<(String, String)> {
     let shapes = ds["shape"].as_array()?;
     let attrs = shapes.iter().filter_map(|s| s.as_str()?.strip_prefix("SVGNODE~")).filter_map(|j| serde_json::from_str::<Value>(j).ok()).map(|v| v["attrs"].clone()).find(|a| a["c_etype"] == "outline3D")?;
     let uuid = attrs["uuid"].as_str()?.to_string();
     let rot: Vec<f64> = attrs["c_rotation"].as_str().unwrap_or("").split(',').map(num).collect();
-    let r = |i: usize| fmt(-rot.get(i).copied().unwrap_or(0.0));
+    let r = |i: usize| rot.get(i).copied().unwrap_or(0.0);
+    // Z turns the opposite way in KiCad (checked on SO-8, SOT-23 and USB-C); X is taken as given (checked on one JST XH).
     let text = format!("(model \"model.step\" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz {} {} {})))
-", r(0), r(1), r(2));
+", fmt(r(0)), fmt(r(1)), fmt(-r(2)));
     Some((uuid, text))
 }
 
@@ -289,15 +290,15 @@ mod tests {
     }
 
     #[test]
-    fn model_rotation_is_negated_and_offsets_ignored() {
-        let node = r#"SVGNODE~{"attrs":{"c_etype":"outline3D","uuid":"abc123","c_rotation":"0,0,270","c_origin":"4006.5,3011.2","z":"-11.8"}}"#;
+    fn model_z_rotation_is_negated_and_offsets_ignored() {
+        let node = r#"SVGNODE~{"attrs":{"c_etype":"outline3D","uuid":"abc123","c_rotation":"270,0,270","c_origin":"4006.5,3011.2","z":"-11.8"}}"#;
         let ds = json!({"head": {"x": 4000, "y": 3000}, "shape": [node]});
         let f = convert("T", "", &ds);
         assert_eq!(f.model_uuid.as_deref(), Some("abc123"));
         let x = sexpr::parse(&f.text).unwrap();
         let m = x.child("model").unwrap();
         assert_eq!(atts(m.child("offset").unwrap(), "xyz"), ["0", "0", "0"]);
-        assert_eq!(atts(m.child("rotate").unwrap(), "xyz"), ["0", "0", "-270"]);
+        assert_eq!(atts(m.child("rotate").unwrap(), "xyz"), ["270", "0", "-270"]);
     }
 
     #[test]
@@ -308,7 +309,11 @@ mod tests {
             "SOLIDREGION~99~~M4000 3000 L4010 3000 L4010 3010 Z~solid~g~~~~0",
             "SOLIDREGION~3~~M4000 3000 L4010 3000 L4010 3010 Z~cutout~g~~~~0",
             "TEXT~N~4000~3000~0.6~0~0~3~~6~name~M0 0~1~g~0",
+            "RECT~3913.187~2949.6043~55.118~19.094~3~gge270~0~1~none~~~",
         ]);
+        let rect = x.child("fp_rect").unwrap();
+        assert_eq!(atts(rect, "layer"), ["F.SilkS"]);
+        assert_eq!(atts(rect.child("stroke").unwrap(), "width"), ["0.254"]);
         assert_eq!(x.children("fp_line").count(), 2);
         let arc = x.child("fp_arc").unwrap();
         assert_eq!(atts(arc, "start"), ["2.54", "0"]);

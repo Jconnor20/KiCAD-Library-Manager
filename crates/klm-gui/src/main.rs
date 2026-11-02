@@ -354,7 +354,12 @@ impl App {
             let source = &sources[src];
             let work = new_work_dir();
             match source.fetch(&part, &work) {
-                Ok(Some(p)) => drop(tx.send(Msg::Fetched(p, work))),
+                Ok(Some(p)) => {
+                    for w in &p.warnings {
+                        let _ = tx.send(Msg::Log(format!("{}: {}: {w}", source.name(), p.mpn)));
+                    }
+                    let _ = tx.send(Msg::Fetched(p, work));
+                }
                 Ok(None) => {
                     let _ = std::fs::remove_dir_all(&work);
                     match source.cad_page_url(&part) {

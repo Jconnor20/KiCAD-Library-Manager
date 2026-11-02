@@ -206,7 +206,7 @@ pub fn flatten(sub: &Sub) -> Vec<Pt> {
 /// `"x y x y …"` (as in EasyEDA polylines and tracks) → points.
 pub fn points(s: &str) -> Vec<Pt> {
     let n: Vec<f64> = s.split(|c: char| c.is_whitespace() || c == ',').filter(|t| !t.is_empty()).map(num).collect();
-    n.chunks_exact(2).map(|c| (c[0], c[1])).collect()
+    n.as_chunks::<2>().0.iter().map(|[x, y]| (*x, *y)).collect()
 }
 
 #[cfg(test)]
