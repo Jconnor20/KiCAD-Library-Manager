@@ -90,3 +90,23 @@ fn bad_usage_fails() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("usage:"));
 }
+
+#[test]
+fn dry_run_prints_the_plan_and_writes_nothing() {
+    let dir = fresh("dry_run");
+    let (config, lib, settings, zip) = (dir.join("config"), dir.join("lib"), dir.join("settings.json"), dir.join("t.zip"));
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(&settings, format!(r#"{{"global_root": {:?}}}"#, lib.to_string_lossy().replace('\\', "/"))).unwrap();
+    make_zip(&zip);
+    let second = dir.join("u.zip");
+    std::fs::copy(&zip, &second).unwrap();
+
+    // Planning only reads the ZIPs, so this needs no kicad-cli.
+    let out = klm(&settings, &config, &["import", zip.to_str().unwrap(), second.to_str().unwrap(), "--category", "ICs", "--dry-run"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(text.matches("TESTPART
+").count(), 2, "one entry per ZIP: {text}");
+    assert!(text.contains("add symbol TESTPART in KLM_ICs") && text.contains("add library KLM_ICs to KiCad's tables"), "{text}");
+    assert!(!lib.exists() && std::fs::read_dir(&config).unwrap().count() == 0, "a dry run writes nothing");
+}

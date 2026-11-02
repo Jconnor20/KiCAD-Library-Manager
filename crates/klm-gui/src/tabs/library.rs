@@ -1,6 +1,8 @@
+use super::batch_dialog::{self, BatchDialog, Progress};
 use super::edit_dialog::{EditAction, EditDialog};
 use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui::{self, Color32, RichText};
+use klm_core::batch::{self, Op};
 use klm_core::checks::{self, Issue, Severity};
 use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartEdit, PartStatus, Scope};
 use std::collections::{HashMap, HashSet};
@@ -17,6 +19,9 @@ pub enum Msg {
     Attach { from: LibraryRoot, targets: Vec<LibraryRoot>, category: String, name: String, path: PathBuf },
     /// The datasheet download worker has finished.
     DownloadDone,
+    /// Apply a batch plan (KiCad is closed, or the plan doesn't touch its tables).
+    RunBatch(batch::Plan),
+    Batch(Progress),
 }
 
 /// Something the user asked for on a row; `ui` carries it out and refreshes the view.
@@ -27,6 +32,8 @@ enum Action {
     Attach { scope: Scope, category: String, name: String, path: PathBuf },
     CopyToProject { category: String, name: String, overwrite: bool },
     DownloadDatasheets(LibraryRoot),
+    /// Show the dry run of these operations.
+    Batch(Vec<Op>),
 }
 
 /// Table of the parts in the global or project library, with what each one is missing.
@@ -46,6 +53,7 @@ pub struct LibraryTab {
     /// Ticked rows, as (category, name).
     selected: HashSet<(String, String)>,
     edit_dialog: Option<EditDialog>,
+    batch: Option<BatchDialog>,
 }
 
 impl Default for LibraryTab {
@@ -61,6 +69,7 @@ impl Default for LibraryTab {
             downloading: false,
             selected: HashSet::new(),
             edit_dialog: None,
+            batch: None,
         }
     }
 }
@@ -98,12 +107,20 @@ fn issues_cell(ui: &mut egui::Ui, issues: Option<&Vec<Issue>>) {
 "));
 }
 
+/// The ticked rows in a stable order.
+fn sorted(selected: &HashSet<(String, String)>) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = selected.iter().cloned().collect();
+    targets.sort();
+    targets
+}
+
 impl LibraryTab {
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
         let (global, project) = (cx.global_root(), cx.project_root());
         match self.show(ui, global.as_ref(), project.as_ref()) {
             Action::None => {}
             Action::DownloadDatasheets(root) => self.download_datasheets(root, cx),
+            Action::Batch(ops) => self.batch = Some(BatchDialog::Review(batch::plan(ops, global.as_ref(), project.as_ref()))),
             Action::Edit(targets) => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
@@ -129,6 +146,12 @@ impl LibraryTab {
                 self.downloading = false;
                 self.parts = None;
             }
+            Msg::RunBatch(plan) => batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p))),
+            Msg::Batch(p) => {
+                if batch_dialog::progress(&mut self.batch, p, cx).is_some() {
+                    self.parts = None;
+                }
+            }
             Msg::Edit { scope, targets, edit } => self.edit(scope, &targets, &edit, cx),
             Msg::CopyToProject { category, name, overwrite } => self.copy_to_project(&category, &name, overwrite, cx),
             Msg::Attach { from, targets, category, name, path } => self.attach(&from, &targets, &category, &name, &path, cx),
@@ -138,6 +161,13 @@ impl LibraryTab {
     /// The "add file" popup; shown whatever tab is selected.
     pub fn dialogs(&mut self, cx: &mut AppCtx) {
         let (global, project) = (cx.global_root(), cx.project_root());
+        if let Some(plan) = batch_dialog::show(&mut self.batch, &cx.ctx) {
+            if plan.touches_kicad_tables() {
+                cx.when_kicad_closed(AppMsg::Library(Msg::RunBatch(plan)));
+            } else {
+                batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p)));
+            }
+        }
         if let Some(dialog) = &mut self.edit_dialog {
             match dialog.show(&cx.ctx) {
                 EditAction::None => {}
@@ -267,7 +297,9 @@ impl LibraryTab {
     fn show(&mut self, ui: &mut egui::Ui, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> Action {
         let mut download = false;
         let mut edit_selected = false;
-        ui.horizontal(|ui| {
+        let (mut copy_selected, mut relink_all) = (None, false);
+        let mut attach_to_selected = None;
+        ui.horizontal_wrapped(|ui| {
             let before = self.scope;
             ui.add_enabled_ui(global.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Global, "Global"));
             ui.add_enabled_ui(project.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Project, "Project"));
@@ -282,6 +314,16 @@ impl LibraryTab {
             if ui.button("Refresh").clicked() {
                 self.parts = None;
             }
+            let can_copy = self.scope == Scope::Global && project.is_some() && !self.selected.is_empty();
+            let copy = ui.add_enabled(can_copy, egui::Button::new("Copy selected to project"));
+            if copy.on_hover_text("Copy the ticked parts into the project's library. Shift-click to replace copies already there.").clicked() {
+                copy_selected = Some(ui.input(|i| i.modifiers.shift));
+            }
+            let attach = ui.add_enabled(!self.selected.is_empty(), egui::Button::new("Attach to selected…"));
+            if attach.on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked() {
+                attach_to_selected = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
+            }
+            relink_all = ui.button("Relink all").on_hover_text("Add every KLM library missing from KiCad's library list").clicked();
             download = ui
                 .add_enabled(!self.downloading, egui::Button::new("Download missing datasheets"))
                 .on_hover_text("Save a local PDF for every part whose datasheet is only a web link")
@@ -326,9 +368,16 @@ impl LibraryTab {
 
         let mut action = if download { Action::DownloadDatasheets(root.clone()) } else { Action::None };
         if edit_selected {
-            let mut targets: Vec<_> = self.selected.iter().cloned().collect();
-            targets.sort();
-            action = Action::Edit(targets);
+            action = Action::Edit(sorted(&self.selected));
+        }
+        if let Some(overwrite) = copy_selected {
+            action = Action::Batch(vec![Op::CopyToProject { parts: sorted(&self.selected), overwrite }]);
+        }
+        if let Some(file) = attach_to_selected {
+            action = Action::Batch(vec![Op::Attach { scope: self.scope, file, parts: sorted(&self.selected) }]);
+        }
+        if relink_all {
+            action = Action::Batch(vec![Op::RelinkAll]);
         }
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             // Selection tick box, eight status columns, Checks, then the row buttons.

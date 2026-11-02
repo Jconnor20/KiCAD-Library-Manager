@@ -1,6 +1,8 @@
+use super::batch_dialog::{self, BatchDialog, ImportAllSetup, Progress, SetupAction};
 use super::library;
 use crate::{AppCtx, Msg as AppMsg, Tab, new_work_dir};
 use eframe::egui;
+use klm_core::batch;
 use klm_core::library::LibraryRoot;
 use klm_core::matching;
 use klm_core::part::Part;
@@ -23,6 +25,9 @@ pub enum Msg {
     ImportFailed(String),
     /// The Downloads folder setting changed.
     RestartWatcher,
+    /// Apply an "Import all" plan (KiCad is closed, or the plan doesn't touch its tables).
+    RunBatch(batch::Plan),
+    Batch(Progress),
 }
 
 struct Pending {
@@ -40,6 +45,11 @@ pub struct ImportTab {
     awaiting_cad: Vec<Part>,
     /// Set to stop the current Downloads watcher thread.
     watch_stop: Arc<AtomicBool>,
+    /// "Import all" setup, then its dry run and progress.
+    batch_setup: Option<ImportAllSetup>,
+    batch: Option<BatchDialog>,
+    /// Extracted-files folder of each part in the batch, in batch order, to drop the imported ones from `pending`.
+    batch_works: Vec<PathBuf>,
 }
 
 /// Reads one ZIP on the calling thread and reports what it found.
@@ -97,6 +107,9 @@ impl ImportTab {
                 .unwrap_or_default(),
             awaiting_cad: vec![],
             watch_stop: Arc::new(AtomicBool::new(false)),
+            batch_setup: None,
+            batch: None,
+            batch_works: vec![],
         };
         tab.start_watcher(cx);
         tab
@@ -143,12 +156,40 @@ impl ImportTab {
                 self.watch_stop.store(true, Ordering::Relaxed);
                 self.start_watcher(cx);
             }
+            Msg::RunBatch(plan) => batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Import(Msg::Batch(p))),
+            Msg::Batch(p) => {
+                let Some(results) = batch_dialog::progress(&mut self.batch, p, cx) else { return };
+                for (work, r) in std::mem::take(&mut self.batch_works).into_iter().zip(&results) {
+                    if r.error.is_none() {
+                        self.pending.retain(|p| p.work != work);
+                        let _ = std::fs::remove_dir_all(work);
+                    }
+                }
+                cx.send(AppMsg::Library(library::Msg::Refresh));
+            }
         }
     }
 
     /// The import dialog; shown whatever tab is selected.
     pub fn dialogs(&mut self, cx: &mut AppCtx) {
         let (global, project) = (cx.global_root(), cx.project_root());
+        if let Some(setup) = &mut self.batch_setup {
+            match setup.show(&cx.ctx) {
+                SetupAction::None => {}
+                SetupAction::Cancel => self.batch_setup = None,
+                SetupAction::Preview(ops) => {
+                    self.batch_setup = None;
+                    self.batch = Some(BatchDialog::Review(batch::plan(ops, global.as_ref(), project.as_ref())));
+                }
+            }
+        }
+        if let Some(plan) = batch_dialog::show(&mut self.batch, &cx.ctx) {
+            if plan.touches_kicad_tables() {
+                cx.when_kicad_closed(AppMsg::Import(Msg::RunBatch(plan)));
+            } else {
+                batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Import(Msg::Batch(p)));
+            }
+        }
         if let Some(dialog) = &mut self.dialog {
             match dialog.show(&cx.ctx, global.as_ref(), project.as_ref()) {
                 DialogAction::None => {}
@@ -204,13 +245,19 @@ impl ImportTab {
         }
     }
 
-    fn open_dialog(&mut self, i: usize, cx: &AppCtx) {
+    /// The built-in categories plus those already in a library.
+    fn all_categories(cx: &AppCtx) -> Vec<String> {
         let mut categories: Vec<String> = klm_core::categories::DEFAULT.iter().map(|s| s.to_string()).collect();
         for root in cx.roots() {
             categories.extend(root.categories());
         }
         categories.sort();
         categories.dedup();
+        categories
+    }
+
+    fn open_dialog(&mut self, i: usize, cx: &AppCtx) {
+        let categories = Self::all_categories(cx);
         self.dialog = Some(ImportDialog::new(i, &self.pending[i].part, categories, cx.global_root().is_some(), cx.project.is_some()));
     }
 
@@ -245,6 +292,11 @@ impl ImportTab {
                         ctx.request_repaint();
                     });
                 }
+            }
+            if ui.add_enabled(!cx.busy && !self.pending.is_empty(), egui::Button::new("Import all…")).on_hover_text("Import every part waiting here in one go, after a preview").clicked() {
+                self.batch_works = self.pending.iter().map(|p| p.work.clone()).collect();
+                let parts = self.pending.iter().map(|p| p.part.clone()).collect();
+                self.batch_setup = Some(ImportAllSetup::new(parts, Self::all_categories(cx), cx.global_root().is_some(), cx.project.is_some()));
             }
             if cx.busy {
                 ui.spinner();
