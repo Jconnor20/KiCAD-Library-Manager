@@ -12,6 +12,8 @@ pub struct Settings {
     pub last_project: Option<PathBuf>,
     /// Per-source switch by source name; a source not listed is on (it still needs credentials).
     pub source_enabled: BTreeMap<String, bool>,
+    /// Currency search prices are converted to (ISO code); empty shows each source's own currency.
+    pub display_currency: String,
 }
 
 fn path() -> Option<PathBuf> {

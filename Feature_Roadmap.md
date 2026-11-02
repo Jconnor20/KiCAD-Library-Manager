@@ -60,7 +60,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
 
 ## Wave 1: Small improvements and foundations (5 in parallel)
 
-- [ ] **W1.1 Search sort and filter (R1, R2)** (S)
+- [x] **W1.1 Search sort and filter (R1, R2)** (S)
   - **Owns:** `tabs/search.rs`
   - Click a column header to sort, ascending or descending.
   - Filters: source, in stock only, manufacturer, package, maximum unit price, plus a text box that filters within the results.
