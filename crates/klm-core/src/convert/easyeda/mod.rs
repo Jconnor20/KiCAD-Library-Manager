@@ -2,7 +2,7 @@
 //! structure (shape strings of `~`-separated fields in 10 mil units), not from any other converter.
 
 mod footprint;
-mod geom;
+pub(crate) mod geom;
 mod symbol;
 
 use anyhow::{Context, Result, bail};

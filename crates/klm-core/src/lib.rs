@@ -15,6 +15,7 @@ pub mod preview;
 pub mod search_filter;
 pub mod settings;
 pub mod snapshot;
+pub mod standardise;
 pub mod sexpr;
 pub mod sources;
 pub mod store;
