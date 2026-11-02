@@ -1,3 +1,4 @@
+use super::alternatives::AlternativesPanel;
 use super::batch_dialog::{self, BatchDialog, Progress};
 use super::edit_dialog::{EditAction, EditDialog};
 use super::preview::PreviewPanel;
@@ -58,6 +59,7 @@ pub struct LibraryTab {
     batch: Option<BatchDialog>,
     /// The open preview window and its title.
     preview: Option<(String, PreviewPanel)>,
+    alternatives: Option<AlternativesPanel>,
 }
 
 impl Default for LibraryTab {
@@ -75,6 +77,7 @@ impl Default for LibraryTab {
             edit_dialog: None,
             batch: None,
             preview: None,
+            alternatives: None,
         }
     }
 }
@@ -178,6 +181,9 @@ impl LibraryTab {
             } else {
                 batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p)));
             }
+        }
+        if self.alternatives.as_mut().is_some_and(|a| !a.window(&cx.ctx, &mut cx.log)) {
+            self.alternatives = None;
         }
         if let Some((title, panel)) = &mut self.preview {
             if !panel.window(&cx.ctx, title) {
@@ -312,6 +318,7 @@ impl LibraryTab {
 
     fn show(&mut self, ui: &mut egui::Ui, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> Action {
         let mut download = false;
+        let mut alternatives = false;
         let mut edit_selected = false;
         let (mut copy_selected, mut relink_all) = (None, false);
         let mut attach_to_selected = None;
@@ -339,6 +346,7 @@ impl LibraryTab {
             if attach.on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked() {
                 attach_to_selected = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
             }
+            alternatives = ui.button("Alternatives…").on_hover_text("Find duplicates and equivalent parts, and mark preferred ones").clicked();
             relink_all = ui.button("Relink all").on_hover_text("Add every KLM library missing from KiCad's library list").clicked();
             download = ui
                 .add_enabled(!self.downloading, egui::Button::new("Download missing datasheets"))
@@ -368,6 +376,9 @@ impl LibraryTab {
         }
         if let Some(done) = self.checks_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             (self.checks, self.checks_rx) = (Some(done), None);
+        }
+        if alternatives {
+            self.alternatives = Some(AlternativesPanel::new(root));
         }
         let parts = self.parts.get_or_insert_with(|| root.list_parts());
 
