@@ -1,5 +1,6 @@
 use super::batch_dialog::{self, BatchDialog, Progress};
 use super::edit_dialog::{EditAction, EditDialog};
+use super::preview::PreviewPanel;
 use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui::{self, Color32, RichText};
 use klm_core::batch::{self, Op};
@@ -30,6 +31,7 @@ enum Action {
     /// Open the edit dialog for these (category, name) parts.
     Edit(Vec<(String, String)>),
     Attach { scope: Scope, category: String, name: String, path: PathBuf },
+    Preview { category: String, name: String },
     CopyToProject { category: String, name: String, overwrite: bool },
     DownloadDatasheets(LibraryRoot),
     /// Show the dry run of these operations.
@@ -54,6 +56,8 @@ pub struct LibraryTab {
     selected: HashSet<(String, String)>,
     edit_dialog: Option<EditDialog>,
     batch: Option<BatchDialog>,
+    /// The open preview window and its title.
+    preview: Option<(String, PreviewPanel)>,
 }
 
 impl Default for LibraryTab {
@@ -70,6 +74,7 @@ impl Default for LibraryTab {
             selected: HashSet::new(),
             edit_dialog: None,
             batch: None,
+            preview: None,
         }
     }
 }
@@ -127,6 +132,12 @@ impl LibraryTab {
                     self.edit_dialog = Some(EditDialog::new(self.scope, targets, root));
                 }
             }
+            Action::Preview { category, name } => {
+                let root = if self.scope == Scope::Global { &global } else { &project };
+                if let Some(root) = root {
+                    self.preview = Some((format!("Preview: {name}"), PreviewPanel::for_library(&cx.ctx, root, &category, &name)));
+                }
+            }
             Action::Attach { scope, category, name, path } => self.attach_dialog = Some(AttachDialog::new(scope, category, name, path)),
             Action::CopyToProject { category, name, overwrite } => {
                 // Only a library new to the project touches KiCad's tables.
@@ -166,6 +177,11 @@ impl LibraryTab {
                 cx.when_kicad_closed(AppMsg::Library(Msg::RunBatch(plan)));
             } else {
                 batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p)));
+            }
+        }
+        if let Some((title, panel)) = &mut self.preview {
+            if !panel.window(&cx.ctx, title) {
+                self.preview = None;
             }
         }
         if let Some(dialog) = &mut self.edit_dialog {
@@ -412,6 +428,9 @@ impl LibraryTab {
                     ui.horizontal(|ui| {
                         if ui.small_button("Edit…").on_hover_text("Edit MPN, maker, description, category, supplier numbers, datasheet and tags").clicked() {
                             action = Action::Edit(vec![(p.category.clone(), p.name.clone())]);
+                        }
+                        if ui.small_button("Preview").on_hover_text("Show the symbol, footprint and 3D model").clicked() {
+                            action = Action::Preview { category: p.category.clone(), name: p.name.clone() };
                         }
                         if ui.small_button("Attach…").on_hover_text("Add a datasheet (PDF), SPICE model or 3D model (STEP/WRL)").clicked() {
                             let picked = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();

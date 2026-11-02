@@ -92,7 +92,7 @@ pub fn kicad_running() -> bool {
     })
 }
 
-fn run_cli(args: &[&std::ffi::OsStr]) -> Result<()> {
+pub fn run_cli(args: &[&std::ffi::OsStr]) -> Result<()> {
     let cli = kicad_cli()?;
     let out = quiet(&cli).args(args).output().with_context(|| format!("could not run {}", cli.display()))?;
     if !out.status.success() {
