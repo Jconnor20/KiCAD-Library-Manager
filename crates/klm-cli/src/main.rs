@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use klm_core::checks::{self, Severity};
 use klm_core::library::{Check, LibraryRoot, PartStatus, Scope};
 use klm_core::settings::Settings;
-use klm_core::{categories, kicad_env};
+use klm_core::{categories, kicad_env, snapshot};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,12 +15,16 @@ use std::process::ExitCode;
 const USAGE: &str = "usage:
   klm-cli check [--json] [--deep] [--project <dir>]
   klm-cli relink [--project <dir>]
+  klm-cli history [--project <dir>]
+  klm-cli rollback <id> [--project <dir>]
   klm-cli import <zip> [--category <c>] [--to global|project] [--project <dir>] [--overwrite]";
 
 #[derive(Debug, PartialEq)]
 enum Command {
     Check { json: bool, deep: bool, project: Option<PathBuf> },
     Relink { project: Option<PathBuf> },
+    History { project: Option<PathBuf> },
+    Rollback { id: String, project: Option<PathBuf> },
     Import { zip: PathBuf, category: Option<String>, to_project: bool, project: Option<PathBuf>, overwrite: bool },
 }
 
@@ -55,6 +59,15 @@ fn parse(args: &[String]) -> Result<Command> {
                 Ok(Command::Relink { project })
             }
         }
+        "history" | "rollback" => {
+            only_for(category.is_none() && to.is_none() && !overwrite && !json && !deep, "that option")?;
+            if name == "history" {
+                only_for(zip.is_none(), "that argument")?;
+                Ok(Command::History { project })
+            } else {
+                Ok(Command::Rollback { id: zip.context("rollback needs a snapshot id from `history`")?.to_string_lossy().into(), project })
+            }
+        }
         "import" => {
             only_for(!json && !deep, "--json or --deep")?;
             let to_project = match to.as_deref() {
@@ -71,7 +84,10 @@ fn parse(args: &[String]) -> Result<Command> {
 fn settings() -> Result<Settings> {
     let s: Settings = match std::env::var_os("KLM_SETTINGS") {
         Some(p) => serde_json::from_str(&std::fs::read_to_string(&p).with_context(|| format!("reading {}", Path::new(&p).display()))?)?,
-        None => Settings::load(),
+        None => {
+            klm_core::snapshot::set_store_path(klm_core::store::Store::default_path());
+            Settings::load()
+        }
     };
     kicad_env::set_kicad_cli_override(s.kicad_cli.clone());
     Ok(s)
@@ -188,6 +204,25 @@ fn relink(project: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+fn history(project: Option<&Path>) -> Result<()> {
+    for root in roots(&settings()?, project)? {
+        println!("{}", root.dir.display());
+        for s in snapshot::list(&root) {
+            println!("  {}  {:>9} bytes  {}", s.id, s.bytes, s.label);
+        }
+    }
+    Ok(())
+}
+
+/// Restores the library that holds snapshot `id` to the state before that change.
+fn rollback(id: &str, project: Option<&Path>) -> Result<()> {
+    let root = roots(&settings()?, project)?.into_iter().find(|r| snapshot::list(r).iter().any(|s| s.id == id)).with_context(|| format!("no snapshot {id}; see `klm-cli history`"))?;
+    ensure_kicad_closed()?;
+    snapshot::rollback(&root, id)?;
+    println!("Rolled {} back to snapshot {id}", root.dir.display());
+    Ok(())
+}
+
 fn import(zip: &Path, category: Option<String>, to_project: bool, project: Option<PathBuf>, overwrite: bool) -> Result<()> {
     let s = settings()?;
     let root = if to_project {
@@ -218,6 +253,8 @@ fn main() -> ExitCode {
     let result = parse(&args).and_then(|cmd| match cmd {
         Command::Check { json, deep, project } => check(json, deep, project.as_deref()),
         Command::Relink { project } => relink(project.as_deref()).map(|_| ExitCode::SUCCESS),
+        Command::History { project } => history(project.as_deref()).map(|_| ExitCode::SUCCESS),
+        Command::Rollback { id, project } => rollback(&id, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Import { zip, category, to_project, project, overwrite } => {
             import(&zip, category, to_project, project, overwrite).map(|_| ExitCode::SUCCESS)
         }
@@ -244,6 +281,9 @@ mod tests {
             Command::Check { json: true, deep: true, project: Some("D:/p".into()) }
         );
         assert_eq!(parse(&args("relink --project D:/p")).unwrap(), Command::Relink { project: Some("D:/p".into()) });
+        assert_eq!(parse(&args("history")).unwrap(), Command::History { project: None });
+        assert_eq!(parse(&args("rollback 0001 --project D:/p")).unwrap(), Command::Rollback { id: "0001".into(), project: Some("D:/p".into()) });
+        assert!(parse(&args("rollback")).is_err());
         assert_eq!(
             parse(&args("import a.zip --category ICs --to project --overwrite")).unwrap(),
             Command::Import { zip: "a.zip".into(), category: Some("ICs".into()), to_project: true, project: None, overwrite: true }

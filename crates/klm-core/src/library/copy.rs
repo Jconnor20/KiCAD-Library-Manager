@@ -26,6 +26,7 @@ impl LibraryRoot {
         if !overwrite && target.has_part(&cat, symbol_name) {
             bail!("{symbol_name} is already in {}", target.nickname(&cat));
         }
+        let _snapshot = crate::snapshot::guard(target, &format!("copy {symbol_name} here"))?;
         let mut files = vec![];
         let mut carry = |value: &str| {
             let (src, dest, new) = self.carry(value, target)?;
