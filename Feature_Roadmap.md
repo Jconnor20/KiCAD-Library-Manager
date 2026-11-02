@@ -96,7 +96,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
 
 ## Wave 2: Better imports (4 in parallel)
 
-- [ ] **W2.1 Previews and model check (R9; Rev "preview before import")** (M)
+- [x] **W2.1 Previews and model check (R9; Rev "preview before import")** (M)
   - **Owns:** `gui/preview.rs` (new) and the preview panel in `import_dialog.rs`
   - Render the symbol and footprint as SVG with `kicad-cli`, and the footprint with its 3D model with `kicad-cli pcb render`.
   - Show these in the import dialog and the Library tab, together with any W1.2 check warnings.

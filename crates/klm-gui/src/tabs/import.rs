@@ -1,4 +1,5 @@
 use super::library;
+use super::preview::PreviewPanel;
 use crate::{AppCtx, Msg as AppMsg, Tab, new_work_dir};
 use eframe::egui;
 use klm_core::library::LibraryRoot;
@@ -299,6 +300,8 @@ struct ImportDialog {
     to_project: bool,
     /// Names of libraries that already hold this MPN, shown once Import is pressed.
     clashes: Vec<String>,
+    /// Built on first show; set to `None` after changing `part`'s files so it is drawn again.
+    preview: Option<PreviewPanel>,
 }
 
 impl ImportDialog {
@@ -311,6 +314,7 @@ impl ImportDialog {
             to_global: has_global,
             to_project: has_project && !has_global,
             clashes: vec![],
+            preview: None,
         }
     }
 
@@ -348,6 +352,9 @@ impl ImportDialog {
                 });
                 ui.end_row();
             });
+
+            ui.add_space(6.0);
+            self.preview.get_or_insert_with(|| PreviewPanel::for_part(ctx, &self.part)).show(ui);
 
             let files = [
                 ("symbol", self.part.symbol_file.is_some() as usize),
