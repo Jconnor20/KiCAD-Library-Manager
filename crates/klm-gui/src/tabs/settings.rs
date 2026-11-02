@@ -3,6 +3,7 @@ use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui;
 use klm_core::credentials::{self, SOURCES};
 use klm_core::kicad_env;
+use klm_core::rules::{MpnCase, Rules, TEMPLATE_FIELDS};
 use klm_core::settings::Settings;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -24,6 +25,8 @@ enum Action {
     KicadCli(Option<PathBuf>),
     TestCli,
     Note(String),
+    /// Naming rules changed: save the settings.
+    SaveNaming,
 }
 
 /// The Settings popup. Credential entry boxes only ever hold what the user is typing; stored secrets are never read back into the UI.
@@ -82,6 +85,7 @@ impl SettingsTab {
                 cx.save_settings();
             }
             Action::TestCli => self.test_cli(cx),
+            Action::SaveNaming => cx.save_settings(),
         }
     }
 
@@ -227,7 +231,50 @@ impl SettingsTab {
                     action = Action::TestCli;
                 }
             });
+
+            if naming_section(ui, &mut settings.rules) {
+                action = Action::SaveNaming;
+            }
         });
         action
     }
+}
+
+/// The "Naming" section; true when a rule changed.
+fn naming_section(ui: &mut egui::Ui, rules: &mut Rules) -> bool {
+    let before = rules.clone();
+    ui.add_space(16.0);
+    ui.strong("Naming");
+    ui.weak("Category rules are checked in order before the built-in guess: text containing the keyword (a word or a package such as SOT-23) goes to that category.");
+    let mut remove = None;
+    for (i, r) in rules.categories.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut r.keyword).hint_text("keyword or package").desired_width(180.0));
+            ui.label("→");
+            ui.add(egui::TextEdit::singleline(&mut r.category).hint_text("category").desired_width(180.0));
+            if ui.small_button("Remove").clicked() {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        rules.categories.remove(i);
+    }
+    if ui.button("Add category rule").clicked() {
+        rules.categories.push(Default::default());
+    }
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label("Name template");
+        ui.add(egui::TextEdit::singleline(&mut rules.name_template).hint_text("{Manufacturer}_{MPN}").desired_width(240.0));
+    });
+    ui.weak(format!("Placeholders: {}. Empty means just the MPN.", TEMPLATE_FIELDS.iter().map(|f| format!("{{{f}}}")).collect::<Vec<_>>().join(" ")));
+    ui.horizontal(|ui| {
+        ui.label("MPN case");
+        for (case, label) in [(MpnCase::Keep, "Keep"), (MpnCase::Upper, "UPPER"), (MpnCase::Lower, "lower")] {
+            ui.selectable_value(&mut rules.mpn_case, case, label);
+        }
+    });
+    ui.weak(format!("Example: {}", rules.name(&[("MPN", "Lm358n"), ("Manufacturer", "TI"), ("Package", "DIP-8")])));
+    *rules != before
 }

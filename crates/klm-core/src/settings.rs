@@ -16,6 +16,8 @@ pub struct Settings {
     pub source_enabled: BTreeMap<String, bool>,
     /// Currency search prices are converted to (ISO code); empty shows each source's own currency.
     pub display_currency: String,
+    /// Category and naming rules.
+    pub rules: crate::rules::Rules,
 }
 
 fn path() -> Option<PathBuf> {

@@ -170,7 +170,7 @@ impl ImportTab {
                 self.pending.push(Pending { part, work });
             }
             Msg::Gather { part, work, waiting } => {
-                let mut dialog = ImportDialog::new(usize::MAX, &part, categories(cx), cx.global_root().is_some(), cx.project.is_some());
+                let mut dialog = ImportDialog::new(usize::MAX, &part, categories(cx), cx.global_root().is_some(), cx.project.is_some(), &cx.settings.rules);
                 let auto = (part.manufacturer.clone(), part.description.clone());
                 dialog.gathered = Some(Gathered { files: Combined::default(), work, waiting, auto, edited: (false, false) });
                 self.dialog = Some(dialog);
@@ -316,7 +316,7 @@ impl ImportTab {
     }
 
     fn open_dialog(&mut self, i: usize, cx: &AppCtx) {
-        self.dialog = Some(ImportDialog::new(i, &self.pending[i].part, categories(cx), cx.global_root().is_some(), cx.project.is_some()));
+        self.dialog = Some(ImportDialog::new(i, &self.pending[i].part, categories(cx), cx.global_root().is_some(), cx.project.is_some(), &cx.settings.rules));
     }
 
     fn setup_screen(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
@@ -447,11 +447,13 @@ impl Gathered {
 }
 
 impl ImportDialog {
-    fn new(index: usize, part: &Part, categories: Vec<String>, has_global: bool, has_project: bool) -> Self {
+    fn new(index: usize, part: &Part, categories: Vec<String>, has_global: bool, has_project: bool, rules: &klm_core::rules::Rules) -> Self {
+        let mut part = part.clone();
+        part.mpn = rules.normalise_mpn(&part.mpn);
         Self {
             index,
-            category: klm_core::categories::guess(&part.category_hint).to_string(),
-            part: part.clone(),
+            category: rules.category_for(&part),
+            part,
             categories,
             to_global: has_global,
             to_project: has_project && !has_global,
