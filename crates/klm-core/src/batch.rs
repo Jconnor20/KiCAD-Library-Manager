@@ -211,6 +211,7 @@ fn import_item(part: Part, category: Option<String>, target: Target, overwrite: 
     let category = category.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).unwrap_or_else(|| categories::guess(&part.category_hint).to_string());
     let (cat, mpn) = (sanitize(&category), sanitize(&part.mpn));
     let mut item = Item::new(part.mpn.clone());
+    item.warnings.extend(part.warnings.iter().cloned());
     if cat.is_empty() || mpn.is_empty() {
         return item.fail("category and MPN must not be empty");
     }
