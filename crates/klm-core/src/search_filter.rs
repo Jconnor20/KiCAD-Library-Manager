@@ -47,7 +47,7 @@ pub struct Filter {
     pub manufacturer: String,
     /// Case-insensitive substring of the package.
     pub package: String,
-    /// Price text; empty or unparseable means no limit. Parts with no parseable price are hidden when set.
+    /// Price text, in the display currency; empty or unparseable means no limit. Parts with no parseable price are hidden when set.
     pub max_price: String,
     /// Case-insensitive substring of MPN, manufacturer or description.
     pub text: String,
@@ -58,28 +58,29 @@ impl Filter {
         self.hidden_sources.is_empty() && !self.in_stock && self.manufacturer.is_empty() && self.package.is_empty() && self.max_price.is_empty() && self.text.is_empty()
     }
 
-    fn matches(&self, src: usize, p: &Part) -> bool {
+    fn matches(&self, src: usize, p: &Part, price: &dyn Fn(&Part) -> Option<f64>) -> bool {
         let has = |hay: &str, needle: &str| hay.to_lowercase().contains(&needle.trim().to_lowercase());
         let max = parse_price(&self.max_price);
         !self.hidden_sources.contains(&src)
             && (!self.in_stock || p.stock.is_some_and(|s| s > 0))
             && (self.manufacturer.is_empty() || p.manufacturer == self.manufacturer)
             && has(&p.package, &self.package)
-            && max.is_none_or(|m| parse_price(&p.unit_price).is_some_and(|v| v <= m))
+            && max.is_none_or(|m| price(p).is_some_and(|v| v <= m))
             && (self.text.trim().is_empty() || [&p.mpn, &p.manufacturer, &p.description].into_iter().any(|f| has(f, &self.text)))
     }
 }
 
+/// `price` gives a part's unit price as a number in the display currency.
 /// Indexes into `results` of the rows to show, filtered then sorted. Rows with no value for a
 /// numeric key (no stock figure, unparseable price) go last in either direction.
-pub fn view(results: &[(usize, Part)], filter: &Filter, sort: Option<(SortKey, bool)>) -> Vec<usize> {
-    let mut rows: Vec<usize> = (0..results.len()).filter(|&i| filter.matches(results[i].0, &results[i].1)).collect();
+pub fn view(results: &[(usize, Part)], filter: &Filter, sort: Option<(SortKey, bool)>, price: &dyn Fn(&Part) -> Option<f64>) -> Vec<usize> {
+    let mut rows: Vec<usize> = (0..results.len()).filter(|&i| filter.matches(results[i].0, &results[i].1, price)).collect();
     let Some((key, ascending)) = sort else { return rows };
     let number = |i: usize| -> Option<f64> {
         let (_, p) = &results[i];
         match key {
             SortKey::Stock => p.stock.map(|s| s as f64),
-            _ => parse_price(&p.unit_price),
+            _ => price(p),
         }
     };
     let text = |i: usize| {
@@ -115,6 +116,10 @@ mod tests {
         Part { mpn: mpn.into(), manufacturer: mfr.into(), package: pkg.into(), stock, unit_price: price.into(), description: format!("{mpn} thing"), ..Part::default() }
     }
 
+    fn unit(p: &Part) -> Option<f64> {
+        parse_price(&p.unit_price)
+    }
+
     fn sample() -> Vec<(usize, Part)> {
         vec![
             (0, part("B", "Yageo", "0603", Some(100), "$0.0123 @100")),
@@ -148,25 +153,25 @@ mod tests {
     fn numeric_sort_puts_missing_last_both_ways() {
         let r = sample();
         let mpns = |v: Vec<usize>| v.into_iter().map(|i| r[i].1.mpn.clone()).collect::<Vec<_>>();
-        assert_eq!(mpns(view(&r, &Filter::default(), Some((SortKey::Price, true)))), ["B", "D", "C", "a"]);
-        assert_eq!(mpns(view(&r, &Filter::default(), Some((SortKey::Price, false)))), ["C", "D", "B", "a"]);
-        assert_eq!(mpns(view(&r, &Filter::default(), Some((SortKey::Stock, false)))), ["D", "B", "C", "a"]);
+        assert_eq!(mpns(view(&r, &Filter::default(), Some((SortKey::Price, true)), &unit)), ["B", "D", "C", "a"]);
+        assert_eq!(mpns(view(&r, &Filter::default(), Some((SortKey::Price, false)), &unit)), ["C", "D", "B", "a"]);
+        assert_eq!(mpns(view(&r, &Filter::default(), Some((SortKey::Stock, false)), &unit)), ["D", "B", "C", "a"]);
         // 100 < 5000 numerically although "100" > "5000" as text sorts the other way round.
-        assert_eq!(mpns(view(&r, &Filter::default(), Some((SortKey::Stock, true)))), ["C", "B", "D", "a"]);
+        assert_eq!(mpns(view(&r, &Filter::default(), Some((SortKey::Stock, true)), &unit)), ["C", "B", "D", "a"]);
     }
 
     #[test]
     fn text_sort_ignores_case() {
         let r = sample();
-        let order: Vec<_> = view(&r, &Filter::default(), Some((SortKey::Mpn, true))).into_iter().map(|i| r[i].1.mpn.as_str()).collect();
+        let order: Vec<_> = view(&r, &Filter::default(), Some((SortKey::Mpn, true)), &unit).into_iter().map(|i| r[i].1.mpn.as_str()).collect();
         assert_eq!(order, ["a", "B", "C", "D"]);
-        assert_eq!(view(&r, &Filter::default(), None), [0, 1, 2, 3]);
+        assert_eq!(view(&r, &Filter::default(), None, &unit), [0, 1, 2, 3]);
     }
 
     #[test]
     fn filters_combine_and_return_original_indexes() {
         let r = sample();
-        let f = |f: Filter| view(&r, &f, None);
+        let f = |f: Filter| view(&r, &f, None, &unit);
         assert_eq!(f(Filter { hidden_sources: vec![1], ..Filter::default() }), [0, 3]);
         assert_eq!(f(Filter { in_stock: true, ..Filter::default() }), [0, 3]);
         assert_eq!(f(Filter { manufacturer: "Yageo".into(), ..Filter::default() }), [0, 2]);

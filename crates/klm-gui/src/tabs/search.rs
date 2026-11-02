@@ -1,6 +1,7 @@
 use super::import;
 use crate::{AppCtx, Msg as AppMsg, new_work_dir};
 use eframe::egui::{self, RichText};
+use klm_core::currency::{Rates, display_price, price_in};
 use klm_core::part::Part;
 use klm_core::search_filter::{Filter, SortKey, view};
 
@@ -10,6 +11,8 @@ pub enum Msg {
     FetchDone,
     /// The sources were rebuilt, so the indexes in the results no longer match.
     ClearResults,
+    /// Exchange rates for the display currency (`None` if they could not be loaded).
+    Rates(Option<Rates>),
 }
 
 enum Action {
@@ -28,12 +31,29 @@ pub struct SearchTab {
     results: Vec<(usize, Part)>,
     filter: Filter,
     sort: Option<(SortKey, bool)>,
+    rates: Option<Rates>,
+    /// A rates load was started since the currency was last changed; don't retry every frame.
+    rates_tried: bool,
 }
 
 impl SearchTab {
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
         let names: Vec<&str> = cx.sources.iter().map(|s| s.name()).collect();
-        match self.show(ui, &names, cx.busy) {
+        let mut currency = cx.settings.display_currency.clone();
+        let action = self.show(ui, &names, cx.busy, &mut currency);
+        if currency != cx.settings.display_currency {
+            cx.settings.display_currency = currency;
+            self.rates_tried = false;
+            if let Err(e) = cx.settings.save() {
+                cx.log.push(format!("Could not save settings: {e:#}"));
+            }
+        }
+        // Loaded as soon as there are results so the currency list has codes to offer.
+        if (!cx.settings.display_currency.is_empty() || !self.results.is_empty()) && self.rates.is_none() && !self.rates_tried {
+            self.rates_tried = true;
+            self.load_rates(cx);
+        }
+        match action {
             Action::None => {}
             Action::Search(q) => self.run_search(q, cx),
             Action::Get(i) => self.get_result(i, cx),
@@ -52,10 +72,11 @@ impl SearchTab {
             }
             Msg::FetchDone => cx.busy = false,
             Msg::ClearResults => self.results.clear(),
+            Msg::Rates(rates) => self.rates = rates.or(self.rates.take()),
         }
     }
 
-    fn show(&mut self, ui: &mut egui::Ui, source_names: &[&str], busy: bool) -> Action {
+    fn show(&mut self, ui: &mut egui::Ui, source_names: &[&str], busy: bool, currency: &mut String) -> Action {
         let mut action = Action::None;
         if source_names.is_empty() {
             ui.label("No search sources are enabled yet.");
@@ -74,11 +95,14 @@ impl SearchTab {
             ui.weak(format!("Searching: {}", source_names.join(", ")));
         });
         ui.add_space(4.0);
-        self.filters_ui(ui, source_names);
-        let rows = view(&self.results, &self.filter, self.sort);
+        self.filters_ui(ui, source_names, currency);
+        let target = (!currency.is_empty()).then_some(currency.as_str());
+        let rates = self.rates.as_ref();
+        let rows = view(&self.results, &self.filter, self.sort, &|p| price_in(&p.unit_price, target, rates));
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             egui::Grid::new("results").striped(true).num_columns(8).spacing([14.0, 4.0]).show(ui, |ui| {
                 for (h, key) in [("Source", SortKey::Source), ("MPN", SortKey::Mpn), ("Manufacturer", SortKey::Manufacturer), ("Description", SortKey::Description), ("Package", SortKey::Package), ("Stock", SortKey::Stock), ("Price", SortKey::Price)] {
+                    let h = if key == SortKey::Price { &format!("Price ({})", target.unwrap_or("native")) } else { h };
                     let arrow = match self.sort {
                         Some((k, asc)) if k == key => if asc { " ▲" } else { " ▼" },
                         _ => "",
@@ -102,7 +126,13 @@ impl SearchTab {
                     ui.label(short).on_hover_text(&p.description);
                     ui.label(&p.package);
                     ui.label(p.stock.map_or(String::new(), |s| s.to_string()));
-                    ui.label(&p.unit_price);
+                    let shown = display_price(&p.unit_price, target, rates);
+                    let price = ui.label(&shown);
+                    if shown != p.unit_price {
+                        price.on_hover_text(format!("Converted from {}", p.unit_price));
+                    } else if target.is_some() && !p.unit_price.is_empty() {
+                        price.on_hover_text("Not converted: unknown currency or no exchange rates");
+                    }
                     if ui.add_enabled(!busy, egui::Button::new("Get…")).clicked() {
                         action = Action::Get(i);
                     }
@@ -113,7 +143,7 @@ impl SearchTab {
         action
     }
 
-    fn filters_ui(&mut self, ui: &mut egui::Ui, source_names: &[&str]) {
+    fn filters_ui(&mut self, ui: &mut egui::Ui, source_names: &[&str], currency: &mut String) {
         if self.results.is_empty() {
             return;
         }
@@ -142,16 +172,42 @@ impl SearchTab {
                 }
             });
             ui.add(egui::TextEdit::singleline(&mut f.package).hint_text("Package contains").desired_width(110.0));
-            ui.add(egui::TextEdit::singleline(&mut f.max_price).hint_text("Max unit price").desired_width(90.0));
+            let unit = if currency.is_empty() { "native" } else { currency.as_str() };
+            ui.add(egui::TextEdit::singleline(&mut f.max_price).hint_text(format!("Max price ({unit})")).desired_width(110.0));
             ui.add(egui::TextEdit::singleline(&mut f.text).hint_text("MPN, manufacturer, description").desired_width(190.0));
         });
         ui.horizontal(|ui| {
-            ui.weak(format!("{} of {} results", view(&self.results, &self.filter, None).len(), self.results.len()));
+            egui::ComboBox::from_id_salt("currency").selected_text(if currency.is_empty() { "Native currencies" } else { currency.as_str() }).show_ui(ui, |ui| {
+                ui.selectable_value(currency, String::new(), "Native currencies");
+                for c in self.rates.as_ref().map_or(vec![], Rates::codes) {
+                    ui.selectable_value(currency, c.to_string(), c);
+                }
+            });
+            match (&self.rates, currency.is_empty()) {
+                (Some(r), false) => drop(ui.weak(format!("rates of {}", r.date))),
+                (None, false) if self.rates_tried => drop(ui.weak("exchange rates unavailable; showing native prices")),
+                _ => {}
+            }
+            let target = (!currency.is_empty()).then_some(currency.as_str());
+            let shown = view(&self.results, &self.filter, None, &|p| price_in(&p.unit_price, target, self.rates.as_ref())).len();
+            ui.weak(format!("{shown} of {} results", self.results.len()));
             if ui.add_enabled(!self.filter.is_empty(), egui::Button::new("Clear filters")).clicked() {
                 self.filter = Filter::default();
             }
         });
         ui.add_space(4.0);
+    }
+
+    fn load_rates(&self, cx: &AppCtx) {
+        let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
+        std::thread::spawn(move || {
+            let rates = Rates::load();
+            if let Err(e) = &rates {
+                let _ = tx.send(AppMsg::Log(format!("Exchange rates: {e:#}")));
+            }
+            let _ = tx.send(AppMsg::Search(Msg::Rates(rates.ok())));
+            ctx.request_repaint();
+        });
     }
 
     fn run_search(&mut self, query: String, cx: &mut AppCtx) {
