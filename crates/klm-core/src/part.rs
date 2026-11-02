@@ -19,6 +19,13 @@ pub struct Part {
     pub stock: Option<u64>,
     /// Display text, e.g. "$0.0123 @100".
     pub unit_price: String,
+    /// Full price list as (from quantity, unit price) in `price_currency`; empty when the source sent none.
+    pub price_breaks: Vec<(u64, f64)>,
+    pub price_currency: String,
+    /// Smallest order quantity the source sells, when it says.
+    pub moq: Option<u64>,
+    /// Days until a part that is out of stock ships from the factory, when the source says.
+    pub lead_time_days: Option<u32>,
     pub symbol_file: Option<PathBuf>,
     pub footprint_files: Vec<PathBuf>,
     pub model_files: Vec<PathBuf>,

@@ -4,6 +4,7 @@ use super::Source;
 use super::http;
 use crate::credentials;
 use crate::part::Part;
+use crate::search_filter::parse_price;
 use anyhow::{Result, bail};
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
@@ -49,6 +50,17 @@ fn stock(availability: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
+/// "84 Days" or "12 Weeks" as days; anything else is unknown.
+fn lead_days(text: &str) -> Option<u32> {
+    let (n, unit) = text.trim().split_once(' ')?;
+    let n: u32 = n.parse().ok()?;
+    match unit.trim().to_ascii_lowercase().trim_end_matches('s') {
+        "day" => Some(n),
+        "week" => Some(n * 7),
+        _ => None,
+    }
+}
+
 fn parse(v: &Value) -> Result<Vec<Part>> {
     if let Some(errors) = v["Errors"].as_array().filter(|e| !e.is_empty()) {
         let msgs: Vec<String> = errors.iter().map(|e| http::text(e, "/Message")).collect();
@@ -68,6 +80,10 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
                 category_hint: http::text(p, "/Category"),
                 datasheet_url: http::https(http::text(p, "/DataSheetUrl")),
                 stock: stock(&http::text(p, "/Availability")),
+                price_breaks: p["PriceBreaks"].as_array().into_iter().flatten().filter_map(|b| Some((b["Quantity"].as_u64()?, parse_price(&http::text(b, "/Price"))?))).collect(),
+                price_currency: http::text(b, "/Currency"),
+                moq: http::text(p, "/Min").parse().ok(),
+                lead_time_days: lead_days(&http::text(p, "/LeadTime")),
                 unit_price: if b.is_null() { String::new() } else { format!("{} @{}", http::text(b, "/Price"), b["Quantity"]) },
                 // The search reply has no package field; ProductAttributes only lists packaging options.
                 supplier_ids: if id.is_empty() { vec![] } else { vec![("Mouser".into(), id)] },
@@ -87,7 +103,7 @@ mod tests {
       "SearchResults": {"NumberOfResult": 2, "Parts": [
         {"Availability": "12,345 In Stock", "DataSheetUrl": "https://www.vishay.com/doc?20035", "Description": "Thick Film Resistors - SMD 10Kohms 1% 0603",
          "Category": "Thick Film Resistors - SMD", "Manufacturer": "Vishay / Dale", "ManufacturerPartNumber": "CRCW060310K0FKEA",
-         "Min": "1", "Mult": "1", "MouserPartNumber": "71-CRCW0603-10K-E3", "ProductAttributes": [{"AttributeName": "Standard Pack Qty", "AttributeValue": "5000"}],
+         "Min": "1", "Mult": "1", "LeadTime": "84 Days", "MouserPartNumber": "71-CRCW0603-10K-E3", "ProductAttributes": [{"AttributeName": "Standard Pack Qty", "AttributeValue": "5000"}],
          "PriceBreaks": [{"Quantity": 1, "Price": "$0.10", "Currency": "USD"}, {"Quantity": 10, "Price": "$0.019", "Currency": "USD"}]},
         {"Availability": "None", "DataSheetUrl": "", "Description": "x", "Manufacturer": "Y", "ManufacturerPartNumber": "Z1", "MouserPartNumber": "", "PriceBreaks": []}]}
     }"#;
@@ -99,6 +115,9 @@ mod tests {
         let p = &parts[0];
         assert_eq!((p.mpn.as_str(), p.manufacturer.as_str()), ("CRCW060310K0FKEA", "Vishay / Dale"));
         assert_eq!(p.stock, Some(12345));
+        assert_eq!((p.price_breaks.clone(), p.price_currency.as_str(), p.moq, p.lead_time_days), (vec![(1, 0.10), (10, 0.019)], "USD", Some(1), Some(84)));
+        assert_eq!(lead_days("2 Weeks"), Some(14));
+        assert_eq!(lead_days("N/A"), None);
         assert_eq!(p.unit_price, "$0.10 @1");
         assert_eq!(p.category_hint, "Thick Film Resistors - SMD");
         assert_eq!(p.supplier_ids, vec![("Mouser".to_string(), "71-CRCW0603-10K-E3".to_string())]);

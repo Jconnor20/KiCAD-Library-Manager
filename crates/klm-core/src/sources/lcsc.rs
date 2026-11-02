@@ -72,7 +72,10 @@ pub(crate) fn parse_search(body: &Value, query: &str) -> Vec<Part> {
         .map(|c| {
             let price = c["componentPrices"].as_array().and_then(|p| p.first()).and_then(|p| Some(format!("${} @{}", p["productPrice"].as_f64()?, p["startNumber"].as_u64()?)));
             let datasheet = [s(c, "dataManualUrl"), s(c, "dataManualOfficialLink")].into_iter().find(|u| !u.is_empty());
+            let breaks = c["componentPrices"].as_array().into_iter().flatten().filter_map(|p| Some((p["startNumber"].as_u64()?, p["productPrice"].as_f64()?))).collect();
             Part {
+                price_breaks: breaks,
+                price_currency: "USD".into(),
                 mpn: s(c, "componentModelEn"),
                 manufacturer: s(c, "componentBrandEn"),
                 description: s(c, "describe"),
