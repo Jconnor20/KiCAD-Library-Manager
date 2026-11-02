@@ -72,6 +72,7 @@ impl LibraryRoot {
             bail!("{name} is already in {}", self.nickname(&new_cat));
         }
 
+        let _snapshot = crate::snapshot::guard(self, &if new_cat == cat { format!("edit {symbol_name}") } else { format!("move {symbol_name} to {new_cat}") })?;
         if new_cat == cat {
             lib.items_mut()[idx] = symbol;
             write_atomic(&self.symbol_lib(&cat), &sexpr::to_string(&lib))?;

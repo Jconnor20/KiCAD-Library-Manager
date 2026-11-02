@@ -111,6 +111,9 @@ impl LibraryRoot {
     /// Adds this category's libraries to KiCad's tables. Returns true if anything was added.
     pub fn link(&self, category: &str) -> Result<bool> {
         let (cat, nick, var) = (sanitize(category), self.nickname(category), self.var());
+        if self.needs_link(category) {
+            crate::snapshot::ensure(self, &format!("link {nick} in KiCad"))?;
+        }
         let new_sym = kicad_env::register_lib(&self.table_dir.join("sym-lib-table"), &nick, &format!("{var}/symbols/{cat}.kicad_sym"))?;
         let new_fp = kicad_env::register_lib(&self.table_dir.join("fp-lib-table"), &nick, &format!("{var}/footprints/{cat}.pretty"))?;
         Ok(new_sym || new_fp)
@@ -128,7 +131,7 @@ impl LibraryRoot {
     }
 }
 
-/// `fs::copy` that creates the folder and does nothing when `src` already is `dest` (copying a file onto itself empties it).
+/// `fs::copy` that replaces `dest`, creates the folder and does nothing when `src` already is `dest` (copying a file onto itself empties it).
 pub(super) fn copy_file(src: &Path, dest: &Path) -> Result<()> {
     if let Some(dir) = dest.parent() {
         std::fs::create_dir_all(dir)?;
@@ -136,8 +139,10 @@ pub(super) fn copy_file(src: &Path, dest: &Path) -> Result<()> {
     if dest.exists() && std::fs::canonicalize(src)? == std::fs::canonicalize(dest)? {
         return Ok(());
     }
-    std::fs::copy(src, dest).with_context(|| format!("copying {} to {}", src.display(), dest.display()))?;
-    Ok(())
+    // Through a temp file and a rename, never into `dest` itself: a snapshot may hold `dest` as a hard link.
+    let tmp = dest.with_extension("klm-tmp");
+    std::fs::copy(src, &tmp).with_context(|| format!("copying {} to {}", src.display(), dest.display()))?;
+    std::fs::rename(&tmp, dest).with_context(|| format!("replacing {}", dest.display()))
 }
 
 pub(super) fn has_ext(p: &Path, exts: &[&str]) -> bool {

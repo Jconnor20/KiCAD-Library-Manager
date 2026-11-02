@@ -112,7 +112,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - Import several ZIPs at once; bulk attach; bulk copy to project; bulk relink.
   - Every batch can run as a dry run first, showing exactly what would change.
   - **Needs:** W0.2
-- [ ] **W2.4 Snapshots and rollback (Rev)** (M)
+- [ ] **W2.4 Snapshots and rollback (Rev)** (M) (core done; History tab and CLI still to do)
   - **Owns:** `core/snapshot.rs` (new)
   - Automatic snapshot before any import, move, standardise or batch run.
   - A "History" list showing what changed, with rollback.

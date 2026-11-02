@@ -41,6 +41,7 @@ impl LibraryRoot {
     fn rewrite_prefix(&self, old: &str) -> Result<usize> {
         // The trailing '/' stops ".../Lib" also matching ".../Lib2".
         let (old, new) = (format!("{}/", old.trim_end_matches('/')), format!("{}/", self.var()));
+        crate::snapshot::ensure(self, "rewrite library paths")?;
         let mut changed = 0;
         for f in self.files_with_paths() {
             let Ok(text) = std::fs::read_to_string(&f) else { continue };
@@ -89,6 +90,10 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for e in std::fs::read_dir(from)? {
         let e = e?;
+        // The snapshots would be copied whole (hard links become copies) and are stale after a move anyway.
+        if e.file_name() == crate::snapshot::DIR {
+            continue;
+        }
         let dest = to.join(e.file_name());
         if e.file_type()?.is_dir() {
             copy_tree(&e.path(), &dest)?;
@@ -104,6 +109,9 @@ fn file_sizes(dir: &Path) -> std::io::Result<BTreeMap<PathBuf, u64>> {
     fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<PathBuf, u64>) -> std::io::Result<()> {
         for e in std::fs::read_dir(dir)? {
             let e = e?;
+            if e.file_name() == crate::snapshot::DIR {
+                continue;
+            }
             if e.file_type()?.is_dir() {
                 walk(root, &e.path(), out)?;
             } else {

@@ -12,6 +12,7 @@ pub mod matching;
 pub mod part;
 pub mod search_filter;
 pub mod settings;
+pub mod snapshot;
 pub mod sexpr;
 pub mod sources;
 pub mod store;

@@ -19,6 +19,7 @@ impl LibraryRoot {
         if !overwrite && self.has_part(&cat, &mpn) {
             bail!("{mpn} is already in {}", self.nickname(&cat));
         }
+        let _snapshot = crate::snapshot::guard(self, &format!("import {mpn}"))?;
         self.ensure_layout()?;
         let nick = self.nickname(&cat);
         let work = scratch_dir()?;
@@ -97,7 +98,7 @@ impl LibraryRoot {
                 write_atomic(&pretty.join(format!("{name}.kicad_mod")), &text)?;
                 if let Some(m) = model {
                     std::fs::create_dir_all(&shapes)?;
-                    std::fs::copy(m, shapes.join(format!("{name}.{ext}")))?;
+                    copy_file(m, &shapes.join(format!("{name}.{ext}")))?;
                 }
                 if i == main_idx {
                     main_fp = Some(name);

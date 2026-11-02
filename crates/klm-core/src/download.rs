@@ -32,9 +32,17 @@ impl LibraryRoot {
     pub fn download_missing_datasheets(&self) -> Vec<(String, Result<()>)> {
         let tmp = std::env::temp_dir().join(format!("klm-datasheet-{}.pdf", std::process::id()));
         let mut out = vec![];
-        for p in self.list_parts() {
-            let Some(url) = p.datasheet_target.as_ref().filter(|u| p.datasheet == Check::Link && u.starts_with("http")) else { continue };
-            let result = download_pdf(url, &tmp).and_then(|()| self.attach_file(&p.category, &p.name, AttachKind::Datasheet, &tmp));
+        let todo: Vec<_> = self.list_parts().into_iter().filter(|p| p.datasheet == Check::Link && p.datasheet_target.as_ref().is_some_and(|u| u.starts_with("http"))).collect();
+        if todo.is_empty() {
+            return out;
+        }
+        let _snapshot = match crate::snapshot::guard(self, "download missing datasheets") {
+            Ok(g) => g,
+            Err(e) => return vec![(String::new(), Err(e))],
+        };
+        for p in todo {
+            let url = p.datasheet_target.clone().unwrap_or_default();
+            let result = download_pdf(&url, &tmp).and_then(|()| self.attach_file(&p.category, &p.name, AttachKind::Datasheet, &tmp));
             out.push((p.mpn, result));
         }
         let _ = std::fs::remove_file(&tmp);

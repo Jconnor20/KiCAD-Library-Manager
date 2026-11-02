@@ -56,6 +56,7 @@ impl LibraryRoot {
         if AttachKind::of(path).map_or(kind != AttachKind::Sim, |k| k != kind) {
             bail!("{} can't be added as that kind of file", path.display());
         }
+        crate::snapshot::ensure(self, &format!("attach to {symbol_name}"))?;
         self.ensure_layout()?;
         let (mut lib, idx) = self.load_symbol(&cat, symbol_name)?;
         let symbol = &mut lib.items_mut()[idx];
