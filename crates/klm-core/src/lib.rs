@@ -9,6 +9,7 @@ pub mod convert;
 pub mod credentials;
 pub mod currency;
 pub mod download;
+pub mod export;
 pub mod kicad_env;
 pub mod library;
 pub mod matching;
