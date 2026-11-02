@@ -31,16 +31,14 @@ Needs KiCad 9 or 10 installed (`kicad-cli` converts vendor files to the installe
 
 Install:
 1. In KiCad: *Preferences → Plugins → Enable KiCad API*. Restart KiCad.
-2. Build the package with `scripts\package.ps1`, then *Plugin and Content Manager → Install from File…* and choose `dist\klm-pcm-<version>.zip`. Or install by hand: copy `kicad_plugin\*` and `target
-elease\klm.exe` into one folder `Documents\KiCad\<version>\plugins\klm\`.
+2. Build the package with `scripts\package.ps1`, then *Plugin and Content Manager → Install from File…* and choose `dist\klm-pcm-<version>.zip`. Or install by hand: copy `kicad_plugin\*` and `target\release\klm.exe` into one folder `Documents\KiCad\<version>\plugins\klm\`.
 3. Restart KiCad and open the PCB editor. KiCad sets up the plugin's environment in the background; the **Library Manager** button appears on the toolbar when that is done (if not, check *Preferences → Plugins* for the plugin and its error).
 
 KLM is found next to `launch.py`, else via the `KLM_EXE` environment variable, else `klm` on `PATH`.
 
 ## Build and package
 ```
-cargo build --release          # target
-elease\klm.exe (no console window)
+cargo build --release          # target\release\klm.exe (no console window)
 scripts\package.ps1            # builds, then writes dist\klm-pcm-<version>.zip (PCM layout, plugin + klm.exe)
 ```
 
