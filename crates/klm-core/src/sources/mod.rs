@@ -1,6 +1,7 @@
 //! Part sources. Each search source (LCSC, DigiKey, …) implements [`Source`] and is listed in
 //! [`all`]; the Search tab queries every enabled one. Vendor ZIPs go through `zip_import` instead.
 
+pub mod lcsc;
 pub mod watcher;
 pub mod zip_import;
 
@@ -31,5 +32,5 @@ pub trait Source: Send + Sync {
 
 /// Every source the user has enabled. Each phase adds its sources here.
 pub fn all(_settings: &Settings) -> Vec<Box<dyn Source>> {
-    vec![]
+    vec![Box::new(lcsc::Lcsc::new())]
 }
