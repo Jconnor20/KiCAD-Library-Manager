@@ -1,11 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod attach_dialog;
 mod import_dialog;
 mod library_view;
 mod search_view;
 mod settings_view;
 
 use eframe::egui::{self, RichText};
+use attach_dialog::{AttachAction, AttachDialog};
 use import_dialog::{DialogAction, ImportDialog};
 use library_view::{LibraryAction, LibraryView};
 use search_view::{SearchAction, SearchView};
@@ -43,6 +45,7 @@ enum Blocked {
     Relink,
     MoveGlobal(PathBuf),
     CopyToProject { category: String, name: String, overwrite: bool },
+    Attach { from: LibraryRoot, targets: Vec<LibraryRoot>, category: String, name: String, path: PathBuf },
 }
 
 #[derive(PartialEq)]
@@ -65,6 +68,7 @@ struct App {
     setup_path: String,
     pending: Vec<Pending>,
     dialog: Option<ImportDialog>,
+    attach_dialog: Option<AttachDialog>,
     blocked: Option<Blocked>,
     still_open: bool,
     tab: Tab,
@@ -140,6 +144,7 @@ impl App {
             settings,
             pending: vec![],
             dialog: None,
+            attach_dialog: None,
             blocked: None,
             still_open: false,
             tab: Tab::Import,
@@ -220,6 +225,7 @@ impl App {
             Blocked::Relink => self.relink(),
             Blocked::MoveGlobal(dir) => self.move_global(&dir),
             Blocked::CopyToProject { category, name, overwrite } => self.copy_to_project(&category, &name, overwrite),
+            Blocked::Attach { from, targets, category, name, path } => self.attach(&from, &targets, &category, &name, &path),
         }
     }
 
@@ -238,18 +244,26 @@ impl App {
         }
     }
 
-    fn attach(&mut self, scope: Scope, category: &str, name: &str, path: &Path) {
-        let root = match scope {
-            Scope::Global => self.global_root(),
-            Scope::Project => self.project_root(),
-        };
-        let result = root.ok_or_else(|| anyhow::anyhow!("library not available")).and_then(|r| match AttachKind::of(path) {
-            Some(kind) => r.attach_file(category, name, kind, path),
-            None => Err(anyhow::anyhow!("don't know what kind of file {} is", path.display())),
-        });
-        match result {
-            Ok(()) => self.log.push(format!("Added {} to {name}", path.file_name().unwrap_or_default().to_string_lossy())),
-            Err(e) => self.log.push(format!("Could not add the file to {name}: {e:#}")),
+    /// Copies `path` into each target library's folder and points the part there. A target without the
+    /// part gets it copied over from `from` first.
+    fn attach(&mut self, from: &LibraryRoot, targets: &[LibraryRoot], category: &str, name: &str, path: &Path) {
+        let file = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        for target in targets {
+            let nick = target.nickname(category);
+            let result = (|| -> anyhow::Result<()> {
+                let kind = AttachKind::of(path).ok_or_else(|| anyhow::anyhow!("don't know what kind of file {} is", path.display()))?;
+                if !target.has_part(category, name) {
+                    if from.copy_part_to(category, name, target, false)? {
+                        self.log.push(format!("Added library {nick} to KiCad"));
+                    }
+                    self.log.push(format!("Copied {name} into {nick}"));
+                }
+                target.attach_file(category, name, kind, path)
+            })();
+            match result {
+                Ok(()) => self.log.push(format!("Added {file} to {name} in {nick}")),
+                Err(e) => self.log.push(format!("Could not add {file} to {name} in {nick}: {e:#}")),
+            }
         }
         self.library.refresh();
     }
@@ -698,7 +712,7 @@ impl eframe::App for App {
                     let (global, project) = (self.global_root(), self.project_root());
                     match self.library.show(ui, global.as_ref(), project.as_ref()) {
                         LibraryAction::None => {}
-                        LibraryAction::Attach { scope, category, name, path } => self.attach(scope, &category, &name, &path),
+                        LibraryAction::Attach { scope, category, name, path } => self.attach_dialog = Some(AttachDialog::new(scope, category, name, path)),
                         LibraryAction::CopyToProject { category, name, overwrite } => {
                             // Only a library new to the project touches KiCad's tables.
                             if project.as_ref().is_some_and(|p| p.needs_link(&category)) {
@@ -726,6 +740,28 @@ impl eframe::App for App {
                         self.when_kicad_closed(action, &ctx);
                     } else if let Blocked::Import { index, part, category, targets } = action {
                         self.run_import(index, part, category, targets, ctx.clone());
+                    }
+                }
+            }
+        }
+        if let Some(dialog) = &mut self.attach_dialog {
+            match dialog.show(&ctx, global.as_ref(), project.as_ref()) {
+                AttachAction::None => {}
+                AttachAction::Cancel => self.attach_dialog = None,
+                AttachAction::Attach { targets } => {
+                    let (scope, category, name, path) = (dialog.from, dialog.category.clone(), dialog.name.clone(), dialog.path.clone());
+                    self.attach_dialog = None;
+                    let from = match scope {
+                        Scope::Global => global.clone(),
+                        Scope::Project => project.clone(),
+                    };
+                    match from {
+                        // Only a library that doesn't hold the part yet can be new to KiCad's tables.
+                        Some(from) if targets.iter().any(|t| !t.has_part(&category, &name) && t.needs_link(&category)) => {
+                            self.when_kicad_closed(Blocked::Attach { from, targets, category, name, path }, &ctx);
+                        }
+                        Some(from) => self.attach(&from, &targets, &category, &name, &path),
+                        None => self.log.push(format!("Could not add the file to {name}: its library is not available")),
                     }
                 }
             }
