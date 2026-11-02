@@ -11,7 +11,7 @@ use std::path::Path;
 
 const QUERY: &str = "query Search($q: String!) { supSearch(q: $q, limit: 10) { results { part { \
     mpn shortDescription totalAvail manufacturer { name } category { name } bestDatasheet { url } \
-    specs { attribute { shortname } displayValue } \
+    specs { attribute { name shortname } displayValue } \
     sellers { company { name } offers { sku prices { quantity price currency } } } } } } }";
 
 pub struct Nexar {
@@ -61,7 +61,10 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
         .flatten()
         .map(|r| {
             let p = &r["part"];
-            let package = p["specs"].as_array().into_iter().flatten().find(|s| s["attribute"]["shortname"] == "case_package");
+            let package = p["specs"].as_array().into_iter().flatten().find(|s| {
+                let a = format!("{} {}", http::text(s, "/attribute/shortname"), http::text(s, "/attribute/name")).to_lowercase();
+                a.contains("package") || a.contains("case")
+            });
             let mut part = Part {
                 mpn: http::text(p, "/mpn"),
                 manufacturer: http::text(p, "/manufacturer/name"),
@@ -115,7 +118,7 @@ mod tests {
         "manufacturer": {"name": "Texas Instruments"}, "category": {"name": "Operational Amplifiers"},
         "bestDatasheet": {"url": "https://www.ti.com/lit/ds/symlink/lm358.pdf"},
         "specs": [{"attribute": {"shortname": "supplyvoltage"}, "displayValue": "3V ~ 32V"},
-                  {"attribute": {"shortname": "case_package"}, "displayValue": "SOIC-8"}],
+                  {"attribute": {"name": "Case/Package", "shortname": "case_package"}, "displayValue": "SOIC-8"}],
         "sellers": [
           {"company": {"name": "Mouser Electronics"}, "offers": [{"sku": "595-LM358DR", "prices": [{"quantity": 1, "price": 0.55, "currency": "USD"}]}]},
           {"company": {"name": "Digi-Key"}, "offers": [{"sku": "296-1395-1-ND", "prices": [{"quantity": 1, "price": 0.52, "currency": "USD"}, {"quantity": 100, "price": 0.3, "currency": "EUR"}]}]},

@@ -49,7 +49,6 @@ enum Tab {
     Search,
     Import,
     Library,
-    Settings,
 }
 
 struct Pending {
@@ -73,6 +72,7 @@ struct App {
     sources: Arc<Vec<Box<dyn Source>>>,
     busy: bool,
     settings_view: SettingsView,
+    settings_open: bool,
     testing: bool,
     /// Search results whose CAD page was opened, waiting for their vendor ZIP.
     awaiting_cad: Vec<Part>,
@@ -147,6 +147,7 @@ impl App {
             sources,
             busy: false,
             settings_view: SettingsView::new(),
+            settings_open: false,
             testing: false,
             awaiting_cad: vec![],
             watch_stop: Arc::new(AtomicBool::new(false)),
@@ -373,6 +374,8 @@ impl App {
         std::thread::spawn(move || {
             let source = &sources[src];
             let work = new_work_dir();
+            // Sources write their files straight into `work`.
+            let _ = std::fs::create_dir_all(&work);
             match source.fetch(&part, &work) {
                 Ok(Some(p)) => drop(tx.send(Msg::Fetched(p, work))),
                 Ok(None) => {
@@ -416,6 +419,33 @@ impl App {
             let _ = tx.send(Msg::TestDone);
             ctx.request_repaint();
         });
+    }
+
+    fn settings_dialog(&mut self, ctx: &egui::Context) {
+        if !self.settings_open {
+            return;
+        }
+        let mut action = SettingsAction::None;
+        let modal = egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
+            ui.set_width(560.0);
+            ui.set_max_height(520.0);
+            action = self.settings_view.show(ui, &mut self.settings, self.testing);
+        });
+        if modal.should_close() {
+            self.settings_open = false;
+        }
+        match action {
+            SettingsAction::None => {}
+            SettingsAction::Rebuild => self.apply_sources(),
+            SettingsAction::Test(name) => self.test_source(name, ctx.clone()),
+            SettingsAction::Note(n) => self.log.push(n),
+            SettingsAction::Downloads(dir) => {
+                self.settings.downloads_dir = dir;
+                self.save_settings();
+                self.watch_stop.store(true, Ordering::Relaxed);
+                self.start_watcher(ctx.clone());
+            }
+        }
     }
 
     fn open_dialog(&mut self, i: usize) {
@@ -604,7 +634,11 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.tab, Tab::Search, RichText::new("Search").heading());
                 ui.selectable_value(&mut self.tab, Tab::Import, RichText::new("Import").heading());
                 ui.selectable_value(&mut self.tab, Tab::Library, RichText::new("Library").heading());
-                ui.selectable_value(&mut self.tab, Tab::Settings, RichText::new("Settings").heading());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Settings…").clicked() {
+                        self.settings_open = true;
+                    }
+                });
             });
             ui.separator();
             match self.tab {
@@ -627,18 +661,6 @@ impl eframe::App for App {
                     let (global, project) = (self.global_root(), self.project_root());
                     self.library.show(ui, global.as_ref(), project.as_ref());
                 }
-                Tab::Settings => match self.settings_view.show(ui, &mut self.settings, self.testing) {
-                    SettingsAction::None => {}
-                    SettingsAction::Rebuild => self.apply_sources(),
-                    SettingsAction::Test(name) => self.test_source(name, ctx.clone()),
-                    SettingsAction::Note(n) => self.log.push(n),
-                    SettingsAction::Downloads(dir) => {
-                        self.settings.downloads_dir = dir;
-                        self.save_settings();
-                        self.watch_stop.store(true, Ordering::Relaxed);
-                        self.start_watcher(ctx.clone());
-                    }
-                },
             }
         });
 
@@ -660,6 +682,7 @@ impl eframe::App for App {
                 }
             }
         }
+        self.settings_dialog(&ctx);
         self.kicad_open_prompt(&ctx);
     }
 }

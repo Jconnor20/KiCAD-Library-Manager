@@ -38,8 +38,9 @@ impl SettingsView {
 
     pub fn show(&mut self, ui: &mut egui::Ui, settings: &mut Settings, testing: bool) -> SettingsAction {
         let mut action = SettingsAction::None;
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            ui.heading("Search sources");
+        egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+            ui.heading("Settings");
+            ui.strong("Search sources");
             ui.weak("Keys are kept in Windows Credential Manager, not in the settings file. A source is searched when it is ticked and has all its keys.");
             for info in SOURCES {
                 ui.add_space(8.0);
@@ -101,7 +102,7 @@ impl SettingsView {
             }
 
             ui.add_space(16.0);
-            ui.heading("Downloads folder");
+            ui.strong("Downloads folder");
             ui.weak("KLM watches this folder for vendor ZIPs (SnapMagic, Ultra Librarian, SamacSys).");
             ui.horizontal(|ui| {
                 ui.label(settings.downloads().map_or("none found".into(), |d| d.display().to_string()));
