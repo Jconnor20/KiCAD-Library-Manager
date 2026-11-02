@@ -149,7 +149,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
 
 ## Wave 4: Projects, BOM and other tools (4 in parallel)
 
-- [ ] **W4.1 BOM import and enrichment (R8; Rev "BOM")** (L) ⚑
+- [x] **W4.1 BOM import and enrichment (R8; Rev "BOM")** (L) ⚑
   - **Owns:** `core/bom.rs` (new), a new "BOM" tab
   - Read a project's BOM with `kicad-cli sch export bom`.
   - Match each line by MPN, manufacturer or supplier number.
@@ -158,18 +158,18 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - Shipping region: a Settings default plus a per-project override (where you are, or where the board is made). Used for stock, lead time and shipping where the API supports it.
   - Export to CSV.
   - **Needs:** W3.2, working distributor keys
-- [ ] **W4.2 Project health report (Rev)** (M)
+- [x] **W4.2 Project health report (Rev)** (M)
   - **Owns:** `core/health.rs` (new), `klm-cli health`
   - Scan a whole project for missing or broken symbols, footprints, 3D models, datasheets and sim models.
   - Also flag duplicate MPNs, inconsistent metadata, orphaned files and invalid library references.
   - Export as CSV or JSON. Usable in CI through the CLI.
   - **Needs:** W1.2
-- [ ] **W4.3 Import from other tools (R5)** (L) ⚑
+- [x] **W4.3 Import from other tools (R5)** (L) ⚑
   - **Owns:** `core/sources/foreign.rs` (new), "Import library…" on the Import tab
   - **Existing KiCad libraries** first, including your old `KiCAD_Library`: split into KLM categories, with fields filled in where possible.
   - Then Altium, Eagle/Fusion and EasyEDA libraries, converted through KiCad's own importers where `kicad-cli` supports them. Check each format first and say so where it doesn't.
   - **Needs:** W3.3 (categorising)
-- [ ] **W4.4 Portable export (R6)** (M)
+- [x] **W4.4 Portable export (R6)** (M)
   - **Owns:** `core/export.rs` (new)
   - A ZIP of the selected parts as standalone KiCad libraries with relative paths, importable by Altium and Fusion.
   - Add the `klm-cli export` command.

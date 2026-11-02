@@ -65,6 +65,21 @@ These have passed automated tests but haven't been checked by hand in the app or
 - [ ] **Rollback.** Roll back the import. Expect the part gone and the library exactly as before, including KiCad's library list. Expect a prompt to close KiCad if the list has to change.
 - [ ] **Rolling back an older snapshot.** Expect the newer changes after it to be undone too.
 
+## BOM tab
+
+- [ ] **Load a real project.** Open the BOM tab on one of your projects. Expect every line from the schematic, matched to library parts by MPN or supplier number, with "missing" shown for parts without CAD files.
+- [ ] **Live prices.** With DigiKey and Mouser keys set, expect stock, price at your quantity and lead time per line, and totals (unit, extended, coverage, longest lead time). Spot-check two lines against the distributor's website, including a quantity that crosses a price break.
+- [ ] **Shipping region.** Set a Settings default, then a different project override. Expect DigiKey prices in that region's currency; Mouser and LCSC are labelled as ignoring it.
+- [ ] **Offline.** Disconnect the network and reload. Expect cached prices marked stale and one error in the log, not one per line.
+- [ ] **CSV export.** Export and open in Excel. Expect the same rows and totals, with no cell turned into a formula.
+
+## Import library (other tools)
+
+- [ ] **Your old `KiCAD_Library`.** Click **Import library…** on the Import tab and pick it. Expect a dry-run list with sensible categories, then after Apply the parts in the Library tab with ✔ and one snapshot in History.
+- [ ] **Altium.** Try a real `.SchLib`/`.PcbLib` or `.IntLib`. Expect either imported parts or a clear "kicad-cli can't convert this" message.
+- [ ] **EasyEDA.** Same with an `.elib`/`.epro` library export.
+- [ ] **Eagle / Fusion.** Same with an `.lbr`.
+
 ## Settings
 
 - [ ] **kicad-cli path.** Use **Browse…** to pick `kicad-cli.exe`, click **Test**, then **Use default**. Expect the version to show each time.
@@ -82,6 +97,9 @@ Do this one last, and on a copy if you're nervous. History can roll it back.
 - [ ] **`klm-cli check --deep`** lists every part. The exit code is 1 when something is incomplete.
 - [ ] **`klm-cli import a.zip b.zip --dry-run`** prints the plan and changes nothing.
 - [ ] **`klm-cli history`**, then **`klm-cli rollback <id>`**, restores that snapshot.
+- [ ] **`klm-cli health --project <dir>`** on a real project. Expect a readable report, exit code 1 only when there are errors, and the same findings with `--json` and `--csv`.
+- [ ] **`klm-cli export out.zip <part>...`**, then unzip it and add the `sym-lib-table`/`fp-lib-table` entries to a fresh KiCad project. Expect the symbols to place with their footprints and 3D models showing.
+- [ ] **Export into Altium or Fusion.** Import the same ZIP with their KiCad importer. Expect symbols and footprints to come through.
 
 ---
 
@@ -90,3 +108,4 @@ Do this one last, and on a copy if you're nervous. History can roll it back.
 - [x] The TE switch (2-1977223-4) datasheet attach: `klm-cli check` shows its datasheet present.
 - [x] Your real library passes `klm-cli check --deep`: 3 parts, 0 problems.
 - [x] A dry-run import of your SamacSys resistor ZIP changes no files.
+- [x] An exported bundle loads with `kicad-cli sym upgrade` and `fp upgrade` (KiCad installed on this machine, run by the W4.4 test after merge).
