@@ -1,6 +1,7 @@
 //! Part sources. Each search source (LCSC, DigiKey, …) implements [`Source`] and is listed in
 //! [`all`]; the Search tab queries every enabled one. Vendor ZIPs go through `zip_import` instead.
 
+pub mod combine;
 pub mod digikey;
 mod http;
 pub mod lcsc;
