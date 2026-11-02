@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -9,6 +10,8 @@ pub struct Settings {
     /// Folder watched for vendor ZIPs; the OS Downloads folder when unset.
     pub downloads_dir: Option<PathBuf>,
     pub last_project: Option<PathBuf>,
+    /// Per-source switch by source name; a source not listed is on (it still needs credentials).
+    pub source_enabled: BTreeMap<String, bool>,
 }
 
 fn path() -> Option<PathBuf> {
@@ -29,7 +32,29 @@ impl Settings {
         std::fs::write(&p, serde_json::to_string_pretty(self)?).with_context(|| format!("writing {}", p.display()))
     }
 
+    pub fn is_enabled(&self, source: &str) -> bool {
+        self.source_enabled.get(source).copied().unwrap_or(true)
+    }
+
     pub fn downloads(&self) -> Option<PathBuf> {
         self.downloads_dir.clone().or_else(dirs::download_dir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trips_and_defaults_sources_on() {
+        let mut s = Settings::default();
+        assert!(s.is_enabled("DigiKey"));
+        s.source_enabled.insert("Mouser".into(), false);
+        s.downloads_dir = Some("D:/dl".into());
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert!(!back.is_enabled("Mouser") && back.is_enabled("DigiKey"));
+        assert_eq!(back.downloads_dir, s.downloads_dir);
+        // Old files without the new field still load.
+        assert!(serde_json::from_str::<Settings>(r#"{"global_root":"C:/x"}"#).unwrap().source_enabled.is_empty());
     }
 }
