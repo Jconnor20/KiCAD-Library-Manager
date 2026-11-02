@@ -129,7 +129,7 @@ impl LibraryTab {
             Action::Edit(targets) => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
-                    self.edit_dialog = Some(EditDialog::new(self.scope, targets, root));
+                    self.edit_dialog = Some(EditDialog::new(self.scope, targets, root, cx.settings.rules.clone()));
                 }
             }
             Action::Preview { category, name } => {

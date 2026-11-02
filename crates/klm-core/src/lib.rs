@@ -12,6 +12,7 @@ pub mod library;
 pub mod matching;
 pub mod part;
 pub mod preview;
+pub mod rules;
 pub mod search_filter;
 pub mod settings;
 pub mod snapshot;

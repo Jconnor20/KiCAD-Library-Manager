@@ -1,5 +1,6 @@
 use eframe::egui;
 use klm_core::library::{LibraryRoot, PartEdit, Scope};
+use klm_core::rules::Rules;
 
 pub enum EditAction {
     None,
@@ -17,10 +18,11 @@ pub struct EditDialog {
     category: String,
     /// (field, text, text when the dialog opened).
     fields: Vec<(&'static str, String, String)>,
+    rules: Rules,
 }
 
 impl EditDialog {
-    pub fn new(scope: Scope, targets: Vec<(String, String)>, root: &LibraryRoot) -> Self {
+    pub fn new(scope: Scope, targets: Vec<(String, String)>, root: &LibraryRoot, rules: Rules) -> Self {
         let single = targets.len() == 1;
         let current = if single { root.part_fields(&targets[0].0, &targets[0].1).unwrap_or_default() } else { vec![] };
         let fields = if single {
@@ -30,14 +32,20 @@ impl EditDialog {
         };
         let mut categories = root.categories();
         categories.sort();
-        Self { scope, category: if single { targets[0].0.clone() } else { String::new() }, targets, categories, fields }
+        Self { scope, category: if single { targets[0].0.clone() } else { String::new() }, targets, categories, fields, rules }
+    }
+
+    /// The category the user's rules give for the text in the boxes.
+    fn suggested(&self) -> Option<String> {
+        let text = self.fields.iter().map(|f| f.1.as_str()).collect::<Vec<_>>().join(" ");
+        self.rules.rule_category(&text).map(str::to_string).filter(|c| *c != self.category)
     }
 
     fn edit(&self) -> PartEdit {
         let current = (self.targets.len() == 1).then(|| self.targets[0].0.as_str());
         PartEdit {
             category: Some(self.category.trim().to_string()).filter(|c| !c.is_empty() && Some(c.as_str()) != current),
-            fields: self.fields.iter().filter(|(_, now, was)| now.trim() != was).map(|(k, now, _)| (k.to_string(), now.trim().to_string())).collect(),
+            fields: self.fields.iter().filter(|(_, now, was)| now.trim() != was).map(|(k, now, _)| (k.to_string(), if *k == "MPN" { self.rules.normalise_mpn(now) } else { now.trim().to_string() })).collect(),
         }
     }
 
@@ -59,6 +67,11 @@ impl EditDialog {
                             ui.selectable_value(&mut self.category, c.clone(), c);
                         }
                     });
+                    if let Some(c) = self.suggested() {
+                        if ui.button(format!("Use {c}")).on_hover_text("Category from your naming rules").clicked() {
+                            self.category = c;
+                        }
+                    }
                 });
                 ui.end_row();
                 for (key, text, _) in &mut self.fields {
