@@ -24,7 +24,7 @@ use klm_core::sources::Source;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use tabs::{import, library, search, settings};
+use tabs::{history, import, library, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
@@ -35,6 +35,7 @@ enum Msg {
     Search(search::Msg),
     Import(import::Msg),
     Library(library::Msg),
+    History(history::Msg),
     Settings(settings::Msg),
 }
 
@@ -43,6 +44,7 @@ enum Tab {
     Search,
     Import,
     Library,
+    History,
 }
 
 /// State every tab can read and change.
@@ -105,6 +107,7 @@ struct App {
     search_tab: search::SearchTab,
     import_tab: import::ImportTab,
     library_tab: library::LibraryTab,
+    history_tab: history::HistoryTab,
     settings_tab: settings::SettingsTab,
 }
 
@@ -133,6 +136,7 @@ impl App {
     fn new(ctx: &egui::Context, project_arg: Option<PathBuf>) -> Self {
         let mut settings = Settings::load();
         kicad_env::set_kicad_cli_override(settings.kicad_cli.clone());
+        klm_core::snapshot::set_store_path(klm_core::store::Store::default_path());
         if let Some(p) = &project_arg {
             settings.last_project = Some(project_dir(p));
         }
@@ -162,6 +166,7 @@ impl App {
             import_tab,
             search_tab: search::SearchTab::default(),
             library_tab: library::LibraryTab::default(),
+            history_tab: history::HistoryTab::default(),
             settings_tab: settings::SettingsTab::new(),
             cx,
             rx,
@@ -233,6 +238,7 @@ impl App {
                 Msg::Search(m) => self.search_tab.handle(m, &mut self.cx),
                 Msg::Import(m) => self.import_tab.handle(m, &mut self.cx),
                 Msg::Library(m) => self.library_tab.handle(m, &mut self.cx),
+                Msg::History(m) => self.history_tab.handle(m, &mut self.cx),
                 Msg::Settings(m) => self.settings_tab.handle(m, &mut self.cx),
             }
         }
@@ -337,6 +343,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.cx.tab, Tab::Search, RichText::new("Search").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::Import, RichText::new("Import").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::Library, RichText::new("Library").heading());
+                ui.selectable_value(&mut self.cx.tab, Tab::History, RichText::new("History").heading());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Settings…").clicked() {
                         self.settings_tab.open();
@@ -348,11 +355,13 @@ impl eframe::App for App {
                 Tab::Search => self.search_tab.ui(ui, &mut self.cx),
                 Tab::Import => self.import_tab.ui(ui, &mut self.cx),
                 Tab::Library => self.library_tab.ui(ui, &mut self.cx),
+                Tab::History => self.history_tab.ui(ui, &mut self.cx),
             }
         });
 
         self.import_tab.dialogs(&mut self.cx);
         self.library_tab.dialogs(&mut self.cx);
+        self.history_tab.dialogs(&mut self.cx);
         self.settings_tab.dialogs(&mut self.cx);
         self.kicad_open_prompt();
     }
