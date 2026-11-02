@@ -1,4 +1,4 @@
-use super::{import, search};
+use super::{import, search, standards};
 use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui;
 use klm_core::credentials::{self, SOURCES};
@@ -27,6 +27,7 @@ enum Action {
     Note(String),
     /// Naming rules changed: save the settings.
     SaveNaming,
+    Standards(standards::Action),
 }
 
 /// The Settings popup. Credential entry boxes only ever hold what the user is typing; stored secrets are never read back into the UI.
@@ -35,11 +36,12 @@ pub struct SettingsTab {
     testing: bool,
     inputs: HashMap<(&'static str, &'static str), String>,
     stored: HashSet<(&'static str, &'static str)>,
+    standards: standards::Standards,
 }
 
 impl SettingsTab {
     pub fn new() -> Self {
-        let mut v = Self { open: false, testing: false, inputs: HashMap::new(), stored: HashSet::new() };
+        let mut v = Self { open: false, testing: false, inputs: HashMap::new(), stored: HashSet::new(), standards: Default::default() };
         v.refresh();
         v
     }
@@ -86,6 +88,7 @@ impl SettingsTab {
             }
             Action::TestCli => self.test_cli(cx),
             Action::SaveNaming => cx.save_settings(),
+            Action::Standards(a) => self.standards.act(a, cx),
         }
     }
 
@@ -234,6 +237,11 @@ impl SettingsTab {
 
             if naming_section(ui, &mut settings.rules) {
                 action = Action::SaveNaming;
+            }
+            ui.add_space(16.0);
+            match self.standards.show(ui, &mut settings.standards) {
+                standards::Action::None => {}
+                a => action = Action::Standards(a),
             }
         });
         action

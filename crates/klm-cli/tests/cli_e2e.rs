@@ -110,3 +110,41 @@ fn dry_run_prints_the_plan_and_writes_nothing() {
     assert!(text.contains("add symbol TESTPART in KLM_ICs") && text.contains("add library KLM_ICs to KiCad's tables"), "{text}");
     assert!(!lib.exists() && std::fs::read_dir(&config).unwrap().count() == 0, "a dry run writes nothing");
 }
+
+#[test]
+fn standardise_dry_run_then_apply_keeps_parts_loadable() {
+    let Ok(cli) = kicad_env::kicad_cli() else { return eprintln!("kicad-cli not found; skipping") };
+    if !Command::new(&cli).arg("version").output().is_ok_and(|o| o.status.success()) {
+        return eprintln!("kicad-cli not working; skipping");
+    }
+    let dir = fresh("standardise");
+    let (config, lib, settings, zip) = (dir.join("config"), dir.join("lib"), dir.join("settings.json"), dir.join("t.zip"));
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(&settings, format!(r#"{{"global_root": {:?}}}"#, lib.to_string_lossy().replace('\\', "/"))).unwrap();
+    make_zip(&zip);
+    assert!(klm(&settings, &config, &["import", zip.to_str().unwrap(), "--category", "ICs"]).status.success());
+    let (sym, pretty) = (lib.join("symbols/ICs.kicad_sym"), lib.join("footprints/ICs.pretty"));
+    let fp = std::fs::read_dir(&pretty).unwrap().flatten().next().unwrap().path();
+    let read = || (std::fs::read_to_string(&sym).unwrap(), std::fs::read_to_string(&fp).unwrap());
+    let before = read();
+
+    let out = klm(&settings, &config, &["standardise", "--dry-run"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("origin moved") && text.contains("Dry run: nothing was changed."), "{text}");
+    assert_eq!(read(), before, "a dry run writes nothing");
+
+    let history = |s: &Path| String::from_utf8_lossy(&klm(s, &config, &["history"]).stdout).matches("standardise (").count();
+    assert_eq!(history(&settings), 0);
+    assert!(klm(&settings, &config, &["standardise"]).status.success());
+    assert_ne!(read(), before);
+    assert_eq!(history(&settings), 1, "a snapshot is taken before writing");
+
+    // KiCad still loads both files.
+    let svg = dir.join("svg");
+    let name = fp.file_stem().unwrap().to_str().unwrap();
+    for args in [vec!["sym", "export", "svg", "--symbol", "TESTPART", sym.to_str().unwrap()], vec!["fp", "export", "svg", "--footprint", name, pretty.to_str().unwrap()]] {
+        let o = Command::new(&cli).args(&args).arg("-o").arg(&svg).output().unwrap();
+        assert!(o.status.success(), "{args:?}: {}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    }
+}

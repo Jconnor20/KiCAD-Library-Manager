@@ -18,6 +18,8 @@ pub struct Settings {
     pub display_currency: String,
     /// Category and naming rules.
     pub rules: crate::rules::Rules,
+    /// Which standardise rules run, and their values; KLC's when unset.
+    pub standards: crate::standardise::Rules,
 }
 
 fn path() -> Option<PathBuf> {

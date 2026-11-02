@@ -208,12 +208,12 @@ fn list<'a>(numbers: impl IntoIterator<Item = &'a str>) -> String {
     if more > 0 { format!("{shown} and {more} more") } else { shown }
 }
 
-struct Pad {
-    number: String,
+pub(crate) struct Pad {
+    pub(crate) number: String,
     shape: String,
-    at: (f64, f64),
+    pub(crate) at: (f64, f64),
     /// Larger side of the pad.
-    size: f64,
+    pub(crate) size: f64,
 }
 
 fn xy(n: &Sexpr) -> Option<(f64, f64)> {
@@ -221,7 +221,7 @@ fn xy(n: &Sexpr) -> Option<(f64, f64)> {
 }
 
 /// Pads with a number. Unnumbered pads and non-plated holes are mechanical and have no pin.
-fn numbered_pads(fp: &Sexpr) -> Vec<Pad> {
+pub(crate) fn numbered_pads(fp: &Sexpr) -> Vec<Pad> {
     fp.children("pad")
         .filter(|p| p.arg(1) != Some("np_thru_hole"))
         .filter_map(|p| {
@@ -233,11 +233,11 @@ fn numbered_pads(fp: &Sexpr) -> Vec<Pad> {
 }
 
 /// Whether any node under `x` sits on one of `layers`.
-fn on_layer(x: &Sexpr, layers: &[&str]) -> bool {
+pub(crate) fn on_layer(x: &Sexpr, layers: &[&str]) -> bool {
     x.child("layer").and_then(|l| l.arg(0)).is_some_and(|l| layers.contains(&l)) || x.items().iter().any(|c| on_layer(c, layers))
 }
 
-fn points(x: &Sexpr, out: &mut Vec<(f64, f64)>) {
+pub(crate) fn points(x: &Sexpr, out: &mut Vec<(f64, f64)>) {
     if matches!(x.head(), Some("xy" | "start" | "end" | "center" | "mid" | "at")) {
         out.extend(xy(x));
     }
@@ -249,7 +249,7 @@ fn points(x: &Sexpr, out: &mut Vec<(f64, f64)>) {
 /// plain outline of straight lines doesn't count, since every footprint has one. Footprints with fewer
 /// than three pads (resistors, capacitors) have no pin 1 to find, and are not checked. It is a
 /// heuristic: a marker drawn further out, or only as an elongated outline line, is reported as missing.
-fn has_pin1_marker(fp: &Sexpr, pads: &[Pad]) -> bool {
+pub(crate) fn has_pin1_marker(fp: &Sexpr, pads: &[Pad]) -> bool {
     let numbers: BTreeSet<&str> = pads.iter().map(|p| p.number.as_str()).collect();
     let Some(one) = pads.iter().find(|p| p.number == "1" || p.number == "A1") else { return true };
     if numbers.len() < 3 {

@@ -8,7 +8,7 @@ use klm_core::batch::{self, Op, Target};
 use klm_core::checks::{self, Severity};
 use klm_core::library::{Check, LibraryRoot, PartStatus, Scope};
 use klm_core::settings::Settings;
-use klm_core::{kicad_env, snapshot};
+use klm_core::{kicad_env, snapshot, standardise};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -18,6 +18,7 @@ const USAGE: &str = "usage:
   klm-cli relink [--project <dir>]
   klm-cli history [--project <dir>]
   klm-cli rollback <id> [--project <dir>]
+  klm-cli standardise [--project <dir>] [--dry-run]
   klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]";
 
 #[derive(Debug, PartialEq)]
@@ -26,6 +27,7 @@ enum Command {
     Relink { project: Option<PathBuf> },
     History { project: Option<PathBuf> },
     Rollback { id: String, project: Option<PathBuf> },
+    Standardise { project: Option<PathBuf>, dry_run: bool },
     Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
 }
 
@@ -71,6 +73,10 @@ fn parse(args: &[String]) -> Result<Command> {
                 let id = zips.pop().context("rollback needs a snapshot id from `history`")?;
                 Ok(Command::Rollback { id: id.to_string_lossy().into(), project })
             }
+        }
+        "standardise" => {
+            only_for(zips.is_empty() && category.is_none() && to.is_none() && !overwrite && !json && !deep, "that argument")?;
+            Ok(Command::Standardise { project, dry_run })
         }
         "import" => {
             only_for(!json && !deep, "--json or --deep")?;
@@ -231,6 +237,22 @@ fn rollback(id: &str, project: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+/// Prints what the Settings' standards rules would change in each library, then applies it unless `dry_run`.
+fn standardise(project: Option<&Path>, dry_run: bool) -> Result<()> {
+    let s = settings()?;
+    for root in roots(&s, project)? {
+        let plan = standardise::plan(&root, &s.standards);
+        print!("{plan}");
+        if !dry_run {
+            println!("Standardised {} file(s) in {}", standardise::apply(&plan)?, root.dir.display());
+        }
+    }
+    if dry_run {
+        println!("Dry run: nothing was changed.");
+    }
+    Ok(())
+}
+
 /// Imports each ZIP, or with `dry_run` only prints what that would change. Exits non-zero if any ZIP fails.
 fn import(zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool) -> Result<ExitCode> {
     let s = settings()?;
@@ -265,6 +287,7 @@ fn main() -> ExitCode {
         Command::Relink { project } => relink(project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::History { project } => history(project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Rollback { id, project } => rollback(&id, project.as_deref()).map(|_| ExitCode::SUCCESS),
+        Command::Standardise { project, dry_run } => standardise(project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
     });
     result.unwrap_or_else(|e| {
@@ -292,6 +315,7 @@ mod tests {
         assert_eq!(parse(&args("history")).unwrap(), Command::History { project: None });
         assert_eq!(parse(&args("rollback 0001 --project D:/p")).unwrap(), Command::Rollback { id: "0001".into(), project: Some("D:/p".into()) });
         assert!(parse(&args("rollback")).is_err());
+        assert_eq!(parse(&args("standardise --dry-run --project D:/p")).unwrap(), Command::Standardise { project: Some("D:/p".into()), dry_run: true });
         assert_eq!(
             parse(&args("import a.zip --category ICs --to project --overwrite")).unwrap(),
             Command::Import { zips: vec!["a.zip".into()], category: Some("ICs".into()), to: Target::Project, project: None, overwrite: true, dry_run: false }
@@ -308,7 +332,7 @@ mod tests {
 
     #[test]
     fn rejects_bad_arguments() {
-        for bad in ["", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "check --dry-run", "relink --dry-run"] {
+        for bad in ["", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "check --dry-run", "relink --dry-run", "standardise a.zip", "standardise --json"] {
             assert!(parse(&args(bad)).is_err(), "{bad:?} should fail");
         }
     }
