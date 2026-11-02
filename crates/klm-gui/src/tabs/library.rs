@@ -1,11 +1,15 @@
+use super::edit_dialog::{EditAction, EditDialog};
 use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui::{self, Color32, RichText};
-use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartStatus, Scope};
+use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartEdit, PartStatus, Scope};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub enum Msg {
     /// Re-read the listing, e.g. after an import.
     Refresh,
+    /// Apply `edit` to each (category, name) in the `scope` library.
+    Edit { scope: Scope, targets: Vec<(String, String)>, edit: PartEdit },
     /// Copy a global part into the project library; `overwrite` replaces an existing copy.
     CopyToProject { category: String, name: String, overwrite: bool },
     Attach { from: LibraryRoot, targets: Vec<LibraryRoot>, category: String, name: String, path: PathBuf },
@@ -14,6 +18,8 @@ pub enum Msg {
 /// Something the user asked for on a row; `ui` carries it out and refreshes the view.
 enum Action {
     None,
+    /// Open the edit dialog for these (category, name) parts.
+    Edit(Vec<(String, String)>),
     Attach { scope: Scope, category: String, name: String, path: PathBuf },
     CopyToProject { category: String, name: String, overwrite: bool },
 }
@@ -26,11 +32,22 @@ pub struct LibraryTab {
     /// Cached listing; `None` means re-read from disk on the next frame.
     parts: Option<Vec<PartStatus>>,
     attach_dialog: Option<AttachDialog>,
+    /// Ticked rows, as (category, name).
+    selected: HashSet<(String, String)>,
+    edit_dialog: Option<EditDialog>,
 }
 
 impl Default for LibraryTab {
     fn default() -> Self {
-        Self { scope: Scope::Global, filter: String::new(), only_incomplete: false, parts: None, attach_dialog: None }
+        Self {
+            scope: Scope::Global,
+            filter: String::new(),
+            only_incomplete: false,
+            parts: None,
+            attach_dialog: None,
+            selected: HashSet::new(),
+            edit_dialog: None,
+        }
     }
 }
 
@@ -55,6 +72,12 @@ impl LibraryTab {
         let (global, project) = (cx.global_root(), cx.project_root());
         match self.show(ui, global.as_ref(), project.as_ref()) {
             Action::None => {}
+            Action::Edit(targets) => {
+                let root = if self.scope == Scope::Global { &global } else { &project };
+                if let Some(root) = root {
+                    self.edit_dialog = Some(EditDialog::new(self.scope, targets, root));
+                }
+            }
             Action::Attach { scope, category, name, path } => self.attach_dialog = Some(AttachDialog::new(scope, category, name, path)),
             Action::CopyToProject { category, name, overwrite } => {
                 // Only a library new to the project touches KiCad's tables.
@@ -70,6 +93,7 @@ impl LibraryTab {
     pub fn handle(&mut self, msg: Msg, cx: &mut AppCtx) {
         match msg {
             Msg::Refresh => self.parts = None,
+            Msg::Edit { scope, targets, edit } => self.edit(scope, &targets, &edit, cx),
             Msg::CopyToProject { category, name, overwrite } => self.copy_to_project(&category, &name, overwrite, cx),
             Msg::Attach { from, targets, category, name, path } => self.attach(&from, &targets, &category, &name, &path, cx),
         }
@@ -78,6 +102,23 @@ impl LibraryTab {
     /// The "add file" popup; shown whatever tab is selected.
     pub fn dialogs(&mut self, cx: &mut AppCtx) {
         let (global, project) = (cx.global_root(), cx.project_root());
+        if let Some(dialog) = &mut self.edit_dialog {
+            match dialog.show(&cx.ctx) {
+                EditAction::None => {}
+                EditAction::Cancel => self.edit_dialog = None,
+                EditAction::Apply { scope, targets, edit } => {
+                    self.edit_dialog = None;
+                    let root = if scope == Scope::Global { &global } else { &project };
+                    // Only a category library new to KiCad's tables touches them.
+                    let new_lib = root.as_ref().is_some_and(|r| edit.category.as_deref().is_some_and(|c| r.needs_link(c)));
+                    if new_lib {
+                        cx.when_kicad_closed(AppMsg::Library(Msg::Edit { scope, targets, edit }));
+                    } else {
+                        self.edit(scope, &targets, &edit, cx);
+                    }
+                }
+            }
+        }
         if let Some(dialog) = &mut self.attach_dialog {
             match dialog.show(&cx.ctx, global.as_ref(), project.as_ref()) {
                 AttachAction::None => {}
@@ -126,6 +167,31 @@ impl LibraryTab {
         self.parts = None;
     }
 
+    fn edit(&mut self, scope: Scope, targets: &[(String, String)], edit: &PartEdit, cx: &mut AppCtx) {
+        let root = if scope == Scope::Global { cx.global_root() } else { cx.project_root() };
+        let Some(root) = root else { return };
+        for (category, name) in targets {
+            match root.edit_part(category, name, edit) {
+                Ok(done) => {
+                    let mut line = format!("Edited {name}");
+                    if done.name != *name {
+                        line += &format!(", renamed {}", done.name);
+                    }
+                    if done.category != *category {
+                        line += &format!(", moved to {}", root.nickname(&done.category));
+                    }
+                    cx.log.push(line);
+                    if done.new_lib {
+                        cx.log.push(format!("Added library {} to KiCad", root.nickname(&done.category)));
+                    }
+                }
+                Err(e) => cx.log.push(format!("Could not edit {name}: {e:#}")),
+            }
+        }
+        self.selected.clear();
+        self.parts = None;
+    }
+
     fn copy_to_project(&mut self, category: &str, name: &str, overwrite: bool, cx: &mut AppCtx) {
         let (Some(global), Some(project)) = (cx.global_root(), cx.project_root()) else { return };
         match global.copy_part_to(category, name, &project, overwrite) {
@@ -141,15 +207,18 @@ impl LibraryTab {
     }
 
     fn show(&mut self, ui: &mut egui::Ui, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> Action {
+        let mut edit_selected = false;
         ui.horizontal(|ui| {
             let before = self.scope;
             ui.add_enabled_ui(global.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Global, "Global"));
             ui.add_enabled_ui(project.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Project, "Project"));
             if self.scope != before {
                 self.parts = None;
+                self.selected.clear();
             }
             ui.separator();
             ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Filter by MPN, maker, category…").desired_width(220.0));
+            edit_selected = ui.add_enabled(!self.selected.is_empty(), egui::Button::new("Edit selected…")).clicked();
             ui.checkbox(&mut self.only_incomplete, "Only incomplete");
             if ui.button("Refresh").clicked() {
                 self.parts = None;
@@ -181,13 +250,28 @@ impl LibraryTab {
             .collect();
 
         let mut action = Action::None;
+        if edit_selected {
+            let mut targets: Vec<_> = self.selected.iter().cloned().collect();
+            targets.sort();
+            action = Action::Edit(targets);
+        }
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-            egui::Grid::new("library").striped(true).num_columns(9).spacing([14.0, 4.0]).show(ui, |ui| {
+            egui::Grid::new("library").striped(true).num_columns(10).spacing([14.0, 4.0]).show(ui, |ui| {
+                ui.label("");
                 for h in ["Category", "MPN", "Manufacturer", "Footprint", "3D model", "Datasheet", "Sim model", "In KiCad", ""] {
                     ui.strong(h);
                 }
                 ui.end_row();
                 for p in shown {
+                    let key = (p.category.clone(), p.name.clone());
+                    let mut ticked = self.selected.contains(&key);
+                    if ui.checkbox(&mut ticked, "").changed() {
+                        if ticked {
+                            self.selected.insert(key);
+                        } else {
+                            self.selected.remove(&key);
+                        }
+                    }
                     ui.label(&p.category);
                     let mpn = ui.label(RichText::new(&p.mpn).strong());
                     if !p.description.is_empty() {
@@ -200,6 +284,9 @@ impl LibraryTab {
                     check_cell(ui, p.sim, "Sim model");
                     check_cell(ui, if p.in_kicad { Check::Ok } else { Check::Missing }, "KiCad library entry");
                     ui.horizontal(|ui| {
+                        if ui.small_button("Edit…").on_hover_text("Edit MPN, maker, description, category, supplier numbers, datasheet and tags").clicked() {
+                            action = Action::Edit(vec![(p.category.clone(), p.name.clone())]);
+                        }
                         if ui.small_button("Attach…").on_hover_text("Add a datasheet (PDF), SPICE model or 3D model (STEP/WRL)").clicked() {
                             let picked = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
                             if let Some(path) = picked {

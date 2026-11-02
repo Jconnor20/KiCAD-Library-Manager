@@ -85,7 +85,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - **Owns:** `core/download.rs` (new; moves LCSC's download helper here) and one button in `tabs/library.rs`, placed next to W1.2's column.
   - "Download missing datasheets": every part whose datasheet is only a web link gets a local PDF.
   - **Done when:** tested against a local HTTP server, and a failed download keeps the link.
-- [ ] **W1.5 Part metadata editor (Rev)** (M)
+- [x] **W1.5 Part metadata editor (Rev)** (M)
   - **Owns:** `gui/edit_dialog.rs` (new), `core/library/edit.rs` (new)
   - Edit MPN, manufacturer, description, category, supplier numbers, datasheet URL and tags after import.
   - Changing the category moves the part between category libraries, footprint and 3D model included.

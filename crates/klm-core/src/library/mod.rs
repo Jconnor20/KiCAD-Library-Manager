@@ -1,16 +1,18 @@
 //! A KLM library on disk (global or per-project) and the import of one part into it.
 //!
 //! This file holds the shared pieces (the root, naming, KiCad table linking); each feature has its
-//! own file: `import`, `status`, `attach`, `copy`, `relocate`. `fields` has the symbol/footprint helpers.
+//! own file: `import`, `status`, `attach`, `copy`, `edit`, `relocate`. `fields` has the symbol/footprint helpers.
 
 mod attach;
 mod copy;
+mod edit;
 mod fields;
 mod import;
 mod relocate;
 mod status;
 
 pub use attach::{ATTACH_EXTENSIONS, AttachKind};
+pub use edit::{EDIT_FIELDS, Edited, PartEdit};
 pub use fields::{property, set_property};
 pub use status::{Check, PartStatus};
 
