@@ -101,7 +101,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - Render the symbol and footprint as SVG with `kicad-cli`, and the footprint with its 3D model with `kicad-cli pcb render`.
   - Show these in the import dialog and the Library tab, together with any W1.2 check warnings.
   - **Needs:** W1.2
-- [ ] **W2.2 Get from multiple sources (R3)** (L) ⚑
+- [x] **W2.2 Get from multiple sources (R3)** (L) ⚑
   - **Owns:** `core/sources/combine.rs` (new) and the per-file "from" picker in the import dialog
   - "Get…" searches every source by MPN and suggests the best file of each type, preferring a complete set from one source.
   - The dialog shows where each file comes from and lets you swap any of them.

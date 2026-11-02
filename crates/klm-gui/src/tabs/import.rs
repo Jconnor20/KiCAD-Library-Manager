@@ -1,12 +1,13 @@
 use super::batch_dialog::{self, BatchDialog, ImportAllSetup, Progress, SetupAction};
 use super::library;
 use super::preview::PreviewPanel;
-use crate::{AppCtx, Msg as AppMsg, Tab, new_work_dir};
+use crate::{AppCtx, Msg as AppMsg, new_work_dir};
 use eframe::egui;
 use klm_core::batch;
 use klm_core::library::LibraryRoot;
 use klm_core::matching;
 use klm_core::part::Part;
+use klm_core::sources::combine::{Combined, Kind};
 use klm_core::sources::{watcher::Watcher, zip_import};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,10 +17,11 @@ use std::sync::mpsc::Sender;
 pub enum Msg {
     /// A vendor ZIP was read (by the Downloads watcher or "Import ZIP…").
     Found(Part, PathBuf),
-    /// A search result's files, downloaded and ready for the import dialog.
-    Fetched(Part, PathBuf),
-    /// A CAD page was opened for this search result; a matching ZIP may follow.
-    CadOpened(Part),
+    /// "Get…" on a search result: open the import dialog while every source is asked for its files,
+    /// which go under `work`.
+    Gather { part: Part, work: PathBuf, waiting: usize },
+    /// One source's answer for the "Get…" whose files go under `work`.
+    Answer { work: PathBuf, source: String, found: anyhow::Result<Option<Part>> },
     /// Import `part` now (KiCad is closed, or the libraries are already in its tables).
     Run { index: usize, part: Part, category: String, targets: Vec<LibraryRoot> },
     Imported { index: usize, notes: Vec<String> },
@@ -70,6 +72,32 @@ fn scan_zip(zip: &Path, tx: &Sender<AppMsg>) {
             let _ = tx.send(AppMsg::Log(format!("{name}: {e:#}")));
         }
     }
+}
+
+/// The built-in categories plus those already in a library.
+fn categories(cx: &AppCtx) -> Vec<String> {
+    let mut categories: Vec<String> = klm_core::categories::DEFAULT.iter().map(|s| s.to_string()).collect();
+    for root in cx.roots() {
+        categories.extend(root.categories());
+    }
+    categories.sort();
+    categories.dedup();
+    categories
+}
+
+/// Moves a ZIP's extracted files from `from` to `to` (inside an open "Get…" dialog's folder, so they're
+/// cleaned up with it) and repoints `part` at them. False if they couldn't be moved.
+fn adopt(part: &mut Part, from: &Path, to: &Path) -> bool {
+    if to.parent().is_some_and(|d| std::fs::create_dir_all(d).is_err()) || std::fs::rename(from, to).is_err() {
+        return false;
+    }
+    let files = part.symbol_file.iter_mut().chain(&mut part.footprint_files).chain(&mut part.model_files).chain(part.datasheet_file.iter_mut()).chain(&mut part.sim_files);
+    for f in files {
+        if let Ok(rest) = f.strip_prefix(from) {
+            *f = to.join(rest);
+        }
+    }
+    true
 }
 
 fn run_import(cx: &mut AppCtx, index: usize, part: Part, category: String, targets: Vec<LibraryRoot>) {
@@ -127,18 +155,44 @@ impl ImportTab {
     pub fn handle(&mut self, msg: Msg, cx: &mut AppCtx) {
         match msg {
             Msg::Found(mut part, work) => {
+                if let Some(ImportDialog { gathered: Some(g), part: meta, .. }) = &mut self.dialog
+                    && matching::same_mpn(&meta.mpn, &part.mpn)
+                    && adopt(&mut part, &work, &g.work.join(format!("zip-{}", g.files.sets.len())))
+                {
+                    cx.log.push(format!("Added {} to the open import dialog", part.source));
+                    g.add(meta, part);
+                    return;
+                }
                 if let Some(i) = self.awaiting_cad.iter().position(|a| matching::same_mpn(&a.mpn, &part.mpn)) {
                     matching::merge(&mut part, &self.awaiting_cad.remove(i));
                 }
                 cx.log.push(format!("Found {} ({})", part.mpn, part.source));
                 self.pending.push(Pending { part, work });
             }
-            Msg::Fetched(part, work) => {
-                self.pending.push(Pending { part, work });
-                cx.tab = Tab::Import;
-                self.open_dialog(self.pending.len() - 1, cx);
+            Msg::Gather { part, work, waiting } => {
+                let mut dialog = ImportDialog::new(usize::MAX, &part, categories(cx), cx.global_root().is_some(), cx.project.is_some());
+                let auto = (part.manufacturer.clone(), part.description.clone());
+                dialog.gathered = Some(Gathered { files: Combined::default(), work, waiting, auto, edited: (false, false) });
+                self.dialog = Some(dialog);
             }
-            Msg::CadOpened(part) => self.awaiting_cad.push(part),
+            Msg::Answer { work, source, found } => {
+                match &found {
+                    Ok(Some(p)) => cx.log.extend(p.warnings.iter().map(|w| format!("{source}: {}: {w}", p.mpn))),
+                    Ok(None) => {}
+                    Err(e) => cx.log.push(format!("{source}: {e:#}")),
+                }
+                if let Some(ImportDialog { gathered: Some(g), part: meta, .. }) = &mut self.dialog
+                    && g.work == work
+                {
+                    g.waiting = g.waiting.saturating_sub(1);
+                    if let Ok(Some(p)) = found {
+                        g.add(meta, p);
+                    }
+                } else if !self.pending.iter().any(|p| p.work == work) {
+                    // The dialog was cancelled before this source answered.
+                    let _ = std::fs::remove_dir_all(&work);
+                }
+            }
             Msg::Run { index, part, category, targets } => run_import(cx, index, part, category, targets),
             Msg::Imported { index, notes } => {
                 cx.busy = false;
@@ -194,9 +248,24 @@ impl ImportTab {
         if let Some(dialog) = &mut self.dialog {
             match dialog.show(&cx.ctx, global.as_ref(), project.as_ref()) {
                 DialogAction::None => {}
-                DialogAction::Cancel => self.dialog = None,
+                DialogAction::Cancel => {
+                    if let Some(g) = &dialog.gathered {
+                        let _ = std::fs::remove_dir_all(&g.work);
+                    }
+                    self.dialog = None;
+                }
+                DialogAction::FetchCad(url) => {
+                    let _ = open::that(&url);
+                    cx.log.push(format!("Opened {url}. Download the KiCad ZIP and it will be added to the import dialog."));
+                    self.awaiting_cad.push(dialog.part.clone());
+                }
                 DialogAction::Import { part, category, targets } => {
-                    let index = dialog.index;
+                    let mut index = dialog.index;
+                    // A "Get…" part's files live until its import finishes, like a ZIP's.
+                    if let Some(g) = dialog.gathered.take() {
+                        self.pending.push(Pending { part: part.clone(), work: g.work });
+                        index = self.pending.len() - 1;
+                    }
                     self.dialog = None;
                     // Only new libraries touch KiCad's tables; adding to a linked one is safe while it's open.
                     if targets.iter().any(|r| r.needs_link(&category)) {
@@ -246,20 +315,8 @@ impl ImportTab {
         }
     }
 
-    /// The built-in categories plus those already in a library.
-    fn all_categories(cx: &AppCtx) -> Vec<String> {
-        let mut categories: Vec<String> = klm_core::categories::DEFAULT.iter().map(|s| s.to_string()).collect();
-        for root in cx.roots() {
-            categories.extend(root.categories());
-        }
-        categories.sort();
-        categories.dedup();
-        categories
-    }
-
     fn open_dialog(&mut self, i: usize, cx: &AppCtx) {
-        let categories = Self::all_categories(cx);
-        self.dialog = Some(ImportDialog::new(i, &self.pending[i].part, categories, cx.global_root().is_some(), cx.project.is_some()));
+        self.dialog = Some(ImportDialog::new(i, &self.pending[i].part, categories(cx), cx.global_root().is_some(), cx.project.is_some()));
     }
 
     fn setup_screen(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
@@ -297,7 +354,7 @@ impl ImportTab {
             if ui.add_enabled(!cx.busy && !self.pending.is_empty(), egui::Button::new("Import all…")).on_hover_text("Import every part waiting here in one go, after a preview").clicked() {
                 self.batch_works = self.pending.iter().map(|p| p.work.clone()).collect();
                 let parts = self.pending.iter().map(|p| p.part.clone()).collect();
-                self.batch_setup = Some(ImportAllSetup::new(parts, Self::all_categories(cx), cx.global_root().is_some(), cx.project.is_some()));
+                self.batch_setup = Some(ImportAllSetup::new(parts, categories(cx), cx.global_root().is_some(), cx.project.is_some()));
             }
             if cx.busy {
                 ui.spinner();
@@ -339,6 +396,8 @@ impl ImportTab {
 enum DialogAction {
     None,
     Cancel,
+    /// Open this CAD download page.
+    FetchCad(String),
     Import { part: Part, category: String, targets: Vec<LibraryRoot> },
 }
 
@@ -352,8 +411,39 @@ struct ImportDialog {
     to_project: bool,
     /// Names of libraries that already hold this MPN, shown once Import is pressed.
     clashes: Vec<String>,
-    /// Built on first show; set to `None` after changing `part`'s files so it is drawn again.
-    preview: Option<PreviewPanel>,
+    /// The preview and the files it was drawn from; redrawn when the picked files change.
+    preview: Option<(Vec<PathBuf>, PreviewPanel)>,
+    /// Set for "Get…": the files every source offered, picked per file type.
+    gathered: Option<Gathered>,
+}
+
+struct Gathered {
+    files: Combined,
+    /// Holds every candidate's files.
+    work: PathBuf,
+    /// Sources that haven't answered yet.
+    waiting: usize,
+    /// Manufacturer and description as the merge last left them, to tell them from the user's edits.
+    auto: (String, String),
+    /// The user edited (manufacturer, description), so later answers leave it alone.
+    edited: (bool, bool),
+}
+
+impl Gathered {
+    /// Adds a source's answer to the candidates and the metadata, except for fields the user has edited.
+    fn add(&mut self, meta: &mut Part, found: Part) {
+        self.edited.0 |= meta.manufacturer != self.auto.0;
+        self.edited.1 |= meta.description != self.auto.1;
+        let kept = (meta.manufacturer.clone(), meta.description.clone());
+        self.files.add(meta, found);
+        if self.edited.0 {
+            meta.manufacturer = kept.0;
+        }
+        if self.edited.1 {
+            meta.description = kept.1;
+        }
+        self.auto = (meta.manufacturer.clone(), meta.description.clone());
+    }
 }
 
 impl ImportDialog {
@@ -367,6 +457,7 @@ impl ImportDialog {
             to_project: has_project && !has_global,
             clashes: vec![],
             preview: None,
+            gathered: None,
         }
     }
 
@@ -406,28 +497,49 @@ impl ImportDialog {
             });
 
             ui.add_space(6.0);
-            self.preview.get_or_insert_with(|| PreviewPanel::for_part(ctx, &self.part)).show(ui);
-
-            let files = [
-                ("symbol", self.part.symbol_file.is_some() as usize),
-                ("footprint", self.part.footprint_files.len()),
-                ("3D model", self.part.model_files.len().min(1)),
-                ("datasheet", (self.part.datasheet_file.is_some() || !self.part.datasheet_url.is_empty()) as usize),
-                ("sim model", self.part.sim_files.len().min(1)),
-            ];
-            let have: Vec<_> = files.iter().filter(|(_, n)| *n > 0).map(|(f, _)| *f).collect();
-            let missing: Vec<_> = files.iter().filter(|(_, n)| *n == 0).map(|(f, _)| *f).collect();
-            ui.add_space(6.0);
-            ui.label(format!("Includes: {}", have.join(", ")));
-            if !missing.is_empty() {
-                ui.weak(format!("Not in this download: {}", missing.join(", ")));
+            // The preview follows the files picked per source, so swapping one redraws it.
+            let shown = self.gathered.as_ref().map_or_else(|| self.part.clone(), |g| g.files.to_part(&self.part));
+            let key: Vec<PathBuf> = shown.symbol_file.iter().chain(shown.footprint_files.first()).chain(shown.model_files.first()).cloned().collect();
+            if self.preview.as_ref().is_none_or(|(k, _)| *k != key) {
+                self.preview = Some((key, PreviewPanel::for_part(ctx, &shown)));
             }
+            if let Some((_, panel)) = &mut self.preview {
+                panel.show(ui);
+            }
+            ui.add_space(6.0);
+            match &mut self.gathered {
+                Some(g) => {
+                    if let Some(url) = source_picker(ui, g, &self.part) {
+                        action = DialogAction::FetchCad(url);
+                    }
+                }
+                None => {
+                    let files = [
+                        ("symbol", self.part.symbol_file.is_some() as usize),
+                        ("footprint", self.part.footprint_files.len()),
+                        ("3D model", self.part.model_files.len().min(1)),
+                        ("datasheet", (self.part.datasheet_file.is_some() || !self.part.datasheet_url.is_empty()) as usize),
+                        ("sim model", self.part.sim_files.len().min(1)),
+                    ];
+                    let have: Vec<_> = files.iter().filter(|(_, n)| *n > 0).map(|(f, _)| *f).collect();
+                    let missing: Vec<_> = files.iter().filter(|(_, n)| *n == 0).map(|(f, _)| *f).collect();
+                    ui.label(format!("Includes: {}", have.join(", ")));
+                    if !missing.is_empty() {
+                        ui.weak(format!("Not in this download: {}", missing.join(", ")));
+                    }
+                }
+            }
+            let part = self.gathered.as_ref().map_or_else(|| self.part.clone(), |g| g.files.to_part(&self.part));
 
             let targets: Vec<LibraryRoot> = [(self.to_global, global), (self.to_project, project)]
                 .into_iter()
                 .filter_map(|(on, r)| if on { r.cloned() } else { None })
                 .collect();
-            let ready = !targets.is_empty() && !self.part.mpn.trim().is_empty() && !self.category.trim().is_empty();
+            let ready = !targets.is_empty()
+                && !self.part.mpn.trim().is_empty()
+                && !self.category.trim().is_empty()
+                && part.symbol_file.is_some()
+                && self.gathered.as_ref().is_none_or(|g| g.files.mismatch().is_none());
 
             if !self.clashes.is_empty() {
                 ui.add_space(6.0);
@@ -443,7 +555,7 @@ impl ImportDialog {
                         .map(|r| r.nickname(&self.category))
                         .collect();
                     if clashes.is_empty() || !self.clashes.is_empty() {
-                        action = DialogAction::Import { part: self.part.clone(), category: self.category.trim().to_string(), targets };
+                        action = DialogAction::Import { part: part.clone(), category: self.category.trim().to_string(), targets };
                     } else {
                         self.clashes = clashes;
                     }
@@ -458,4 +570,57 @@ impl ImportDialog {
         }
         action
     }
+}
+
+/// The per-file-type source picker of a "Get…" dialog. Returns a CAD page to open when asked to.
+fn source_picker(ui: &mut egui::Ui, g: &mut Gathered, meta: &Part) -> Option<String> {
+    let mut changed = None;
+    egui::Grid::new("from").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
+        for kind in Kind::ALL {
+            ui.label(kind.label());
+            let options = g.files.candidates(kind);
+            let name = |i: Option<usize>| i.map_or("none", |i| g.files.sets[i].source.as_str());
+            if options.is_empty() {
+                let link = kind == Kind::Datasheet && !meta.datasheet_url.is_empty();
+                ui.weak(if link { "web link only" } else { "(missing)" });
+            } else {
+                let mut pick = g.files.picked(kind);
+                egui::ComboBox::from_id_salt(kind.label()).selected_text(name(pick)).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut pick, None, "none");
+                    for i in options {
+                        ui.selectable_value(&mut pick, Some(i), name(Some(i)));
+                    }
+                });
+                if pick != g.files.picked(kind) {
+                    changed = Some((kind, pick));
+                }
+            }
+            ui.end_row();
+        }
+    });
+    if let Some((kind, pick)) = changed {
+        g.files.choose(kind, pick);
+    }
+    if g.waiting > 0 {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.weak(format!("Waiting for {} more source(s)…", g.waiting));
+        });
+    }
+    let mut open = None;
+    if !g.files.has_cad() {
+        ui.horizontal(|ui| {
+            ui.weak("No source has a symbol.");
+            if ui.small_button("Fetch from SnapMagic…").clicked() {
+                open = Combined::cad_page_url(meta);
+            }
+        });
+    }
+    if let Some(why) = g.files.mismatch() {
+        ui.colored_label(ui.visuals().error_fg_color, why);
+        if ui.button("Switch back").clicked() {
+            g.files.reset();
+        }
+    }
+    open
 }

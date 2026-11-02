@@ -88,16 +88,7 @@ fn check_symbol(root: &LibraryRoot, cat: &str, lib: &Sexpr, sym: &Sexpr) -> Vec<
 /// Pins against pads, courtyard and pin 1: what a footprint must satisfy whatever library it is in.
 fn check_footprint(pins: &[(u32, u32, String)], fp: &Sexpr, out: &mut Vec<Issue>) {
     let pads = numbered_pads(fp);
-    let pin_numbers: BTreeSet<&str> = pins.iter().map(|p| p.2.as_str()).collect();
-    let pad_numbers: BTreeSet<&str> = pads.iter().map(|p| p.number.as_str()).collect();
-    let no_pad: Vec<_> = pin_numbers.difference(&pad_numbers).copied().collect();
-    if !no_pad.is_empty() {
-        error(out, format!("Symbol pin(s) {} have no pad in the footprint", list(no_pad)));
-    }
-    let no_pin: Vec<_> = pad_numbers.difference(&pin_numbers).copied().collect();
-    if !no_pin.is_empty() {
-        warning(out, format!("Footprint pad(s) {} have no pin in the symbol", list(no_pin)));
-    }
+    check_pins_against_pads(pins, &pads, out);
 
     if !on_layer(fp, &["F.CrtYd", "B.CrtYd"]) {
         warning(out, "The footprint has no courtyard (F.CrtYd or B.CrtYd)".into());
@@ -133,6 +124,36 @@ pub fn check_files(symbol: &Path, footprint: &Path, model: Option<&Path>) -> Vec
         check_model_file(m, &mut out);
     }
     out
+}
+
+/// Only the pin/pad check, on files that aren't in a library yet: whether a symbol and a footprint
+/// from different sources fit together. Courtyard and pin-1 warnings are left to [`check_files`] so
+/// they don't block a valid pairing. Uses the first symbol in `symbol`.
+pub fn check_pin_pad_files(symbol: &Path, footprint: &Path) -> Vec<Issue> {
+    let read = |p: &Path| std::fs::read_to_string(p).ok().and_then(|t| sexpr::parse(&t).ok());
+    let mut out = vec![];
+    match (read(symbol), read(footprint)) {
+        (Some(lib), Some(fp)) => match lib.child("symbol") {
+            Some(sym) => check_pins_against_pads(&symbol_pins(&lib, sym), &numbered_pads(&fp), &mut out),
+            None => error(&mut out, format!("{} contains no symbol", symbol.display())),
+        },
+        (None, _) => error(&mut out, format!("Symbol file {} can't be read (only KiCad 6+ .kicad_sym files can be checked)", symbol.display())),
+        (_, None) => error(&mut out, format!("Footprint file {} can't be read", footprint.display())),
+    }
+    out
+}
+
+fn check_pins_against_pads(pins: &[(u32, u32, String)], pads: &[Pad], out: &mut Vec<Issue>) {
+    let pin_numbers: BTreeSet<&str> = pins.iter().map(|p| p.2.as_str()).collect();
+    let pad_numbers: BTreeSet<&str> = pads.iter().map(|p| p.number.as_str()).collect();
+    let no_pad: Vec<_> = pin_numbers.difference(&pad_numbers).copied().collect();
+    if !no_pad.is_empty() {
+        error(out, format!("Symbol pin(s) {} have no pad in the footprint", list(no_pad)));
+    }
+    let no_pin: Vec<_> = pad_numbers.difference(&pin_numbers).copied().collect();
+    if !no_pin.is_empty() {
+        warning(out, format!("Footprint pad(s) {} have no pin in the symbol", list(no_pin)));
+    }
 }
 
 /// (unit, body style, number) of every symbol pin. A derived symbol (`extends`) uses its parent's pins.
