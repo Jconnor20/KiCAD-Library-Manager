@@ -3,6 +3,7 @@
 
 pub mod combine;
 pub mod digikey;
+pub mod foreign;
 mod http;
 pub mod lcsc;
 pub mod mouser;

@@ -3,12 +3,12 @@ use super::library;
 use super::preview::PreviewPanel;
 use crate::{AppCtx, Msg as AppMsg, new_work_dir};
 use eframe::egui;
-use klm_core::batch;
+use klm_core::batch::{self, Op, Target};
 use klm_core::library::LibraryRoot;
 use klm_core::matching;
 use klm_core::part::Part;
 use klm_core::sources::combine::{Combined, Kind};
-use klm_core::sources::{watcher::Watcher, zip_import};
+use klm_core::sources::{foreign, watcher::Watcher, zip_import};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,6 +31,8 @@ pub enum Msg {
     /// Apply an "Import all" plan (KiCad is closed, or the plan doesn't touch its tables).
     RunBatch(batch::Plan),
     Batch(Progress),
+    /// "Import library…" finished reading a folder; its files are under the second path.
+    Foreign(anyhow::Result<foreign::Scan>, PathBuf),
 }
 
 struct Pending {
@@ -53,6 +55,8 @@ pub struct ImportTab {
     batch: Option<BatchDialog>,
     /// Extracted-files folder of each part in the batch, in batch order, to drop the imported ones from `pending`.
     batch_works: Vec<PathBuf>,
+    /// Single-symbol files made by "Import library…"; removed once its batch has run.
+    foreign_work: Option<PathBuf>,
 }
 
 /// Reads one ZIP on the calling thread and reports what it found.
@@ -142,6 +146,7 @@ impl ImportTab {
             batch_setup: None,
             batch: None,
             batch_works: vec![],
+            foreign_work: None,
         };
         tab.start_watcher(cx);
         tab
@@ -215,8 +220,28 @@ impl ImportTab {
                 self.start_watcher(cx);
             }
             Msg::RunBatch(plan) => batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Import(Msg::Batch(p))),
+            Msg::Foreign(scan, work) => {
+                cx.busy = false;
+                self.batch_works.clear(); // left over from a cancelled "Import all…"; they must not be matched to these results
+                self.drop_foreign_work();
+                match scan {
+                    Err(e) => {
+                        cx.log.push(format!("Import library: {e:#}"));
+                        let _ = std::fs::remove_dir_all(work);
+                    }
+                    Ok(scan) => {
+                        cx.log.extend(scan.skipped.iter().map(|s| format!("Import library: skipped {s}")));
+                        cx.log.extend(scan.unsupported.iter().map(|s| format!("Import library: not converted: {s}")));
+                        let target = if cx.global_root().is_some() { Target::Global } else { Target::Project };
+                        let ops = scan.parts.into_iter().map(|f| Op::ImportPart { part: f.part, category: Some(f.category), target, overwrite: false }).collect();
+                        self.foreign_work = Some(work);
+                        self.batch = Some(BatchDialog::Review(batch::plan(ops, cx.global_root().as_ref(), cx.project_root().as_ref())));
+                    }
+                }
+            }
             Msg::Batch(p) => {
                 let Some(results) = batch_dialog::progress(&mut self.batch, p, cx) else { return };
+                self.drop_foreign_work();
                 for (work, r) in std::mem::take(&mut self.batch_works).into_iter().zip(&results) {
                     if r.error.is_none() {
                         self.pending.retain(|p| p.work != work);
@@ -278,6 +303,12 @@ impl ImportTab {
                     }
                 }
             }
+        }
+    }
+
+    fn drop_foreign_work(&mut self) {
+        if let Some(w) = self.foreign_work.take() {
+            let _ = std::fs::remove_dir_all(w);
         }
     }
 
@@ -350,6 +381,17 @@ impl ImportTab {
                     let ctx = cx.ctx.clone();
                     std::thread::spawn(move || {
                         scan_zip(&f, &tx);
+                        ctx.request_repaint();
+                    });
+                }
+            }
+            if ui.add_enabled(!cx.busy, egui::Button::new("Import library…")).on_hover_text("Import a folder of KiCad libraries (.kicad_sym, .pretty, 3D models), or Eagle/Altium/EasyEDA libraries kicad-cli can convert. Shows a preview first.").clicked() {
+                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                    cx.busy = true;
+                    let (tx, ctx, rules, work) = (cx.tx.clone(), cx.ctx.clone(), cx.settings.rules.clone(), new_work_dir());
+                    std::thread::spawn(move || {
+                        let scan = std::fs::create_dir_all(&work).map_err(anyhow::Error::from).and_then(|_| foreign::scan(&dir, &rules, &work));
+                        let _ = tx.send(AppMsg::Import(Msg::Foreign(scan, work)));
                         ctx.request_repaint();
                     });
                 }
