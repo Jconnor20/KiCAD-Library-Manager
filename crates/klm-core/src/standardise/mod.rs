@@ -73,7 +73,7 @@ pub struct Plan {
     pub files: Vec<FileChange>,
     /// Files that couldn't be read; they are left alone.
     pub errors: Vec<String>,
-    root: LibraryRoot,
+    pub root: LibraryRoot,
 }
 
 impl stdfmt::Display for Plan {
