@@ -174,7 +174,31 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - A ZIP of the selected parts as standalone KiCad libraries with relative paths, importable by Altium and Fusion.
   - Add the `klm-cli export` command.
 
-## Wave 5: Later
+## Wave 4.5: Polish after Wave 4 (8 in parallel, ships 0.2.0)
+
+- [x] **W4.5.0 Test-data corpus:** openly licensed fixtures in `tests/fixtures/third_party/`, plus a manifest of vendor downloads for a git-ignored `testdata/` (`docs/testdata-manifest.md`) and `corpus_e2e.rs`.
+- [x] **W4.5.1 Version and plugin:** version 0.2.0 (every wave bumps the minor version), the plugin shows its errors, and there is a schematic button with a fallback.
+- [x] **W4.5.2 Working with KiCad open:** new libraries are added straight away and re-checked once KiCad closes. The `kicad_running` check is cached, and the import queue tracks parts by id.
+- [x] **W4.5.3 Settings:** Settings stays a popup. Wider API key fields with show/hide, and multiple watch folders.
+- [x] **W4.5.4 Search:** sort hints, currency per row, MOQ and pack size, an Import button, availability icons, and favourites on right-click.
+- [x] **W4.5.5 Import:** Ultra Librarian `.lbr` fix, Altium/Fusion vendor ZIPs, STL, picking files, and a `.LibPkg` hint.
+- [x] **W4.5.6 Library:** detail panel and context menu, sorting and filters, and a "Find missing datasheets" that searches by MPN.
+- [x] **W4.5.7 History:** automatic minors (count and size cap), named majors, and auto-versions at a regular interval.
+- [x] **W4.5.8 Rough edges:** Alternatives and Standards run off the UI thread, the log has Clear and Copy, and labels are consistent.
+
+## Wave 5: Features from the Wave 4 review
+
+- [ ] **W5.1 Search by part type, with images:** browse and filter by category using the DigiKey/Mouser/Nexar category APIs, show thumbnails, and check what a part has (symbol, footprint, 3D, SPICE) before import.
+- [ ] **W5.2 House-style symbols:** generate consistent symbols for each class (R, C, L, diodes, LEDs, transistors, IC boxes) from templates, whatever the source, mapping pins from the imported symbol.
+- [ ] **W5.3 Alternatives beyond the library:** search distributors for equivalents, define alternates by hand, and import them.
+- [ ] **W5.4 Clean up existing KiCad libraries:** scan every global and project library, report duplicates, broken entries and unused libraries, then remove or fix each one, or move it into KLM.
+- [ ] **W5.5 Rest of W4.5:**
+  - attach footprint-only or 3D-only ZIPs to an existing part
+  - make rollback, move-global and relink safe while KiCad is open
+  - LCSC/Nexar MOQ fields
+  - show snapshot kind in `klm-cli history`
+
+## Wave 6: Later
 
 - [ ] **Team / shared libraries (Rev):** a shared folder or git repository, conflict detection, locking, rules for merging metadata.
 - [ ] **KiCad 9 output:** write files that KiCad 9 can still open.

@@ -4,6 +4,25 @@ A running list of what each merged work package left undone, cut short or made r
 
 ---
 
+## Wave 4.5
+
+- **Symbol-less ZIPs.** A footprint-only or 3D-only ZIP still fails with "part has no symbol file" unless an Import dialog for the same MPN is open. Attaching it to an existing part isn't built yet (W5.5).
+- **STL models.** These are attached with a warning. Whether KiCad's 3D viewer shows them isn't confirmed.
+- **Formats still untested on real files:** EasyEDA, and Altium files outside Ultra Librarian ZIPs.
+- **KiCad open.** New libraries are written while KiCad runs and re-checked when it closes. Rollback, move-global, relink and old `${KLM_LIB}` path rewrites still ask you to close KiCad. It isn't known whether KiCad picks up a table edited while it runs.
+- **Watcher.** It only sees ZIPs saved after the app starts, or after the folder list changes.
+- **Search.**
+  - Availability icons show what is known before import, not what the import will find.
+  - LCSC and Nexar MOQ and pack fields aren't filled.
+  - The DigiKey `StandardPackage` field name is untested.
+- **Datasheet finder.** With no distributor source enabled, it can only retry existing links. Search results are used only when their MPN matches the part's.
+- **History.**
+  - Retention settings apply to every library.
+  - Auto-version dates are in UTC. Weekly means 7 days and Monthly means 30.
+  - Manifest edits made outside the app need **Refresh**.
+- **Standards Apply and import can overlap.** Apply doesn't mark the app busy, so an import started during Apply could write a file mid-apply. Standards results are only collected while Settings is open.
+- **Plugin.** It is untested in KiCad 10. If KiCad's `kicad-python` lacks a schematic call, the button opens KLM with no project.
+
 ## Wave 4
 
 ### W4.1 BOM import and enrichment
@@ -42,7 +61,7 @@ A running list of what each merged work package left undone, cut short or made r
 ### W3.1 Standardise to KLC + overrides
 - **Wires can come loose.** Moving a footprint's origin or lengthening a pin moves its connection point, so schematics and boards that later update the part from the library may lose connections. The dry run lists every such change before anything is written.
 - **Pin-1 marker on large pads.** On pads larger than about 6 mm, the added marker can land more than 2 mm from pin 1, and the W1.2 check may still report it as missing.
-- **UI freeze.** Dry run and Apply run on the UI thread, so a very large library may freeze the window briefly. This is marked `shortcut:` in the code.
+- ~~**UI freeze.**~~ Fixed in W4.5.8. Dry run and Apply run on the UI thread, so a very large library may freeze the window briefly. This is marked `shortcut:` in the code.
 - **Naming rules not used yet.** W3.3's name template isn't applied during standardise. See the `TODO(W3.3)` in `standardise/mod.rs`.
 - Left out on purpose: symbols with two pins or fewer, power symbols and hidden pins.
 

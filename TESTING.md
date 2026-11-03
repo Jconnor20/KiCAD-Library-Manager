@@ -11,9 +11,9 @@ These have passed automated tests but haven't been checked by hand in the app or
 
 ## KiCad integration
 
-- [ ] **Install the toolbar plugin.** In KiCad: *Plugin and Content Manager → Install from File…*, then pick `dist\klm-pcm-0.1.0.zip`. Expect it to install with no "metadata" error.
+- [ ] **Install the toolbar plugin.** In KiCad: *Plugin and Content Manager → Install from File…*, then pick `dist\klm-pcm-0.2.0.zip`. Expect it to install with no "metadata" error.
 - [ ] **Toolbar button.** Open a board in the PCB editor (KiCad's API must be on: *Preferences → Plugins*) and click **Library Manager**. Expect KLM to open with that board's project already chosen.
-- [ ] **New category library.** Import a part into a new category while KiCad is open. Expect KLM to ask you to close KiCad first. After you reopen KiCad, the new `KLM_<Category>` library is in the symbol chooser.
+- [ ] **New category library.** Import a part into a new category while KiCad is open. Expect no close-KiCad prompt, and "N pending" in the top bar. After you reopen KiCad, the new `KLM_<Category>` library is in the symbol chooser.
 - [ ] **Placed part is complete.** Place an imported part from KiCad's symbol chooser. Expect its footprint to be assigned, the 3D viewer to show its model, and *Show datasheet* to open the local PDF.
 - [ ] **Re-link.** Delete a `KLM_…` entry in KiCad's *Manage Symbol Libraries*, close KiCad, then click **Re-link libraries** in KLM. Expect the entry back.
 
@@ -102,6 +102,31 @@ Do this one last, and on a copy if you're nervous. History can roll it back.
 - [ ] **Export into Altium or Fusion.** Import the same ZIP with their KiCad importer. Expect symbols and footprints to come through.
 
 ---
+
+## Wave 4.5
+
+- [ ] **Plugin errors.** Rename `klm.exe` in the installed plugin folder and click the button. Expect a message box, and the reason in `%TEMP%\klm-plugin.log`.
+- [ ] **Schematic button.** Open a schematic and click **Library Manager**. Expect KLM to open on that project.
+- [ ] **Pending libraries.** With KiCad open, import into a new category, then close KiCad. Expect the library to still be in *Manage Symbol Libraries*.
+- [ ] **Watch folders.** Add two watch folders, drop a vendor ZIP into each, and expect both to be picked up. A config with the old `downloads_dir` should show that folder in the list.
+- [ ] **Key fields.** Type a key, toggle 👁, then save. Expect the saved key not to be shown.
+- [ ] **Search.**
+  - Unsorted headers show ⇅.
+  - Hovering a price lists the price breaks.
+  - A DigiKey search with a non-US region shows that currency code.
+  - Right-clicking the MPN toggles a favourite.
+- [ ] **Vendor ZIPs.** Import Ultra Librarian KiCad, Altium, Fusion and combined ZIPs. Expect each one to convert, with an attached `.stl` showing the STL warning.
+- [ ] **Import library from files.** Pick a `.SchLib` and a `.PcbLib` directly. Picking a `.LibPkg` should explain that it's a project.
+- [ ] **Library tab.** Sort by each column, combine the filters, and use the detail panel and the right-click menu.
+- [ ] **Find missing datasheets.** Delete a part's PDF and run it. Expect the PDF to come back and `Datasheet` to be updated, with a results dialog.
+- [ ] **History.**
+  - Only the last N minors are kept.
+  - A marked version survives more than N changes.
+  - The size cap prunes minors.
+  - A fresh library shows "No version saved yet".
+  - "Make minor" and "Delete" work on a version.
+- [ ] **Responsiveness.** Alternatives on a large library, and Standards Dry run and Apply, keep the window responsive.
+- [ ] **Log.** **Clear** empties the log, and **Copy** pastes every line.
 
 ## Already verified
 
