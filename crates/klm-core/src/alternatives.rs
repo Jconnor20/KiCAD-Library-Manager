@@ -8,6 +8,7 @@
 
 use crate::kicad_env::write_atomic;
 use crate::library::{LibraryRoot, property, sanitize};
+use crate::part::Part;
 use crate::matching::{key, same_mpn};
 use crate::sexpr;
 use crate::store::{Alternative, Store};
@@ -115,6 +116,50 @@ pub fn suggest(parts: &[LibPart]) -> Vec<Vec<usize>> {
     let mut out: Vec<_> = groups.into_values().filter(|g| g.len() > 1).collect();
     out.sort();
     out
+}
+
+/// What to search distributors for to find equivalents of `part`: its value ("10k") when that says more
+/// than the part number, else the MPN.
+pub fn search_query(part: &LibPart) -> String {
+    part.value_key().unwrap_or_else(|| part.mpn.clone())
+}
+
+/// The search results that could stand in for `part`: another MPN, the same package where both sides
+/// name one, and the part's value somewhere in the description or MPN when it has one.
+// shortcut: text matching only ("0.1uF" won't match "100nF"); parse units if users miss equivalents.
+pub fn equivalents(part: &LibPart, found: Vec<Part>) -> Vec<Part> {
+    let (pkg, value) = (part.package(), part.value_key());
+    found
+        .into_iter()
+        .filter(|f| !same_mpn(&f.mpn, &part.mpn))
+        .filter(|f| {
+            let fp = key(&f.package);
+            fp.is_empty() || pkg.is_empty() || pkg.contains(&fp) || fp.contains(&pkg)
+        })
+        .filter(|f| value.as_ref().is_none_or(|v| key(&format!("{} {}", f.description, f.mpn)).replace(['Ω', ' '], "").replace("ohm", "").contains(v.as_str())))
+        .collect()
+}
+
+impl From<&Part> for Alternative {
+    /// A substitute taken from a distributor result.
+    fn from(p: &Part) -> Self {
+        Alternative { mpn: p.mpn.clone(), manufacturer: p.manufacturer.clone(), supplier_ids: p.supplier_ids.clone(), role: "substitute".into() }
+    }
+}
+
+/// Adds `alt` to the group `base` belongs to (starting one with `base` preferred if it has none), stores
+/// it and writes the `_AltN` fields into the library. Returns the symbols written.
+pub fn add_alternate(root: &LibraryRoot, store: &Store, base: &LibPart, alt: Alternative) -> Result<usize> {
+    if alt.mpn.trim().is_empty() {
+        bail!("an alternate needs an MPN");
+    }
+    let mut members = alternatives_of(store, &base.mpn)?;
+    if members.is_empty() {
+        members.push(base.as_alternative("preferred"));
+    }
+    members.retain(|m| !same_mpn(&m.mpn, &alt.mpn));
+    members.push(alt);
+    write_back(root, &confirm(store, &members)?)
 }
 
 fn rank(role: &str) -> usize {
@@ -319,5 +364,34 @@ mod tests {
     fn alt_field_names() {
         assert!(is_alt_field("MPN_Alt1") && is_alt_field("DigiKey_Alt12"));
         assert!(!is_alt_field("MPN") && !is_alt_field("MPN_Alt") && !is_alt_field("Foo_Alt1"));
+    }
+
+    #[test]
+    fn equivalents_from_recorded_search() {
+        let found: Vec<Part> = serde_json::from_str(include_str!("../tests/fixtures/alt_search_10k_0603.json")).unwrap();
+        let parts = scan(&library("alt_equiv"));
+        let base = parts.iter().find(|p| p.symbol == "RC0603FR-0710KL").unwrap();
+        assert_eq!(search_query(base), "10k");
+        let mpns: Vec<_> = equivalents(base, found).into_iter().map(|p| p.mpn).collect();
+        assert_eq!(mpns, ["ERJ-3EKF1002V", "CRCW060310K0FKEA"], "own MPN, 0805 and 100k dropped");
+    }
+
+    #[test]
+    fn add_alternate_writes_fields_and_reads_back() {
+        let root = library("alt_add");
+        let s = Store::open(&crate::test_dir("alt_add_db").join("parts.db")).unwrap();
+        let parts = scan(&root);
+        let base = parts.iter().find(|p| p.symbol == "RC0603FR-0710KL").unwrap();
+        let alt = Alternative { mpn: "CRCW060310K0FKEA".into(), manufacturer: "Vishay".into(), supplier_ids: vec![("Mouser".into(), "71-CRCW0603-10K".into())], role: "substitute".into() };
+        assert!(add_alternate(&root, &s, base, Alternative { mpn: " ".into(), ..alt.clone() }).is_err());
+        assert_eq!(add_alternate(&root, &s, base, alt).unwrap(), 2, "both Yageo copies");
+        assert_eq!(alternatives_of(&s, "CRCW060310K0FKEA").unwrap().len(), 2);
+        let again = scan(&root);
+        let back = again.iter().find(|p| p.symbol == "RC0603FR-0710KL").unwrap();
+        let lib = sexpr::parse(&std::fs::read_to_string(root.dir.join("symbols/Resistors.kicad_sym")).unwrap()).unwrap();
+        let sym = lib.children("symbol").find(|s| s.arg(0) == Some(back.symbol.as_str())).unwrap();
+        assert_eq!(property(sym, "MPN_Alt1"), Some("CRCW060310K0FKEA"));
+        assert_eq!(property(sym, "Manufacturer_Alt1"), Some("Vishay"));
+        assert_eq!(property(sym, "Mouser_Alt1"), Some("71-CRCW0603-10K"));
     }
 }

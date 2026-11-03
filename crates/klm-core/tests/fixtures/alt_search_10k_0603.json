@@ -1,0 +1,7 @@
+[
+  {"mpn": "RC0603FR-0710KL", "manufacturer": "Yageo", "description": "RES 10K OHM 1% 1/10W 0603", "package": "0603"},
+  {"mpn": "ERJ-3EKF1002V", "manufacturer": "Panasonic", "description": "RES 10K OHM 1% 1/10W 0603", "package": "0603", "supplier_ids": [["DigiKey", "P10.0KHCT-ND"]]},
+  {"mpn": "CRCW060310K0FKEA", "manufacturer": "Vishay", "description": "RES SMD 10K OHM 1% 1/10W 0603", "package": "0603"},
+  {"mpn": "RC0805FR-0710KL", "manufacturer": "Yageo", "description": "RES 10K OHM 1% 1/8W 0805", "package": "0805"},
+  {"mpn": "RC0603FR-07100KL", "manufacturer": "Yageo", "description": "RES 100K OHM 1% 1/10W 0603", "package": "0603"}
+]
