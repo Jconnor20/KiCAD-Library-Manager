@@ -21,6 +21,8 @@ pub struct AlternativesPanel {
     rx: Option<Receiver<(Vec<LibPart>, Groups)>>,
     /// The library part the online and manual alternates are added to.
     base: usize,
+    /// (category, symbol) to make `base` once the scan arrives.
+    open_on: Option<(String, String)>,
     /// Distributor results for `base` as (source index, part); the search runs on a worker.
     online: Vec<(usize, Part)>,
     searching: Option<Receiver<Vec<(usize, Part)>>>,
@@ -29,7 +31,8 @@ pub struct AlternativesPanel {
 }
 
 impl AlternativesPanel {
-    pub fn new(root: &LibraryRoot, ctx: &egui::Context) -> Self {
+    /// `open_on`: the (category, symbol) the "For part" box starts on; the first part if `None` or not found.
+    pub fn new(root: &LibraryRoot, ctx: &egui::Context, open_on: Option<(String, String)>) -> Self {
         let (tx, rx) = channel();
         let (r, ctx) = (root.clone(), ctx.clone());
         std::thread::spawn(move || {
@@ -53,21 +56,24 @@ impl AlternativesPanel {
             let _ = tx.send((parts, groups));
             ctx.request_repaint();
         });
-        Self { root: root.clone(), parts: Vec::new(), groups: Vec::new(), rx: Some(rx), base: 0, online: Vec::new(), searching: None, manual: Default::default() }
+        Self { root: root.clone(), parts: Vec::new(), groups: Vec::new(), rx: Some(rx), base: 0, open_on, online: Vec::new(), searching: None, manual: Default::default() }
     }
 
     /// Equivalents from distributors, and alternates typed in by hand, for one library part.
     fn beyond_library(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
         let Some(base) = self.parts.get(self.base).cloned() else { return };
         ui.heading("Alternates from outside the library");
-        egui::ComboBox::from_label("For part").selected_text(format!("{} ({})", base.mpn, base.category)).show_ui(ui, |ui| {
-            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                for (i, p) in self.parts.iter().enumerate() {
-                    if ui.selectable_label(i == self.base, format!("{} ({})", p.mpn, p.category)).clicked() {
-                        (self.base, self.online) = (i, Vec::new());
+        ui.horizontal(|ui| {
+            let label = ui.label("For part");
+            egui::ComboBox::from_id_salt("alt_base").selected_text(format!("{} ({})", base.mpn, base.category)).width(320.0).show_ui(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for (i, p) in self.parts.iter().enumerate() {
+                        if ui.selectable_label(i == self.base, format!("{} ({})", p.mpn, p.category)).clicked() {
+                            (self.base, self.online) = (i, Vec::new());
+                        }
                     }
-                }
-            });
+                });
+            }).response.labelled_by(label.id);
         });
         ui.horizontal(|ui| {
             let can = self.searching.is_none() && !cx.sources.is_empty();
@@ -160,6 +166,8 @@ impl AlternativesPanel {
             if let Some(rx) = &self.rx {
                 match rx.try_recv() {
                     Ok((parts, groups)) => {
+                        let wanted = self.open_on.take();
+                        self.base = wanted.and_then(|(c, s)| parts.iter().position(|p| p.category == c && p.symbol == s)).unwrap_or(0);
                         (self.parts, self.groups, self.rx) = (parts, groups, None);
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {
