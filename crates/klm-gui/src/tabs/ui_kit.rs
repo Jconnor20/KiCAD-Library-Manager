@@ -33,11 +33,28 @@ impl Level {
     }
 }
 
-/// A settings page a tab can ask for with `cx.open_settings(Section)`. W7.1 adds the real pages.
+/// A settings page a tab can ask for with `cx.open_settings(Section)`. `General`, `Sources` and `Standards`
+/// are the tree's groups: they open on the group's first page.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Section {
     #[default]
     General,
+    Libraries,
+    WatchFolders,
+    KiCad,
+    Sources,
+    Lcsc,
+    DigiKey,
+    Mouser,
+    Nexar,
+    SnapMagic,
+    Search,
+    Import,
+    Standards,
+    Symbols,
+    Footprints,
+    Bom,
+    History,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

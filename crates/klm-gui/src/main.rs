@@ -360,7 +360,7 @@ impl App {
             match msg {
                 Msg::Log(s) => self.cx.log.push(s),
                 Msg::LogAt(level, s) => self.cx.log(level, s),
-                Msg::OpenSettings(_) => self.settings_tab.open(),
+                Msg::OpenSettings(section) => self.settings_tab.open(section, &self.cx.settings),
                 Msg::Relink => self.relink(),
                 Msg::ApplyPending => self.apply_pending(),
                 Msg::MoveGlobal(dir) => self.move_global(&dir),

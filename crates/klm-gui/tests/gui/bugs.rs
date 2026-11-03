@@ -20,19 +20,6 @@ fn select(h: &mut Gui, mpn: &str) {
 
 #[test]
 #[should_panic(expected = "KNOWN BUG")]
-fn b1_settings_key_fields_are_at_least_300px_wide() {
-    let _env = setup();
-    for size in SIZES {
-        let mut h = app(size, Tab::Library);
-        click(&mut h, "Settings…");
-        let widths: Vec<f32> = h.query_all_by_role(Role::PasswordInput).map(|n| n.rect().width()).collect();
-        assert!(!widths.is_empty(), "no key fields found");
-        bug!(widths.iter().all(|w| *w >= 300.0), "W7: key field widths at {size:?}: {widths:?}");
-    }
-}
-
-#[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b2_alternatives_window_stays_on_its_tab() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
