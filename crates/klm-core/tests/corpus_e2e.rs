@@ -54,6 +54,11 @@ fn downloaded_vendor_zips_are_readable() {
         let kicad = zip_import::read_zip(&e.path(), &work.join("kicad")).unwrap();
         let (foreign_n, libpkg) = zip_import::extract_foreign(&e.path(), &work.join("foreign")).unwrap();
         eprintln!("{}: kicad part {:?}, {foreign_n} foreign files, libpkg {libpkg}", e.path().display(), kicad.as_ref().map(|p| &p.mpn));
+        if foreign_n > 0 && cli_works() {
+            let scan = foreign::scan(&work.join("foreign"), &Rules::default(), &work.join("conv"));
+            eprintln!("  converted: {:?}", scan.as_ref().map(|s| (s.parts.len(), &s.unsupported)));
+            assert!(scan.is_ok_and(|s| !s.parts.is_empty()), "{}: foreign files gave no parts", e.path().display());
+        }
         assert!(kicad.is_some() || foreign_n > 0 || libpkg, "{}: nothing importable inside", e.path().display());
     }
 }

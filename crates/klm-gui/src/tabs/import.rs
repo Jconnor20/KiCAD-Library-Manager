@@ -62,11 +62,31 @@ pub struct ImportTab {
 }
 
 /// Reads one ZIP on the calling thread and reports what it found.
+/// Converts the Altium/Eagle files in `zip` and sends the parts, each given `loose`'s 3D models if it has none.
+/// False if the ZIP has no such files.
+fn convert_foreign(zip: &Path, work: &Path, rules: &klm_core::rules::Rules, loose: &Part, tx: &Sender<AppMsg>) -> bool {
+    let dir = work.join("foreign");
+    if !zip_import::extract_foreign(zip, &dir).is_ok_and(|(n, _)| n > 0) {
+        return false;
+    }
+    let mut scan = foreign::scan(&dir, rules, &work.join("conv"));
+    if let Ok(s) = &mut scan {
+        for f in s.parts.iter_mut().filter(|f| f.part.model_files.is_empty()) {
+            f.part.model_files = loose.model_files.clone();
+            f.part.warnings.extend(loose.warnings.iter().filter(|w| w.contains("STL")).cloned());
+        }
+    }
+    let _ = tx.send(AppMsg::Import(Msg::Foreign(scan, work.to_path_buf())));
+    true
+}
+
 /// With `rules`, a ZIP holding only Altium/Eagle files goes to the foreign converter.
 fn scan_zip(zip: &Path, tx: &Sender<AppMsg>, rules: Option<&klm_core::rules::Rules>) {
     let work = new_work_dir();
     let name = zip.file_name().unwrap_or_default().to_string_lossy().into_owned();
     match zip_import::read_zip(zip, &work) {
+        // Ultra Librarian's Altium/Fusion-only ZIPs carry just a loose .stl next to the foreign files.
+        Ok(Some(part)) if part.symbol_file.is_none() && part.footprint_files.is_empty() && rules.is_some_and(|r| convert_foreign(zip, &work, r, &part, tx)) => {}
         Ok(Some(part)) => {
             let _ = tx.send(AppMsg::Import(Msg::Found(part, work)));
         }

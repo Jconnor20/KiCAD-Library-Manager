@@ -99,6 +99,8 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
     for (i, p) in std::mem::take(&mut files.foreign).iter().enumerate() {
         let (dir, stem) = (work.join(format!("conv{i}")), lib_stem(p));
         let _ = std::fs::create_dir_all(&dir);
+        let fixed = dir.join(p.file_name().unwrap_or_default());
+        let p = &if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lbr")) && std::fs::read_to_string(p).is_ok_and(|t| std::fs::write(&fixed, fix_eagle_numbers(&t)).is_ok()) { fixed } else { p.clone() };
         let sym = kicad_env::upgrade_symbols(p, &dir.join(format!("{stem}.kicad_sym")));
         let fp = kicad_env::upgrade_footprints(p, &dir.join(format!("{stem}.pretty")));
         if sym.is_err() && fp.is_err() {
@@ -159,6 +161,27 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
         }
     }
     Ok(out)
+}
+
+/// Ultra Librarian writes Eagle numbers as `.1524` and `-.5`; kicad-cli's Eagle importer rejects those
+/// ("Unable to convert library"), so give them the leading zero.
+fn fix_eagle_numbers(xml: &str) -> String {
+    let mut out = String::with_capacity(xml.len() + 64);
+    let mut rest = xml;
+    while let Some(i) = rest.find("=\"") {
+        let (head, tail) = rest.split_at(i + 2);
+        out.push_str(head);
+        let neg = tail.starts_with('-');
+        let num = &tail[usize::from(neg)..];
+        if num.starts_with('.') && num[1..].starts_with(|c: char| c.is_ascii_digit()) {
+            out.push_str(if neg { "-0" } else { "0" });
+            rest = num;
+        } else {
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn first_line(e: &anyhow::Error) -> String {
@@ -262,6 +285,11 @@ fn find_model(fp: &Path, files: &Files, root: &Path) -> Option<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eagle_numbers_get_leading_zero() {
+        assert_eq!(fix_eagle_numbers(r#"<wire x1="-.5" width=".1524" name=".x" y="2.5"/>"#), r#"<wire x1="-0.5" width="0.1524" name=".x" y="2.5"/>"#);
+    }
 
     #[test]
     fn derived_symbols_are_flattened() {
