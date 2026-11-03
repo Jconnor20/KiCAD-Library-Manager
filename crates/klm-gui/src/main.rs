@@ -140,6 +140,7 @@ impl App {
         let mut settings = Settings::load();
         kicad_env::set_kicad_cli_override(settings.kicad_cli.clone());
         klm_core::snapshot::set_store_path(klm_core::store::Store::default_path());
+        klm_core::snapshot::set_policy(&settings.history);
         if let Some(p) = &project_arg {
             settings.last_project = Some(project_dir(p));
         }

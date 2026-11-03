@@ -122,6 +122,7 @@ fn settings() -> Result<Settings> {
         }
     };
     kicad_env::set_kicad_cli_override(s.kicad_cli.clone());
+    klm_core::snapshot::set_policy(&s.history);
     Ok(s)
 }
 

@@ -27,6 +27,35 @@ pub struct Settings {
     pub cache_ttl_minutes: Option<u64>,
     /// Default shipping region (ISO country, e.g. "DE") for BOM stock and prices; a project can override it.
     pub shipping_region: String,
+    /// How many snapshots are kept and when versions are made on their own.
+    pub history: History,
+}
+
+/// How often a snapshot is promoted to a version without being asked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AutoVersion {
+    Off,
+    Daily,
+    #[default]
+    Weekly,
+    Monthly,
+}
+
+/// Retention of snapshots (see `snapshot`): versions are never pruned, minor snapshots are.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct History {
+    /// Minor snapshots kept per library.
+    pub keep_minors: usize,
+    /// Optional cap on the disk space of minor snapshots, in MB.
+    pub max_minor_mb: Option<u64>,
+    pub auto_version: AutoVersion,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self { keep_minors: 10, max_minor_mb: None, auto_version: AutoVersion::default() }
+    }
 }
 
 fn path() -> Option<PathBuf> {
@@ -85,6 +114,8 @@ mod tests {
         let old = Settings::parse(r#"{"downloads_dir":"D:/old"}"#).unwrap();
         assert_eq!(old.watch_dirs, vec![PathBuf::from("D:/old")]);
         // Old files without the new field still load.
-        assert!(serde_json::from_str::<Settings>(r#"{"global_root":"C:/x"}"#).unwrap().source_enabled.is_empty());
+        let old = serde_json::from_str::<Settings>(r#"{"global_root":"C:/x"}"#).unwrap();
+        assert!(old.source_enabled.is_empty());
+        assert_eq!((old.history.keep_minors, old.history.auto_version), (10, AutoVersion::Weekly));
     }
 }
