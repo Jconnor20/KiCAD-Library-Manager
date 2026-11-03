@@ -2,6 +2,10 @@ use eframe::egui;
 use klm_core::alternatives::{self, LibPart, ROLES};
 use klm_core::library::LibraryRoot;
 use klm_core::store::Store;
+use std::sync::mpsc::{Receiver, channel};
+
+/// Per suggested group: (index into `parts`, role, ticked).
+type Groups = Vec<Vec<(usize, String, bool)>>;
 
 /// Suggested groups of equivalent parts in one library. The user ticks the members, picks a role for
 /// each and confirms; only then is the group stored and written into the symbols.
@@ -9,35 +13,58 @@ pub struct AlternativesPanel {
     root: LibraryRoot,
     parts: Vec<LibPart>,
     /// Per suggested group: (index into `parts`, role, ticked).
-    groups: Vec<Vec<(usize, String, bool)>>,
+    groups: Groups,
+    /// The scan runs on a worker; this is where its result arrives.
+    rx: Option<Receiver<(Vec<LibPart>, Groups)>>,
 }
 
 impl AlternativesPanel {
-    pub fn new(root: &LibraryRoot) -> Self {
-        let parts = alternatives::scan(root);
-        let store = Store::default_path().and_then(|p| Store::open(&p).ok());
-        let groups = alternatives::suggest(&parts)
-            .into_iter()
-            .map(|g| {
-                g.into_iter()
-                    .enumerate()
-                    .map(|(n, i)| {
-                        // A stored role wins; otherwise the first part is the suggested preferred one.
-                        let stored = store.as_ref().and_then(|s| alternatives::alternatives_of(s, &parts[i].mpn).ok()).and_then(|grp| {
-                            grp.into_iter().find(|a| klm_core::matching::same_mpn(&a.mpn, &parts[i].mpn)).map(|a| a.role)
-                        });
-                        (i, stored.unwrap_or_else(|| if n == 0 { "preferred" } else { "substitute" }.into()), true)
-                    })
-                    .collect()
-            })
-            .collect();
-        Self { root: root.clone(), parts, groups }
+    pub fn new(root: &LibraryRoot, ctx: &egui::Context) -> Self {
+        let (tx, rx) = channel();
+        let (r, ctx) = (root.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let parts = alternatives::scan(&r);
+            let store = Store::default_path().and_then(|p| Store::open(&p).ok());
+            let groups = alternatives::suggest(&parts)
+                .into_iter()
+                .map(|g| {
+                    g.into_iter()
+                        .enumerate()
+                        .map(|(n, i)| {
+                            // A stored role wins; otherwise the first part is the suggested preferred one.
+                            let stored = store.as_ref().and_then(|s| alternatives::alternatives_of(s, &parts[i].mpn).ok()).and_then(|grp| {
+                                grp.into_iter().find(|a| klm_core::matching::same_mpn(&a.mpn, &parts[i].mpn)).map(|a| a.role)
+                            });
+                            (i, stored.unwrap_or_else(|| if n == 0 { "preferred" } else { "substitute" }.into()), true)
+                        })
+                        .collect()
+                })
+                .collect();
+            let _ = tx.send((parts, groups));
+            ctx.request_repaint();
+        });
+        Self { root: root.clone(), parts: Vec::new(), groups: Vec::new(), rx: Some(rx) }
     }
 
     /// Returns false once closed.
     pub fn window(&mut self, ctx: &egui::Context, log: &mut Vec<String>) -> bool {
         let mut open = true;
         egui::Window::new("Alternatives and duplicates").open(&mut open).default_width(720.0).show(ctx, |ui| {
+            if let Some(rx) = &self.rx {
+                match rx.try_recv() {
+                    Ok((parts, groups)) => {
+                        (self.parts, self.groups, self.rx) = (parts, groups, None);
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Scanning the library…");
+                        });
+                        return;
+                    }
+                    Err(_) => self.rx = None,
+                }
+            }
             if self.groups.is_empty() {
                 ui.label("No likely-equivalent parts found in this library.");
                 return;

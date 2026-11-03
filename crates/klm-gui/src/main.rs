@@ -337,6 +337,14 @@ impl eframe::App for App {
             ui.add_space(6.0);
         });
         egui::Panel::bottom("log").resizable(true).default_size(120.0).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Clear").clicked() {
+                    self.cx.log.clear();
+                }
+                if ui.button("Copy").on_hover_text("Copy all log lines to the clipboard").clicked() {
+                    ui.ctx().copy_text(self.cx.log.join("\n"));
+                }
+            });
             egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink(false).show(ui, |ui| {
                 for line in &self.cx.log {
                     ui.label(line);

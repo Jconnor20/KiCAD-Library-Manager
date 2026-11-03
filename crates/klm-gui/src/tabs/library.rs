@@ -378,7 +378,7 @@ impl LibraryTab {
             (self.checks, self.checks_rx) = (Some(done), None);
         }
         if alternatives {
-            self.alternatives = Some(AlternativesPanel::new(root));
+            self.alternatives = Some(AlternativesPanel::new(root, ui.ctx()));
         }
         let parts = self.parts.get_or_insert_with(|| root.list_parts());
 
