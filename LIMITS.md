@@ -13,6 +13,24 @@ A running list of what each merged work package left undone, cut short or made r
 - Temporary scratch folders (`klm-zip-*`, `klm-batch-*`, ...) still go to the OS temp dir, not the sandbox; they are unique per run and not user data.
 - The GUI's native file dialogs open in the user's real folders and can browse anywhere; the sandbox does not restrict what the user picks.
 
+### W6.4 Scale and KiCad-open checks
+
+Timings: `cargo test --release -p klm-core --test scale_e2e -- --ignored scale --nocapture`, 2,000 parts in 8 categories, median of 3 runs, Windows 11. Full output in [docs/verification/W6.4-scale.md](docs/verification/W6.4-scale.md).
+
+| Operation | Median ms | On the UI thread? | Note |
+|---|---|---|---|
+| `LibraryRoot::list_parts` | 345 | **yes, over 200 ms** | `klm-gui/src/tabs/library.rs:553`, `get_or_insert_with` in the Library tab's draw. Redone after every reset (`self.parts = None`, about ten sites), so an edit or refresh stalls the UI for this long. |
+| `checks::check_library` | 382 | no | Runs on a worker (`library.rs:542`). Over 200 ms, but off the UI thread. |
+| `alternatives::scan` + `suggest` | 52 | no | Runs on a worker (`alternatives.rs:36`). Store lookups per group are not timed. |
+
+- **`list_parts` blocks the UI.** Move it to a worker like `check_library`, or cache the result across resets. Not fixed here (no feature work in Wave 6).
+- **The scale fixture is written straight to disk.** `add_part` runs `kicad-cli` for each part, so 2,000 of them would take minutes. The reads all go through the real APIs. One footprint per package and one model per package is kinder than a real library.
+- **No time budget is asserted.** The timing test prints numbers; it does not fail on them.
+- **Pending queue, outside edit to a queued library:** passes. The queued library is added to the table as it is at apply time, so an edit made in between survives.
+- **Pending queue, outside edit after a queued table restore: data loss.** A snapshot restore made while KiCad is open queues `TableOp::Restore(old text)`. Applying it after an outside edit overwrites the whole table, so the edit is lost without a warning. The test is `queued_restore_keeps_an_outside_edit` (ignored). Fix in `kicad_env::apply_in`: a restore should merge the outside edits, or refuse and warn, rather than write the old text.
+- **The KiCad-open branches are simulated.** Under a sandbox `kicad_running()` is always false, so `defer_table_op` and `register_or_queue` never queue. The replay tests write the queue files directly, in the format those functions write.
+- **`klm-cli health` runs on projects only in the tests.** Global table checks are not covered.
+
 ## Wave 5
 
 ### W5.1 Search by part type
