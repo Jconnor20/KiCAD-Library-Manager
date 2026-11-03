@@ -85,6 +85,8 @@ pub(crate) fn parse_search(body: &Value, query: &str) -> Vec<Part> {
                 datasheet_url: datasheet.unwrap_or_default(),
                 package: s(c, "componentSpecificationEn"),
                 stock: c["stockCount"].as_u64(),
+                moq: c["minPurchaseNum"].as_u64().filter(|&n| n > 0),
+                pack_qty: c["encapsulationNumber"].as_u64().filter(|&n| n > 0),
                 unit_price: price.unwrap_or_default(),
                 ..Default::default()
             }
@@ -171,6 +173,7 @@ mod tests {
         let p = &parts[0];
         assert_eq!((p.mpn.as_str(), p.manufacturer.as_str(), p.package.as_str()), ("RP2040", "Raspberry Pi", "LQFN-56(7x7)"));
         assert_eq!(p.supplier_ids, [("LCSC".to_string(), "C2040".to_string())]);
+        assert_eq!((p.moq, p.pack_qty), (Some(1), Some(3400)));
         assert!(p.stock.is_some() && p.unit_price.starts_with('$') && p.unit_price.contains(" @1"));
         assert!(p.datasheet_url.starts_with("https://") && p.category_hint.contains("Microcontrollers"));
     }

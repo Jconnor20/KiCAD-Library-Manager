@@ -12,7 +12,7 @@ use std::path::Path;
 const QUERY: &str = "query Search($q: String!) { supSearch(q: $q, limit: 10) { results { part { \
     mpn shortDescription totalAvail manufacturer { name } category { name } bestDatasheet { url } \
     specs { attribute { name shortname } displayValue } \
-    sellers { company { name } offers { sku prices { quantity price currency } } } } } } }";
+    sellers { company { name } offers { sku moq multipack prices { quantity price currency } } } } } } }";
 
 pub struct Nexar {
     http: Client,
@@ -77,6 +77,7 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
             };
             // Lowest-quantity USD price over all sellers, so the column is comparable across rows.
             let mut best: Option<(u64, f64)> = None;
+            let mut best_offer: Option<&Value> = None;
             for seller in p["sellers"].as_array().into_iter().flatten() {
                 let company = http::text(seller, "/company/name").to_lowercase();
                 let name = if company.contains("digi-key") || company.contains("digikey") {
@@ -96,12 +97,16 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
                             && best.is_none_or(|(bq, bp)| q < bq || (q == bq && price < bp))
                         {
                             best = Some((q, price));
+                            best_offer = Some(offer);
                         }
                     }
                 }
             }
             if let Some((q, price)) = best {
                 part.unit_price = format!("${price} @{q}");
+                // MOQ and pack size come from the offer that gave the shown price.
+                part.moq = best_offer.and_then(|o| o["moq"].as_u64());
+                part.pack_qty = best_offer.and_then(|o| o["multipack"].as_u64());
             }
             part
         })
@@ -121,7 +126,7 @@ mod tests {
                   {"attribute": {"name": "Case/Package", "shortname": "case_package"}, "displayValue": "SOIC-8"}],
         "sellers": [
           {"company": {"name": "Mouser Electronics"}, "offers": [{"sku": "595-LM358DR", "prices": [{"quantity": 1, "price": 0.55, "currency": "USD"}]}]},
-          {"company": {"name": "Digi-Key"}, "offers": [{"sku": "296-1395-1-ND", "prices": [{"quantity": 1, "price": 0.52, "currency": "USD"}, {"quantity": 100, "price": 0.3, "currency": "EUR"}]}]},
+          {"company": {"name": "Digi-Key"}, "offers": [{"sku": "296-1395-1-ND", "moq": 1, "multipack": 2500, "prices": [{"quantity": 1, "price": 0.52, "currency": "USD"}, {"quantity": 100, "price": 0.3, "currency": "EUR"}]}]},
           {"company": {"name": "Somewhere Else"}, "offers": [{"sku": "ZZ", "prices": []}]}]}}]}}}"#;
 
     #[test]
@@ -134,6 +139,7 @@ mod tests {
         assert_eq!(p.category_hint, "Operational Amplifiers");
         assert_eq!(p.datasheet_url, "https://www.ti.com/lit/ds/symlink/lm358.pdf");
         assert_eq!(p.unit_price, "$0.52 @1");
+        assert_eq!((p.moq, p.pack_qty), (Some(1), Some(2500)));
         assert_eq!(p.supplier_ids, vec![("Mouser".to_string(), "595-LM358DR".to_string()), ("DigiKey".to_string(), "296-1395-1-ND".to_string())]);
     }
 
