@@ -89,7 +89,7 @@ fn b3_search_header_is_not_clipped_at_both_sizes() {
 fn b3_library_header_is_not_clipped_at_both_sizes() {
     let _env = setup();
     for size in SIZES {
-        let mut h = app(size, Tab::Library);
+        let h = app(size, Tab::Library);
         assert_nothing_clipped(&h, size, "Library");
         let table = h.get_by_label("RP2040").rect();
         assert!(table.max.y <= size.1 * 0.75, "first table row hidden behind the log at {size:?}: {table:?}");
@@ -97,7 +97,6 @@ fn b3_library_header_is_not_clipped_at_both_sizes() {
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b4_search_sidebar_icons_have_glyphs() {
     let _env = setup();
     for size in SIZES {
@@ -106,28 +105,26 @@ fn b4_search_sidebar_icons_have_glyphs() {
         settle(&mut h);
         assert!(h.query_by_label("Recently imported").is_some(), "side list missing");
         let missing = missing_glyphs(&h);
-        bug!(missing.is_empty(), "W7: Search at {size:?} draws {missing:?} as empty boxes (star buttons, sort arrows)");
+        assert!(missing.is_empty(), " Search at {size:?} draws {missing:?} as empty boxes (star buttons, sort arrows)");
     }
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b4b_library_table_has_no_tofu() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     settle(&mut h);
     let missing = missing_glyphs(&h);
-    bug!(missing.is_empty(), "W7: the Library table draws {missing:?} as empty boxes (the ✔ cells, sort arrows)");
+    assert!(missing.is_empty(), " the Library table draws {missing:?} as empty boxes (the ✔ cells, sort arrows)");
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b4c_settings_has_no_tofu() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     click(&mut h, "Settings…");
     let missing = missing_glyphs(&h);
-    bug!(missing.is_empty(), "W7: Settings draws {missing:?} as an empty box (the show/hide-key button)");
+    assert!(missing.is_empty(), " Settings draws {missing:?} as an empty box (the show/hide-key button)");
 }
 
 #[test]

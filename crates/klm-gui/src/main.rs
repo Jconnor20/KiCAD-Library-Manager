@@ -31,11 +31,17 @@ use klm_core::sources::Source;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use tabs::ui_kit::{Level, Section};
 use tabs::{bom, cleanup, history, import, library, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
+    /// A log line whose severity is guessed from its wording (see `Log::push`).
     Log(String),
+    /// For worker threads: `tx.send(Msg::LogAt(Level::Error, …))`.
+    #[allow(dead_code)]
+    LogAt(Level, String),
+    OpenSettings(Section),
     /// Re-add KLM libraries missing from KiCad's tables.
     Relink,
     /// Add queued libraries to KiCad's tables, after the close-KiCad prompt if it is open.
@@ -59,6 +65,60 @@ enum Tab {
     Cleanup,
 }
 
+/// The log: lines with a severity. `cx.log(level, text)` is the way to add one; `push`/`extend` are for older call sites.
+#[derive(Default)]
+struct Log {
+    lines: Vec<(Level, String)>,
+}
+
+impl Log {
+    /// Adds a line of unknown severity: an error if it reads like one, else info.
+    fn push(&mut self, s: String) {
+        let low = s.to_lowercase();
+        let failed = ["could not", "failed", "can't", "cannot", "nothing was changed", "not found"].iter().any(|w| low.contains(w));
+        self.lines.push((if failed { Level::Error } else { Level::Info }, s));
+    }
+
+    fn extend(&mut self, lines: impl IntoIterator<Item = String>) {
+        for s in lines {
+            self.push(s);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.lines.clear();
+    }
+
+    fn errors(&self) -> usize {
+        self.lines.iter().filter(|(l, _)| *l == Level::Error).count()
+    }
+
+    fn text(&self) -> String {
+        self.lines.iter().map(|(_, s)| s.as_str()).collect::<Vec<_>>().join("\n")
+    }
+}
+
+/// Fonts for the symbols the GUI uses (✔ ✘ ★ ▲ 📄 🧊 …), which egui's own fonts lack. They come from the system, so
+/// nothing is bundled; if none is found those glyphs show as empty boxes.
+fn install_fonts(ctx: &egui::Context) {
+    let candidates = [
+        ("symbols", [r"C:\Windows\Fonts\seguisym.ttf", "/System/Library/Fonts/Apple Symbols.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]),
+        ("emoji", [r"C:\Windows\Fonts\seguiemj.ttf", "", ""]),
+    ];
+    let mut fonts = egui::FontDefinitions::default();
+    let mut at = 1;
+    for (name, paths) in candidates {
+        let Some(bytes) = paths.iter().find_map(|p| std::fs::read(p).ok()) else { continue };
+        fonts.font_data.insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            // After the main text font, before egui's emoji fonts, so ✔ comes out as a plain glyph in the text colour.
+            fonts.families.entry(family).or_default().insert(at, name.into());
+        }
+        at += 1;
+    }
+    ctx.set_fonts(fonts);
+}
+
 /// State every tab can read and change.
 struct AppCtx {
     ctx: egui::Context,
@@ -69,7 +129,7 @@ struct AppCtx {
     /// A download or import is running; buttons that start another are disabled.
     busy: bool,
     tab: Tab,
-    log: Vec<String>,
+    log: Log,
     tx: Sender<Msg>,
     /// An action that edits KiCad's library tables, held until KiCad is closed.
     blocked: Option<Msg>,
@@ -84,6 +144,16 @@ impl AppCtx {
     fn send(&self, msg: Msg) {
         let _ = self.tx.send(msg);
         self.ctx.request_repaint();
+    }
+
+    /// Adds a line to the log, coloured by `level`.
+    fn log(&mut self, level: Level, text: impl Into<String>) {
+        self.log.lines.push((level, text.into()));
+    }
+
+    /// Opens the Settings popup at `section`.
+    fn open_settings(&self, section: Section) {
+        self.send(Msg::OpenSettings(section));
     }
 
     /// Sends `msg` now, or holds it behind the "close KiCad" prompt if KiCad is open.
@@ -155,6 +225,7 @@ fn new_work_dir() -> PathBuf {
 
 impl App {
     fn new(ctx: &egui::Context, project_arg: Option<PathBuf>) -> Self {
+        install_fonts(ctx);
         let mut settings = Settings::load();
         kicad_env::set_kicad_cli_override(settings.kicad_cli.clone());
         kicad_env::set_pending_queue(kicad_env::default_queue_path());
@@ -174,7 +245,7 @@ impl App {
             sources,
             busy: false,
             tab: Tab::Import,
-            log: vec![],
+            log: Log::default(),
             tx,
             blocked: None,
             still_open: false,
@@ -182,7 +253,7 @@ impl App {
             last_poll: std::time::Instant::now(),
         };
         if let Err(e) = &cx.kicad_config {
-            cx.log.push(format!("KiCad not found: {e}"));
+            cx.log(Level::Warn, format!("KiCad not found: {e}"));
         }
         if let Some(g) = cx.settings.global_root.clone().filter(|g| !g.is_dir()) {
             cx.log.push(format!("Global library not found at {}. If you moved it, click \"Change location…\" and choose its new folder.", g.display()));
@@ -288,6 +359,8 @@ impl App {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Log(s) => self.cx.log.push(s),
+                Msg::LogAt(level, s) => self.cx.log(level, s),
+                Msg::OpenSettings(_) => self.settings_tab.open(),
                 Msg::Relink => self.relink(),
                 Msg::ApplyPending => self.apply_pending(),
                 Msg::MoveGlobal(dir) => self.move_global(&dir),
@@ -407,12 +480,15 @@ impl eframe::App for App {
                     self.cx.log.clear();
                 }
                 if ui.button("Copy").on_hover_text("Copy all log lines to the clipboard").clicked() {
-                    ui.ctx().copy_text(self.cx.log.join("\n"));
+                    ui.ctx().copy_text(self.cx.log.text());
                 }
             });
             egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink(false).show(ui, |ui| {
-                for line in &self.cx.log {
-                    ui.label(line);
+                for (level, line) in &self.cx.log.lines {
+                    match level {
+                        Level::Info => ui.label(line),
+                        _ => ui.colored_label(level.color(ui.visuals()), line),
+                    };
                 }
             });
         });
@@ -426,7 +502,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.cx.tab, Tab::Cleanup, RichText::new("Clean up").heading());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Settings…").clicked() {
-                        self.settings_tab.open();
+                        self.cx.open_settings(Section::General);
                     }
                 });
             });

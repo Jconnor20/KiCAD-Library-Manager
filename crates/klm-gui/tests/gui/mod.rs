@@ -6,3 +6,4 @@
 mod harness;
 mod screens;
 mod bugs;
+mod kit;
