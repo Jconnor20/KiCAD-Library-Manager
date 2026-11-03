@@ -106,6 +106,7 @@ fn s9_first_run_checklist() {
     assert!(h.query_by_label("✔ KiCad found").is_some());
     click(&mut h, "Open");
     assert!(h.query_by_label("Settings").is_some(), "Open did not show Settings");
+    assert!(h.query_all_by_label_contains("General › Libraries").next().is_some(), "the first Open goes to Libraries");
 }
 
 #[test]

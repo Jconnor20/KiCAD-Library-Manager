@@ -255,12 +255,14 @@ No new features. Prove what's built works, fix what doesn't, and leave tests beh
 
 Driven by the screenshots above. Each WP checks its own tab with the W6.3 harness and adds the snapshots to its merge.
 
-- [ ] **W7.0 Shared look (run first, here)** (S)
+- Status (2026-11-04): all six merged and checked together. Test plans, results and before/after snapshots are in `docs/ui-review/` (W7.0–W7.5 and W7-integration). Still open: accessible names (b7), Restyle applying the reviewed result, a per-part datasheet finder, saving a BOM alternate swap. Not yet checked by hand.
+
+- [x] **W7.0 Shared look (run first, here)** (S)
   - **Owns:** `gui/tabs/ui_kit.rs` (new), `gui/main.rs` (fonts and visuals only)
   - One place for status cells (✔ / missing / broken / optional "—"), badges, a sortable header, and a font fallback that has every glyph we use (fixes the □). The colours for ok/warn/error/info.
   - A `TableBuilder` wrapper (`egui_extras`, already a dependency) that only draws visible rows, with resizable columns and a fixed header.
   - The shared hooks other WPs call, so they don't all edit `main.rs`: `cx.open_settings(Section)` (an empty `Section` enum that W7.1 fills in) and `cx.log(Level, …)`.
-- [ ] **W7.1 Settings as a sectioned popup, like Altium's Preferences or Fusion's** (L)
+- [x] **W7.1 Settings as a sectioned popup, like Altium's Preferences or Fusion's** (L)
   - **Owns:** `gui/tabs/settings.rs`, `gui/tabs/standards.rs`, `gui/tabs/settings/` (new, one file per page if it grows)
   - **Stays a popup** (modal over the app), sized to about 80% of the window, resizable, with an **✕ close button in its title bar** as well as Esc.
   - **Left:** a search box over a tree of sections. Typing filters the tree to pages whose labels match. **Right:** the selected page, with a title and its options in titled groups, in two columns when wide enough.
@@ -277,28 +279,28 @@ Driven by the screenshots above. Each WP checks its own tab with the W6.3 harnes
   - **Open at a section:** fills in W7.0's `cx.open_settings(Section)` for any tab to call (Search's "no sources", BOM's region, Import's watch folder). This replaces the old Wave 6 nice-to-have.
   - History's retention controls move here from the History tab. Standards keeps its rules here; its Dry run/Apply moves to the Library tab (W7.3).
   - **Done when:** the harness opens every page by clicking the tree and through the search box, Cancel leaves `settings.json` unchanged, and a key box is at least 300 px at the default window size.
-- [ ] **W7.2 App shell** (M)
+- [x] **W7.2 App shell** (M)
   - **Owns:** `gui/main.rs`
   - Default size 1200×800, and size and position remembered (eframe `persistence`).
   - Log: coloured by severity, a smaller default height, and an "N errors" badge in the top bar that opens it, using W7.0's `(Level, String)` messages.
   - **Floating windows belong to their tab:** hidden when you switch away, and back when you return. Or make them modals.
   - Opens on Library once set up (Import only for first run). One Relink (the dry-run one). Rename the project's "Clear" to "Close project".
   - First-run checklist: global library → KiCad found → a source enabled → a watch folder, each linking to its place.
-- [ ] **W7.3 Library tab** (L) ⚑
+- [x] **W7.3 Library tab** (L) ⚑
   - **Owns:** `gui/tabs/library.rs`, `edit_dialog.rs`, `preview.rs`, `alternatives.rs`, `batch_dialog.rs`
   - Moves to the W7.0 table: select all/none, shift-click ranges, and parts loaded off the UI thread.
   - Sim model shows "—" when absent (it's optional). Status cells offer the fix on click: missing datasheet → find it, missing 3D → attach.
   - Toolbar: **Standardise…** (dry run, then apply), **Export selected…** (W4.4 core), **Health report…** (W4.2 core), **Delete** (after W8.1, or hidden until then).
   - Restyle gets the same dry-run review as the rest.
   - Alternatives opens on the selected part, with its label before the dropdown. Preview thumbnails at least 240 px, with a larger default window.
-- [ ] **W7.4 Search tab** (M)
+- [x] **W7.4 Search tab** (M)
   - **Owns:** `gui/tabs/search.rs`
   - W7.0 table, so nothing is cut off at the default size. An empty-state message before the first search.
   - An **"In library"** badge on results whose MPN you already have, with "Open in Library".
   - Side panel: ☆ to save a recent search, a clear "Saved" list, and working icons for "Recently imported".
   - CAD-availability as text badges (Sym / FP / 3D / SPICE) instead of 🔣⏚🧊. "(native)" in the price header becomes the currency, or "as listed".
   - "No sources enabled" links to Settings → Sources.
-- [ ] **W7.5 Import, History, BOM and Clean up** (M)
+- [x] **W7.5 Import, History, BOM and Clean up** (M)
   - **Owns:** `gui/tabs/import.rs`, `history.rs`, `bom.rs`, `cleanup.rs`
   - Import: "Import folder…" and "Import files…" buttons instead of the "files" checkbox.
   - History: actions in a row menu (⋯ or right-click), Delete kept away from Roll back, and a "what changed" list of files per snapshot.

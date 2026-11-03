@@ -133,7 +133,7 @@ impl HistoryTab {
             }
             ui.checkbox(&mut self.versions_only, "Versions only");
             if ui.link("Retention settings…").clicked() {
-                cx.open_settings(Section::General);
+                cx.open_settings(Section::History);
             }
         });
         if snapshots.is_empty() {

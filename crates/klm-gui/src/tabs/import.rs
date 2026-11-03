@@ -467,7 +467,7 @@ impl ImportTab {
         });
         ui.horizontal_wrapped(|ui| {
             if ui.link("Watch folders…").clicked() {
-                cx.open_settings(Section::General);
+                cx.open_settings(Section::WatchFolders);
             }
             let dirs = cx.settings.downloads();
             ui.weak(if dirs.is_empty() {

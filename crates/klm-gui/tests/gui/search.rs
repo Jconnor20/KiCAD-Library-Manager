@@ -75,6 +75,10 @@ fn s3_in_library_badge_and_open_in_library() {
     h.get_by_label("In library").click();
     h.run_ok();
     assert!(h.state().cx.tab == Tab::Library);
+    settle(&mut h);
+    assert!(h.query_by_label("LM358").is_some() && h.query_by_label("RP2040").is_none(), "Library isn't filtered to LM358:
+{}", dump(&h));
+    snap(&mut h, "library-opened-from-search");
 }
 
 #[test]
@@ -118,6 +122,7 @@ fn s6_no_sources_links_to_settings() {
         h.get_by_label("Enable one in Settings").click();
         h.run_ok();
         assert!(h.query_by_label("Settings").is_some(), "Settings did not open");
+        assert!(h.query_all_by_label_contains("LCSC needs no keys.").next().is_some(), "Settings isn't on Sources");
     }
 }
 

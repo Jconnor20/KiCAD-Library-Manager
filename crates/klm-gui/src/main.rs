@@ -418,10 +418,10 @@ impl App {
         let cx = &self.cx;
         // W7.1 adds Libraries / KiCad / Sources / Watch folders pages; point each step at its own then.
         let steps = [
-            ("Global library", cx.settings.global_root.is_some(), Section::General),
-            ("KiCad found", cx.kicad_config.is_ok(), Section::General),
-            ("A source enabled", !cx.sources.is_empty(), Section::General),
-            ("A watch folder", !cx.settings.watch_dirs.is_empty(), Section::General),
+            ("Global library", cx.settings.global_root.is_some(), Section::Libraries),
+            ("KiCad found", cx.kicad_config.is_ok(), Section::KiCad),
+            ("A source enabled", !cx.sources.is_empty(), Section::Sources),
+            ("A watch folder", !cx.settings.watch_dirs.is_empty(), Section::WatchFolders),
         ];
         if self.checklist_hidden || steps.iter().all(|s| s.1) {
             return;

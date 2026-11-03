@@ -1,4 +1,4 @@
-use super::import;
+use super::{import, library};
 use super::ui_kit::{self, Col, Level, Section, Sort};
 use crate::{AppCtx, Msg as AppMsg, Tab, new_work_dir};
 use eframe::egui::{self, RichText};
@@ -27,6 +27,8 @@ pub enum Msg {
     Categories(usize, Result<Vec<Category>, String>),
     /// A thumbnail finished downloading (`None` if it failed).
     Thumb(String, Option<PathBuf>),
+    /// Search for this text now (BOM's "Search").
+    Query(String),
 }
 
 enum Action {
@@ -132,11 +134,9 @@ impl SearchTab {
         match action {
             Action::None => {}
             Action::Search(q) => self.run_search(q, cx),
-            Action::OpenSettings => cx.open_settings(Section::General), // W7.1's Sources page, once it exists
+            Action::OpenSettings => cx.open_settings(Section::Sources),
             Action::OpenLibrary(mpn) => {
-                // The Library tab has no hand-over field yet, so the MPN goes to the clipboard for its filter box.
-                ui.ctx().copy_text(mpn.clone());
-                cx.log(Level::Info, format!("{mpn} copied: paste it into the Library filter"));
+                cx.send(AppMsg::Library(library::Msg::Show(mpn)));
                 cx.tab = Tab::Library;
             }
             Action::LoadCategories(i) => self.load_categories(i, cx),
@@ -162,6 +162,10 @@ impl SearchTab {
 
     pub fn handle(&mut self, msg: Msg, cx: &mut AppCtx) {
         match msg {
+            Msg::Query(q) => {
+                self.query = q.clone();
+                self.run_search(q, cx);
+            }
             Msg::Done(results) => {
                 self.searching = false;
                 self.searched = true;

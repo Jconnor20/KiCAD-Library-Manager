@@ -1,5 +1,6 @@
 //! The "BOM" tab: the project's BOM matched against the libraries and priced from the distributors.
 
+use super::search;
 use super::ui_kit::{self, Col, Level, Section, Sort};
 use crate::{AppCtx, Msg as AppMsg, Tab};
 use eframe::egui;
@@ -167,7 +168,7 @@ impl BomTab {
                 .on_hover_text("Country code (US, DE, ...) for this project; empty uses the Settings default. Where you are, or where the board is made.")
                 .lost_focus();
             if self.settings.region.is_empty() && cx.settings.shipping_region.is_empty() && ui.link("Set in Settings…").on_hover_text("No region anywhere: DigiKey prices use its default site").clicked() {
-                cx.open_settings(Section::General);
+                cx.open_settings(Section::Bom);
             }
             if ui.add_enabled(!self.rows.is_empty(), egui::Button::new("Export CSV…")).clicked() {
                 if let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom.csv").save_file() {
@@ -302,8 +303,7 @@ impl BomTab {
         });
         self.sort = (sort.col != usize::MAX).then_some(sort);
         if let Some(mpn) = search {
-            cx.ctx.copy_text(mpn.clone());
-            cx.log(Level::Info, format!("BOM: {mpn} copied to the clipboard; paste it into Search's box"));
+            cx.send(AppMsg::Search(search::Msg::Query(mpn)));
             cx.tab = Tab::Search;
         }
         if import {

@@ -40,6 +40,10 @@ fn settings_open(h: &Gui) -> bool {
     h.query_by_label("Settings").is_some()
 }
 
+fn on_page(h: &Gui, text: &str) -> bool {
+    h.query_all_by_label_contains(text).next().is_some()
+}
+
 #[test]
 fn i1_import_buttons() {
     let _env = setup();
@@ -70,7 +74,7 @@ fn i3_watch_folder_link_opens_settings() {
     let mut h = app(SIZES[0], Tab::Import);
     assert!(!settings_open(&h));
     click(&mut h, "Watch folders…");
-    assert!(settings_open(&h));
+    assert!(settings_open(&h) && on_page(&h, "Folders watched for vendor ZIPs"));
 }
 
 fn history(size: (f32, f32)) -> Gui<'static> {
@@ -154,7 +158,7 @@ fn h5_retention_link() {
     let mut h = history(SIZES[0]);
     assert!(h.query_by_label("Retention…").is_none());
     click(&mut h, "Retention settings…");
-    assert!(settings_open(&h));
+    assert!(settings_open(&h) && on_page(&h, "Keep the last"));
 }
 
 #[test]
@@ -203,7 +207,9 @@ fn b3_missing_part_actions() {
     h.query_all_by_label("Search").find(|n| n.rect().top() > 150.0).unwrap().click();
     h.run_ok();
     assert!(h.state().cx.tab == Tab::Search);
-    assert!(h.state().cx.log.lines.iter().any(|(_, s)| s.contains("GRM155R71C104KA88D") && s.contains("clipboard")));
+    h.run_ok();
+    let store = klm_core::store::Store::open(&klm_core::store::Store::default_path().unwrap()).unwrap();
+    assert_eq!(store.recent_searches(1).unwrap(), ["GRM155R71C104KA88D"], "Search didn't run for the MPN");
     let mut h = bom(SIZES[1]);
     h.query_all_by_label("Import").find(|n| n.rect().top() > 150.0).unwrap().click();
     h.run_ok();
@@ -229,7 +235,7 @@ fn b5_region_link() {
     let mut h = bom(SIZES[0]);
     assert!(!settings_open(&h));
     click(&mut h, "Set in Settings…");
-    assert!(settings_open(&h));
+    assert!(settings_open(&h) && on_page(&h, "Shipping region"));
 }
 
 #[test]
