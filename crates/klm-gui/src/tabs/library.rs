@@ -22,7 +22,6 @@ pub enum Msg {
     /// The datasheet finder has finished: (part, URL used or why not).
     DatasheetsDone(Vec<(String, Result<String, String>)>),
     /// Apply a batch plan (KiCad is closed, or the plan doesn't touch its tables).
-    RunBatch(batch::Plan),
     Batch(Progress),
 }
 
@@ -185,8 +184,8 @@ fn part_actions(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, has_project: bo
     if btn(ui, "Preview", true, "Show the symbol, footprint and 3D model", "") {
         *action = Action::Preview { category: key.0.clone(), name: key.1.clone() };
     }
-    if btn(ui, "Attach…", true, "Add a datasheet (PDF), SPICE model or 3D model (STEP/WRL)", "") {
-        let picked = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
+    if btn(ui, "Attach…", true, "Add a datasheet (PDF), SPICE model, 3D model (STEP/WRL) or a footprint/3D ZIP without a symbol", "") {
+        let picked = rfd::FileDialog::new().add_filter("Datasheet, sim, 3D model or footprint ZIP", ATTACH_EXTENSIONS).pick_file();
         if let Some(path) = picked {
             *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
         }
@@ -287,7 +286,6 @@ impl LibraryTab {
                 self.parts = None;
                 self.finder_results = Some(results);
             }
-            Msg::RunBatch(plan) => batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p))),
             Msg::Batch(p) => {
                 if batch_dialog::progress(&mut self.batch, p, cx).is_some() {
                     self.parts = None;
@@ -303,11 +301,7 @@ impl LibraryTab {
     pub fn dialogs(&mut self, cx: &mut AppCtx) {
         let (global, project) = (cx.global_root(), cx.project_root());
         if let Some(plan) = batch_dialog::show(&mut self.batch, &cx.ctx) {
-            if plan.touches_kicad_tables() {
-                cx.when_kicad_closed(AppMsg::Library(Msg::RunBatch(plan)));
-            } else {
-                batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p)));
-            }
+            batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p)));
         }
         if let Some(results) = &self.finder_results {
             let mut open = true;
@@ -505,7 +499,7 @@ impl LibraryTab {
             }
             let attach = ui.add_enabled(has_selection, egui::Button::new("Attach to selected…"));
             if attach.on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked() {
-                attach_to_selected = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
+                attach_to_selected = rfd::FileDialog::new().add_filter("Datasheet, sim, 3D model or footprint ZIP", ATTACH_EXTENSIONS).pick_file();
             }
             alternatives = ui.button("Alternatives…").on_hover_text("Find duplicates and equivalent parts, and mark preferred ones").clicked();
             relink_all = ui.button("Relink libraries").on_hover_text("Add every KLM library missing from KiCad's library list").clicked();

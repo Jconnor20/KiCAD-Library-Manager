@@ -136,7 +136,7 @@ impl LibraryRoot {
     }
 }
 
-fn scratch_dir() -> Result<PathBuf> {
+pub(super) fn scratch_dir() -> Result<PathBuf> {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
     let dir = std::env::temp_dir().join(format!("klm-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir)?;

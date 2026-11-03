@@ -4,7 +4,7 @@
 use crate::library::{AttachKind, Check, LibraryRoot, Scope, sanitize};
 use crate::part::Part;
 use crate::sources::zip_import::read_zip;
-use crate::{categories, kicad_env};
+use crate::categories;
 use anyhow::{Result, bail};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -138,11 +138,6 @@ impl Plan {
     pub fn adds_libraries(&self) -> bool {
         self.items.iter().any(|i| i.changes.iter().any(|c| matches!(c, Change::NewLibrary(_))))
     }
-
-    /// Whether applying rewrites existing entries in KiCad's library tables, which KiCad overwrites while it is open. New libraries are queued instead.
-    pub fn touches_kicad_tables(&self) -> bool {
-        self.items.iter().any(|i| matches!(i.work, Work::FixPaths(_)))
-    }
 }
 
 impl Drop for Plan {
@@ -205,9 +200,6 @@ pub fn plan(ops: Vec<Op>, global: Option<&LibraryRoot>, project: Option<&Library
             Op::CopyToProject { parts, overwrite } => plan.items.extend(copy_items(global, project, parts, overwrite)),
             Op::RelinkAll => plan.items.extend(relink_items(global.into_iter().chain(project))),
         }
-    }
-    if plan.touches_kicad_tables() && kicad_env::kicad_running() {
-        plan.warnings.push("KiCad is running; close it before applying, since it would overwrite the path changes to its library list".into());
     }
     plan
 }
@@ -276,6 +268,7 @@ fn attach_items(root: Option<&LibraryRoot>, file: &Path, parts: Vec<(String, Str
             let (what, have, field) = match kind {
                 AttachKind::Datasheet => ("datasheet", st.datasheet, "Datasheet to the local copy"),
                 AttachKind::Sim => ("simulation model", st.sim, "Sim.Library to the new file"),
+                AttachKind::Zip => ("footprint", st.footprint, "the footprint link and model path to the ZIP's files"),
                 AttachKind::Model if st.footprint != Check::Ok => {
                     return item.fail(format!("{name} has no footprint in {nick}, so there is nothing to put the 3D model on"));
                 }
@@ -465,7 +458,6 @@ mod tests {
         assert_eq!(plan.items[3].label, "ZIPPED");
         assert!(plan.items[3].changes.contains(&Change::Add("symbol ZIPPED in PRJ_ICs".into())));
         assert_eq!(plan.items[4].changes, [Change::NewLibrary("KLM_ICs".into())]);
-        assert!(!plan.touches_kicad_tables(), "new libraries are queued, only path rewrites need KiCad closed");
         assert!(plan.to_string().contains("add library PRJ_ICs to KiCad's tables"));
     }
 
