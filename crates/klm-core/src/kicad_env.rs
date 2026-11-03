@@ -287,14 +287,49 @@ fn apply_table_op(table: &Path, op: &TableOp) -> Result<()> {
                 write_atomic(table, &text)?;
             }
         }
-        TableOp::Restore(Some(text)) => write_atomic(table, text)?,
+        TableOp::Restore(Some(text)) => {
+            let current = std::fs::read_to_string(table).unwrap_or_default();
+            write_atomic(table, &with_outside_entries(text, &current))?;
+        }
         TableOp::Restore(None) => {
+            // Entries that aren't ours were added since: keep the table, minus ours.
             if table.is_file() {
-                std::fs::remove_file(table)?;
+                let current = std::fs::read_to_string(table).unwrap_or_default();
+                if outside_entries(&current, "").is_empty() {
+                    std::fs::remove_file(table)?;
+                } else {
+                    write_atomic(table, &with_outside_entries(&empty_table(table), &current))?;
+                }
             }
         }
     }
     Ok(())
+}
+
+fn empty_table(table: &Path) -> String {
+    let kind = if table.file_name().is_some_and(|n| n == "fp-lib-table") { "fp_lib_table" } else { "sym_lib_table" };
+    format!("({kind}\n\t(version 7)\n)\n")
+}
+
+/// Entries of `current` that `base` doesn't list and that KLM didn't add: edits made by the user or KiCad
+/// since the restore was queued. KLM's own entries are left out so a restore can still remove them.
+fn outside_entries(current: &str, base: &str) -> Vec<String> {
+    let Ok(cur) = sexpr::parse(current) else { return vec![] };
+    let base = sexpr::parse(base).ok();
+    let name = |l: &sexpr::Sexpr| l.child("name").and_then(|n| n.arg(0)).unwrap_or_default().to_string();
+    let known: Vec<String> = base.iter().flat_map(|b| b.children("lib")).map(name).collect();
+    cur.children("lib")
+        .filter(|l| !known.contains(&name(l)) && !l.child("descr").and_then(|d| d.arg(0)).is_some_and(|d| d.contains("Managed by KiCad Library Manager")))
+        .map(|l| sexpr::to_string(l).replace("\n\t", " ").replace('\n', ""))
+        .collect()
+}
+
+/// `restore` with the outside entries of `current` spliced in, so applying a queued restore doesn't lose them.
+fn with_outside_entries(restore: &str, current: &str) -> String {
+    let extra = outside_entries(current, restore);
+    let Some(close) = restore.rfind(')').filter(|_| !extra.is_empty()) else { return restore.to_string() };
+    let lines: String = extra.iter().map(|e| format!("\t{e}\n")).collect();
+    format!("{}{lines}{}", restore[..close].trim_end_matches([' ', '\t']), &restore[close..])
 }
 
 /// Records that `op` was just done to `table` so it is repeated once KiCad closes. Only while KiCad is open and queueing is on.

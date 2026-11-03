@@ -241,7 +241,7 @@ No new features. Prove what's built works, fix what doesn't, and leave tests beh
   - Headless tests that open every tab and every dialog through AccessKit names (as this review did by hand), and assert the bugs above stay fixed: key fields at least 300 px wide, no tab's window shown on another tab, nothing clipped at the default size. Save a PNG of each screen to `target/ui-snapshots/` for review.
   - **Needs:** W6.0
   - **Done when:** `cargo test -p klm-gui` opens all 6 tabs, Settings and every Library dialog without panicking, and saves their snapshots.
-- [ ] **W6.4 Scale and KiCad-open checks** (S)
+- [x] **W6.4 Scale and KiCad-open checks** (S)
   - **Owns:** `core/tests/scale_e2e.rs` (new), `crates/klm-cli/tests/cli_health.rs` (new)
   - Generate a 2,000-part library and time `list_parts`, `check_library` and an Alternatives scan. Record the numbers in LIMITS.md, and flag anything over 200 ms that runs on the UI thread.
   - An end-to-end test for `klm-cli health`, which has only argument-parsing tests today.

@@ -13,6 +13,24 @@ A running list of what each merged work package left undone, cut short or made r
 - Temporary scratch folders (`klm-zip-*`, `klm-batch-*`, ...) still go to the OS temp dir, not the sandbox; they are unique per run and not user data.
 - The GUI's native file dialogs open in the user's real folders and can browse anywhere; the sandbox does not restrict what the user picks.
 
+### W6.4 Scale and KiCad-open checks
+
+Timings: `cargo test --release -p klm-core --test scale_e2e -- --ignored scale --nocapture`, 2,000 parts in 8 categories, median of 3 runs, Windows 11. Full output in [docs/verification/W6.4-scale.md](docs/verification/W6.4-scale.md).
+
+| Operation | Median ms | On the UI thread? | Note |
+|---|---|---|---|
+| `LibraryRoot::list_parts` | 345 | **yes, over 200 ms** | `klm-gui/src/tabs/library.rs:553`, `get_or_insert_with` in the Library tab's draw. Redone after every reset (`self.parts = None`, about ten sites), so an edit or refresh stalls the UI for this long. |
+| `checks::check_library` | 382 | no | Runs on a worker (`library.rs:542`). Over 200 ms, but off the UI thread. |
+| `alternatives::scan` + `suggest` | 52 | no | Runs on a worker (`alternatives.rs:36`). Store lookups per group are not timed. |
+
+- **`list_parts` blocks the UI.** Move it to a worker like `check_library`, or cache the result across resets. Not fixed here (no feature work in Wave 6).
+- **The scale fixture is written straight to disk.** `add_part` runs `kicad-cli` for each part, so 2,000 of them would take minutes. The reads all go through the real APIs. One footprint per package and one model per package is kinder than a real library.
+- **No time budget is asserted.** The timing test prints numbers; it does not fail on them.
+- **Pending queue, outside edit to a queued library:** passes. The queued library is added to the table as it is at apply time, so an edit made in between survives.
+- ~~**Pending queue, outside edit after a queued table restore: data loss.**~~ Fixed in W6.4: `kicad_env::apply_table_op` splices entries that are neither in the restore text nor KLM-managed (descr "Managed by KiCad Library Manager") back into the restored table, and a queued removal keeps the table if such entries exist. Limit: an outside *change or removal* of an entry that the restore text also lists is still overwritten, and the immediate snapshot restore (`copy_replace`) still replaces the table as the user asked.
+- **The KiCad-open branches are simulated.** Under a sandbox `kicad_running()` is always false, so `defer_table_op` and `register_or_queue` never queue. The replay tests write the queue files directly, in the format those functions write.
+- **`klm-cli health` runs on projects only in the tests.** Global table checks are not covered.
+
 ## Wave 5
 
 ### W5.1 Search by part type
@@ -38,7 +56,7 @@ A running list of what each merged work package left undone, cut short or made r
 - **Path rules from memory.** How it resolves env vars, text variables and relative project paths comes from Opus's memory of how KiCad does it, not from KiCad's source.
 
 ### W5.5 Rest of W4.5
-- **KiCad open:** rollback, move-global and relink apply at once and queue their table edits in `pending-tables.json`. The queue is replayed after KiCad closes, but only when the GUI next re-checks. A table edit made outside KLM in between is overwritten. Never tried with real KiCad.
+- **KiCad open:** rollback, move-global and relink apply at once and queue their table edits in `pending-tables.json`. The queue is replayed after KiCad closes, but only when the GUI next re-checks. Outside additions in between are kept since W6.4 (see below); changes to existing entries are not. Never tried with real KiCad.
 - **`klm-cli import`** that adds libraries still refuses while KiCad is open.
 
 ## Wave 4.5
