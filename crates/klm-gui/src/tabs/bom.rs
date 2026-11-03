@@ -84,7 +84,7 @@ impl BomTab {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
         let Some(project) = cx.project.clone() else {
-            ui.weak("Choose a project (Settings, or the KiCad plugin) to see its BOM.");
+            ui.weak("Choose a project (top bar, or the KiCad plugin) to see its BOM.");
             return;
         };
         if self.project.as_ref() != Some(&project) {
@@ -108,7 +108,7 @@ impl BomTab {
                 .add(egui::TextEdit::singleline(&mut self.settings.region).hint_text(hint).desired_width(90.0))
                 .on_hover_text("Country code (US, DE, ...) for this project; empty uses the Settings default. Where you are, or where the board is made.")
                 .lost_focus();
-            if ui.add_enabled(!self.rows.is_empty(), egui::Button::new("Export CSV...")).clicked() {
+            if ui.add_enabled(!self.rows.is_empty(), egui::Button::new("Export CSV…")).clicked() {
                 if let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom.csv").save_file() {
                     let csv = bom::to_csv(&self.rows, self.settings.boards, &self.priced_in);
                     cx.log.push(match std::fs::write(&path, csv) {
