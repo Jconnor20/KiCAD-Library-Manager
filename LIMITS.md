@@ -27,7 +27,7 @@ Timings: `cargo test --release -p klm-core --test scale_e2e -- --ignored scale -
 - **The scale fixture is written straight to disk.** `add_part` runs `kicad-cli` for each part, so 2,000 of them would take minutes. The reads all go through the real APIs. One footprint per package and one model per package is kinder than a real library.
 - **No time budget is asserted.** The timing test prints numbers; it does not fail on them.
 - **Pending queue, outside edit to a queued library:** passes. The queued library is added to the table as it is at apply time, so an edit made in between survives.
-- **Pending queue, outside edit after a queued table restore: data loss.** A snapshot restore made while KiCad is open queues `TableOp::Restore(old text)`. Applying it after an outside edit overwrites the whole table, so the edit is lost without a warning. The test is `queued_restore_keeps_an_outside_edit` (ignored). Fix in `kicad_env::apply_in`: a restore should merge the outside edits, or refuse and warn, rather than write the old text.
+- ~~**Pending queue, outside edit after a queued table restore: data loss.**~~ Fixed in W6.4: `kicad_env::apply_table_op` splices entries that are neither in the restore text nor KLM-managed (descr "Managed by KiCad Library Manager") back into the restored table, and a queued removal keeps the table if such entries exist. Limit: an outside *change or removal* of an entry that the restore text also lists is still overwritten, and the immediate snapshot restore (`copy_replace`) still replaces the table as the user asked.
 - **The KiCad-open branches are simulated.** Under a sandbox `kicad_running()` is always false, so `defer_table_op` and `register_or_queue` never queue. The replay tests write the queue files directly, in the format those functions write.
 - **`klm-cli health` runs on projects only in the tests.** Global table checks are not covered.
 
@@ -56,7 +56,7 @@ Timings: `cargo test --release -p klm-core --test scale_e2e -- --ignored scale -
 - **Path rules from memory.** How it resolves env vars, text variables and relative project paths comes from Opus's memory of how KiCad does it, not from KiCad's source.
 
 ### W5.5 Rest of W4.5
-- **KiCad open:** rollback, move-global and relink apply at once and queue their table edits in `pending-tables.json`. The queue is replayed after KiCad closes, but only when the GUI next re-checks. A table edit made outside KLM in between is overwritten. Never tried with real KiCad.
+- **KiCad open:** rollback, move-global and relink apply at once and queue their table edits in `pending-tables.json`. The queue is replayed after KiCad closes, but only when the GUI next re-checks. Outside additions in between are kept since W6.4 (see below); changes to existing entries are not. Never tried with real KiCad.
 - **`klm-cli import`** that adds libraries still refuses while KiCad is open.
 
 ## Wave 4.5

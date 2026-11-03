@@ -196,10 +196,9 @@ fn queued_library_survives_an_outside_table_edit() {
     assert!(kicad_env::pending_in(&queue).is_empty());
 }
 
-/// Found while writing W6.4: a table restore queued by a snapshot restore holds the whole old table, so
-/// applying it after an outside edit throws that edit away. Fix belongs to the owner of `kicad_env`.
+/// Found while writing W6.4: a queued restore holds the whole old table, so applying it used to throw away
+/// an outside edit. Fixed in `kicad_env::apply_table_op`, which now splices outside entries back in.
 #[test]
-#[ignore = "BUG (data loss): a queued table restore overwrites an outside edit made after it was queued; see LIMITS.md W6.4"]
 fn queued_restore_keeps_an_outside_edit() {
     let (_lock, table, queue) = kicad_tables();
     // A snapshot restore queued while KiCad was open: the table as it was then.
@@ -210,4 +209,20 @@ fn queued_restore_keeps_an_outside_edit() {
     kicad_env::apply_in(&queue).unwrap();
     let text = std::fs::read_to_string(&table).unwrap();
     assert!(text.contains("\"UserLib\""), "outside edit silently lost:\n{text}");
+}
+
+#[test]
+fn queued_removal_keeps_an_outside_edit_and_drops_ours() {
+    let (_lock, table, queue) = kicad_tables();
+    kicad_env::register_lib(&table, "KLM_ICs", "x/ICs.kicad_sym").unwrap();
+    let removal = vec![PendingTable { table: table.clone(), op: TableOp::Restore(None) }];
+    std::fs::write(queue.with_file_name("pending-tables.json"), serde_json::to_string(&removal).unwrap()).unwrap();
+    outside_edit(&table, "UserLib");
+
+    kicad_env::apply_in(&queue).unwrap();
+    let text = std::fs::read_to_string(&table).unwrap();
+    assert!(text.contains("\"UserLib\"") && text.contains("\"Device\""), "outside entries lost:
+{text}");
+    assert!(!text.contains("KLM_ICs"), "our entry should be gone:
+{text}");
 }
