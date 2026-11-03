@@ -6,6 +6,7 @@
 use anyhow::{Context, Result, bail};
 use klm_core::batch::{self, Op, Target};
 use klm_core::checks::{self, Severity};
+use klm_core::cleanup;
 use klm_core::library::{Check, LibraryRoot, PartStatus, Scope};
 use klm_core::settings::Settings;
 use klm_core::{kicad_env, snapshot, standardise};
@@ -20,6 +21,7 @@ const USAGE: &str = "usage:
   klm-cli rollback <id> [--project <dir>]
   klm-cli standardise [--project <dir>] [--dry-run]
   klm-cli health [--json | --csv] [--project <dir>]
+  klm-cli cleanup [--project <dir>]... [--remove sym:<lib>|fp:<lib>]... [--fix sym:<lib>=<path>]... [--move sym:<lib>]... [--apply]
   klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
   klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]";
 
@@ -31,12 +33,33 @@ enum Command {
     Rollback { id: String, project: Option<PathBuf> },
     Standardise { project: Option<PathBuf>, dry_run: bool },
     Health { json: bool, csv: bool, project: Option<PathBuf> },
+    Cleanup { projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, moves: Vec<String>, apply: bool },
     Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
     Export { zip: PathBuf, parts: Vec<String>, category: Option<String>, project: Option<PathBuf> },
 }
 
+fn parse_cleanup(args: &[String]) -> Result<Command> {
+    let (mut projects, mut remove, mut fix, mut moves, mut apply) = (vec![], vec![], vec![], vec![], false);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut value = || it.next().cloned().with_context(|| format!("{a} needs a value"));
+        match a.as_str() {
+            "--apply" => apply = true,
+            "--project" => projects.push(PathBuf::from(value()?)),
+            "--remove" => remove.push(value()?),
+            "--fix" => fix.push(value()?),
+            "--move" => moves.push(value()?),
+            _ => bail!("{a} is not valid for cleanup"),
+        }
+    }
+    Ok(Command::Cleanup { projects, remove, fix, moves, apply })
+}
+
 fn parse(args: &[String]) -> Result<Command> {
     let (name, rest) = args.split_first().context("missing command")?;
+    if name == "cleanup" {
+        return parse_cleanup(rest);
+    }
     let (mut csv, mut json, mut deep, mut overwrite, mut dry_run) = (false, false, false, false, false);
     let (mut project, mut category, mut to, mut zips) = (None, None, None, vec![]);
     let mut it = rest.iter();
@@ -290,6 +313,87 @@ fn standardise(project: Option<&Path>, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
+/// `sym:Name` / `fp:Name` → the one scanned entry of that name.
+fn pick<'a>(report: &'a cleanup::Report, sel: &str) -> Result<&'a cleanup::Entry> {
+    let (kind, name) = sel.split_once(':').context("name a library as sym:<name> or fp:<name>")?;
+    let kind = match kind {
+        "sym" => cleanup::Kind::Symbol,
+        "fp" => cleanup::Kind::Footprint,
+        _ => bail!("{sel}: use sym: or fp:"),
+    };
+    let mut found = report.entries.iter().filter(|e| e.kind == kind && e.name == name);
+    match (found.next(), found.next()) {
+        (Some(e), None) => Ok(e),
+        (None, _) => bail!("{sel}: no such library in the scanned tables"),
+        _ => bail!("{sel}: listed in more than one table, so it can't be picked by name"),
+    }
+}
+
+/// Reports duplicate, broken and unused library-table entries. Chosen actions are only previewed
+/// unless `apply`; every table edited is backed up first and library files are never deleted.
+fn cleanup_cmd(projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, moves: Vec<String>, apply: bool) -> Result<ExitCode> {
+    let s = settings()?;
+    let projects = if projects.is_empty() { s.last_project.clone().into_iter().collect() } else { projects };
+    let report = cleanup::scan(&kicad_config()?, &projects);
+    let acting = !(remove.is_empty() && fix.is_empty() && moves.is_empty());
+    if !acting {
+        for (i, e) in report.entries.iter().enumerate() {
+            let tag = format!("{}:{}", if e.kind == cleanup::Kind::Symbol { "sym" } else { "fp" }, e.name);
+            for x in report.issues_of(i) {
+                println!("{:<12} {tag}: {} [{}]", format!("{:?}", x.kind).to_lowercase(), x.message, e.locked.unwrap_or("can be changed"));
+            }
+        }
+        report.errors.iter().for_each(|e| println!("error: {e}"));
+        report.other_configs.iter().for_each(|c| println!("not scanned: {}", c.display()));
+        println!("{} libraries in {} projects, {} findings", report.entries.len(), report.projects.len(), report.issues.len());
+        return Ok(if report.errors.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+    }
+    let mut actions = vec![];
+    for sel in &remove {
+        let e = pick(&report, sel)?;
+        actions.push(cleanup::Action::Remove { table: e.table.clone(), name: e.name.clone() });
+    }
+    for spec in &fix {
+        let (sel, path) = spec.split_once('=').context("--fix needs <sym:name>=<path>")?;
+        let e = pick(&report, sel)?;
+        actions.push(cleanup::Action::FixPath { table: e.table.clone(), name: e.name.clone(), new_path: PathBuf::from(path) });
+    }
+    let plan = cleanup::plan(&report, &actions)?;
+    plan.lines.iter().for_each(|l| println!("{l}"));
+    plan.warnings.iter().for_each(|w| println!("warning: {w}"));
+    let global = if moves.is_empty() { None } else { Some(global_root(&s)?) };
+    let mut staged = vec![];
+    for sel in &moves {
+        let (e, g) = (pick(&report, sel)?, global.as_ref().context("no global library")?);
+        let mv = cleanup::plan_move(&report, e, &s.rules, g)?;
+        print!("move {sel} into KLM:
+{}", mv.plan);
+        mv.caveats.iter().for_each(|c| println!("  not everything comes along: {c}"));
+        staged.push(mv);
+    }
+    if !apply {
+        println!("Preview only; nothing was changed. Add --apply to do it.");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let real = std::env::var_os("KLM_KICAD_CONFIG").is_none();
+    if !plan.tables.is_empty() {
+        for b in cleanup::apply(&plan, real)? {
+            println!("backup: {}", b.display());
+        }
+    }
+    let mut failed = false;
+    for mv in &staged {
+        for r in mv.apply() {
+            r.notes.iter().for_each(|n| println!("{n}"));
+            if let Some(e) = &r.error {
+                eprintln!("error: {}: {e}", r.label);
+                failed = true;
+            }
+        }
+    }
+    Ok(if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+}
+
 /// Imports each ZIP, or with `dry_run` only prints what that would change. Exits non-zero if any ZIP fails.
 fn import(zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool) -> Result<ExitCode> {
     let s = settings()?;
@@ -340,6 +444,7 @@ fn main() -> ExitCode {
         Command::Rollback { id, project } => rollback(&id, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Standardise { project, dry_run } => standardise(project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
         Command::Health { json, csv, project } => health(json, csv, project),
+        Command::Cleanup { projects, remove, fix, moves, apply } => cleanup_cmd(projects, remove, fix, moves, apply),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
         Command::Export { zip, parts, category, project } => export(&zip, parts, category, project.as_deref()).map(|_| ExitCode::SUCCESS),
     });

@@ -1,6 +1,7 @@
 pub mod alternatives;
 pub mod batch_dialog;
 pub mod bom;
+pub mod cleanup;
 pub mod edit_dialog;
 pub mod history;
 pub mod import;
