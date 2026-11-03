@@ -10,3 +10,4 @@ mod kit;
 mod settings;
 mod shell;
 mod search;
+mod other_tabs;
