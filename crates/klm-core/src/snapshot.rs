@@ -73,6 +73,17 @@ pub struct Info {
     pub bytes: u64,
 }
 
+impl Info {
+    /// "minor" (automatic, per change), "named" (a version made by hand) or "interval" (a version made by the auto-version timer).
+    pub fn kind_name(&self) -> &'static str {
+        match (self.kind, self.version.as_deref()) {
+            (Kind::Minor, _) => "minor",
+            (Kind::Major, Some(v)) if v.starts_with("Auto ") => "interval",
+            (Kind::Major, _) => "named",
+        }
+    }
+}
+
 thread_local! {
     /// Libraries this thread holds a [`Guard`] for.
     static HELD: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
@@ -358,8 +369,8 @@ fn prune_to(root: &LibraryRoot, max_minors: usize, max_bytes: u64) -> Result<()>
 }
 
 /// Puts `root` (and KiCad's two tables for it) back exactly as they were when snapshot `id` was taken, which
-/// undoes every change made since, newer snapshots' included. KiCad must be closed: the tables are
-/// restored whole. The current state is snapshotted first, so this can be rolled back too.
+/// undoes every change made since, newer snapshots' included. The tables are restored whole, so with KiCad
+/// open (it saves over them) the restore is also queued for when it closes. The current state is snapshotted first, so this can be rolled back too.
 pub fn rollback(root: &LibraryRoot, id: &str) -> Result<()> {
     check_id(id)?;
     let snap = root.dir.join(DIR).join(id);
@@ -396,9 +407,12 @@ pub fn rollback(root: &LibraryRoot, id: &str) -> Result<()> {
     for t in TABLES {
         let dest = root.table_dir.join(t);
         if m.tables.iter().any(|x| x == t) {
-            copy_replace(&snap.join("tables").join(t), &dest).with_context(|| format!("restoring {t}"))?;
+            let saved = snap.join("tables").join(t);
+            copy_replace(&saved, &dest).with_context(|| format!("restoring {t}"))?;
+            crate::kicad_env::defer_table_op(&dest, crate::kicad_env::TableOp::Restore(std::fs::read_to_string(&saved).ok()))?;
         } else if dest.is_file() {
             std::fs::remove_file(&dest)?;
+            crate::kicad_env::defer_table_op(&dest, crate::kicad_env::TableOp::Restore(None))?;
         }
     }
     prune(root)
@@ -595,6 +609,7 @@ mod tests {
         let l = list(&root);
         assert_eq!((l.len(), l[0].label.as_str(), l[1].version.as_deref()), (2, "s5", Some("v1")));
         // Demoting makes it prunable.
+        assert_eq!(l[1].kind_name(), "named");
         set_kind(&root, &l[1].id, Kind::Minor, None).unwrap();
         prune_to(&root, 1, u64::MAX).unwrap();
         assert_eq!(list(&root).len(), 1);
@@ -609,7 +624,7 @@ mod tests {
         let l = list(&root);
         assert_eq!((l[0].kind, l[0].version.as_deref()), (Kind::Major, Some(format!("Auto {}", date(l[0].ts)).as_str())), "no major yet");
         ensure(&root, "b").unwrap();
-        assert_eq!(list(&root)[0].kind, Kind::Minor, "a fresh major exists");
+        assert_eq!((list(&root)[0].kind, list(&root)[0].kind_name(), l[0].kind_name()), (Kind::Minor, "minor", "interval"), "a fresh major exists");
         // Age the major past the interval.
         let hist = root.dir.join(DIR);
         let old = l[0].id.clone();

@@ -27,7 +27,6 @@ pub enum Msg {
     /// The Downloads folder setting changed.
     RestartWatcher,
     /// Apply an "Import all" plan (KiCad is closed, or the plan doesn't touch its tables).
-    RunBatch(batch::Plan),
     Batch(Progress),
     /// "Import library…" finished reading a folder; its files are under the second path.
     Foreign(anyhow::Result<foreign::Scan>, PathBuf),
@@ -272,7 +271,6 @@ impl ImportTab {
                 self.watch_stop.store(true, Ordering::Relaxed);
                 self.start_watcher(cx);
             }
-            Msg::RunBatch(plan) => batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Import(Msg::Batch(p))),
             Msg::Foreign(scan, work) => {
                 cx.busy = false;
                 self.batch_works.clear(); // left over from a cancelled "Import all…"; they must not be matched to these results
@@ -325,11 +323,7 @@ impl ImportTab {
             }
         }
         if let Some(plan) = batch_dialog::show(&mut self.batch, &cx.ctx) {
-            if plan.touches_kicad_tables() {
-                cx.when_kicad_closed(AppMsg::Import(Msg::RunBatch(plan)));
-            } else {
-                batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Import(Msg::Batch(p)));
-            }
+            batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Import(Msg::Batch(p)));
         }
         if let Some(dialog) = &mut self.dialog {
             match dialog.show(&cx.ctx, global.as_ref(), project.as_ref()) {
