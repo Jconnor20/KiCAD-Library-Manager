@@ -145,11 +145,8 @@ fn c03_altium_pcblib_alone_has_no_part_but_says_why() {
 }
 
 #[test]
-fn c04_altium_intlib_blocked() {
-    // No redistributable small .IntLib was found (only a 63 MB one); see docs/verification/W6.2-corpus.md.
-    let Some(p) = corpus("corpus/any.IntLib") else { return };
-    let (_w, scan) = scan_file("C04", p.file_name().unwrap().to_str().unwrap()).unwrap();
-    eprintln!("{:?}", scan.map(|s| (s.parts.len(), s.unsupported)));
+fn c04_altium_intlib() {
+    assert_imports("C04", "corpus/cc0_Everlight.IntLib", 3);
 }
 
 #[test]

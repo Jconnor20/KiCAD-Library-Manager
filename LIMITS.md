@@ -36,7 +36,7 @@ A running list of what each merged work package left undone, cut short or made r
 
 - ~~**Symbol-less ZIPs.** Attaching a footprint-only or 3D-only ZIP to an existing part isn't built yet.~~ Fixed in W5.5: Attach… takes them. Importing one on its own still fails with "part has no symbol file" unless an Import dialog for the same MPN is open.
 - **STL models.** These are attached with a warning. Whether KiCad's 3D viewer shows them isn't confirmed.
-- **Formats still untested on real files:** Altium `.IntLib` (no small redistributable file) and EasyEDA Pro `.elibz2` (KiCad can't convert it; the app says so). Real `.SchLib`/`.PcbLib`, LCSC/EasyEDA JSON, legacy `.lib` and Ultra Librarian ZIPs are proven in `corpus_e2e.rs` (W6.2).
+- **Formats still untested on real files:** EasyEDA Pro `.elibz2` (KiCad can't convert it; the app says so). Real `.SchLib`/`.PcbLib`/`.IntLib`, LCSC/EasyEDA JSON, legacy `.lib` and Ultra Librarian ZIPs are proven in `corpus_e2e.rs` (W6.2).
 - **KiCad open.** New libraries are written while KiCad runs and re-checked when it closes. ~~Rollback, move-global and relink still ask you to close KiCad~~ (queued since W5.5). Old `${KLM_LIB}` path rewrites still ask you to close KiCad. It isn't known whether KiCad picks up a table edited while it runs.
 - **Watcher.** It only sees ZIPs saved after the app starts, or after the folder list changes.
 - **Search.**
@@ -70,7 +70,7 @@ A running list of what each merged work package left undone, cut short or made r
 - `klm-cli health` has no end-to-end test; only its argument parsing is tested.
 
 ### W4.3 Import from other tools
-- **Altium `.IntLib` and EasyEDA Pro libraries aren't proven.** Real `.SchLib`/`.PcbLib` convert and render (W6.2), but no `.IntLib` was tested. KiCad 9.0 and 10.0 both refuse an EasyEDA Pro `.elibz2` ("Unable to convert library"); the app reports that. A `.PcbLib` alone has no symbol, so its footprints convert but can't become a part.
+- **EasyEDA Pro libraries aren't proven.** Real Altium `.SchLib`/`.PcbLib`/`.IntLib` convert and render (W6.2). KiCad 9.0 and 10.0 both refuse an EasyEDA Pro `.elibz2` ("Unable to convert library"); the app reports that. A `.PcbLib` alone has no symbol, so its footprints convert but can't become a part.
 - **Only the first 3D model** of a footprint with several is carried over.
 - **Leftover temp folder** after a cancelled import review, until the next import finishes.
 - **No choice of destination.** Parts go to the global library, or the project library when there is no global one.
