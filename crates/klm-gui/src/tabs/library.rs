@@ -19,8 +19,8 @@ pub enum Msg {
     /// Copy a global part into the project library; `overwrite` replaces an existing copy.
     CopyToProject { category: String, name: String, overwrite: bool },
     Attach { from: LibraryRoot, targets: Vec<LibraryRoot>, category: String, name: String, path: PathBuf },
-    /// The datasheet download worker has finished.
-    DownloadDone,
+    /// The datasheet finder has finished: (part, URL used or why not).
+    DatasheetsDone(Vec<(String, Result<String, String>)>),
     /// Apply a batch plan (KiCad is closed, or the plan doesn't touch its tables).
     RunBatch(batch::Plan),
     Batch(Progress),
@@ -34,7 +34,7 @@ enum Action {
     Attach { scope: Scope, category: String, name: String, path: PathBuf },
     Preview { category: String, name: String },
     CopyToProject { category: String, name: String, overwrite: bool },
-    DownloadDatasheets(LibraryRoot),
+    FindDatasheets(LibraryRoot),
     /// Show the dry run of these operations.
     Batch(Vec<Op>),
 }
@@ -43,7 +43,14 @@ enum Action {
 pub struct LibraryTab {
     scope: Scope,
     filter: String,
-    only_incomplete: bool,
+    /// Category, manufacturer and status filters; empty means all.
+    category: String,
+    maker: String,
+    status: Status,
+    sort: (Col, bool),
+    /// The row whose actions the detail panel shows.
+    current: Option<(String, String)>,
+    finder_results: Option<Vec<(String, Result<String, String>)>>,
     /// Cached listing; `None` means re-read from disk on the next frame.
     parts: Option<Vec<PartStatus>>,
     /// Part checks for `parts`, by (category, name). They read every footprint and 3D model, so they
@@ -67,7 +74,12 @@ impl Default for LibraryTab {
         Self {
             scope: Scope::Global,
             filter: String::new(),
-            only_incomplete: false,
+            category: String::new(),
+            maker: String::new(),
+            status: Status::All,
+            sort: (Col::Category, true),
+            current: None,
+            finder_results: None,
             parts: None,
             checks: None,
             checks_rx: None,
@@ -78,6 +90,120 @@ impl Default for LibraryTab {
             batch: None,
             preview: None,
             alternatives: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Status {
+    All,
+    Incomplete,
+    NoDatasheet,
+    NoModel,
+}
+
+impl Status {
+    const ALL: [(Status, &'static str); 4] = [(Status::All, "Any status"), (Status::Incomplete, "Incomplete"), (Status::NoDatasheet, "No datasheet"), (Status::NoModel, "No 3D model")];
+
+    fn matches(self, p: &PartStatus) -> bool {
+        let no = |c: Check| matches!(c, Check::Missing | Check::Broken);
+        match self {
+            Status::All => true,
+            Status::Incomplete => incomplete(p),
+            Status::NoDatasheet => no(p.datasheet),
+            Status::NoModel => no(p.model),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Col {
+    Category,
+    Mpn,
+    Maker,
+    Footprint,
+    Model,
+    Datasheet,
+    Sim,
+    InKicad,
+    Checks,
+}
+
+impl Col {
+    const ALL: [(Col, &'static str); 9] = [
+        (Col::Category, "Category"),
+        (Col::Mpn, "MPN"),
+        (Col::Maker, "Manufacturer"),
+        (Col::Footprint, "Footprint"),
+        (Col::Model, "3D model"),
+        (Col::Datasheet, "Datasheet"),
+        (Col::Sim, "Sim model"),
+        (Col::InKicad, "In KiCad"),
+        (Col::Checks, "Checks"),
+    ];
+}
+
+/// Worst-first rank, so ascending puts the parts with problems on top.
+fn rank(c: Check) -> u8 {
+    match c {
+        Check::Broken => 0,
+        Check::Missing => 1,
+        Check::Link => 2,
+        Check::Ok => 3,
+    }
+}
+
+fn compare(col: Col, a: &PartStatus, b: &PartStatus, issues: impl Fn(&PartStatus) -> usize) -> std::cmp::Ordering {
+    match col {
+        Col::Category => a.category.to_lowercase().cmp(&b.category.to_lowercase()),
+        Col::Mpn => a.mpn.to_lowercase().cmp(&b.mpn.to_lowercase()),
+        Col::Maker => a.manufacturer.to_lowercase().cmp(&b.manufacturer.to_lowercase()),
+        Col::Footprint => rank(a.footprint).cmp(&rank(b.footprint)),
+        Col::Model => rank(a.model).cmp(&rank(b.model)),
+        Col::Datasheet => rank(a.datasheet).cmp(&rank(b.datasheet)),
+        Col::Sim => rank(a.sim).cmp(&rank(b.sim)),
+        Col::InKicad => a.in_kicad.cmp(&b.in_kicad),
+        Col::Checks => issues(b).cmp(&issues(a)),
+    }
+}
+
+/// The part's actions as full-size buttons; one that doesn't apply is disabled and says why.
+/// Used by the detail panel and the row's context menu (`menu` closes the menu on a click).
+fn part_actions(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, has_project: bool, menu: bool, action: &mut Action) {
+    let key = (p.category.clone(), p.name.clone());
+    let btn = |ui: &mut egui::Ui, label: &str, enabled: bool, tip: &str, why_not: &str| {
+        let r = ui.add_enabled(enabled, egui::Button::new(label));
+        let clicked = if enabled { r.on_hover_text(tip).clicked() } else { r.on_disabled_hover_text(why_not).clicked() };
+        if clicked && menu {
+            ui.close();
+        }
+        clicked
+    };
+    if btn(ui, "Edit…", true, "Edit MPN, maker, description, category, supplier numbers, datasheet and tags", "") {
+        *action = Action::Edit(vec![key.clone()]);
+    }
+    if btn(ui, "Preview", true, "Show the symbol, footprint and 3D model", "") {
+        *action = Action::Preview { category: key.0.clone(), name: key.1.clone() };
+    }
+    if btn(ui, "Attach…", true, "Add a datasheet (PDF), SPICE model or 3D model (STEP/WRL)", "") {
+        let picked = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
+        if let Some(path) = picked {
+            *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
+        }
+    }
+    let (can_copy, why) = match (scope, has_project) {
+        (Scope::Project, _) => (false, "This part is already in the project library"),
+        (_, false) => (false, "Choose a project first"),
+        _ => (true, ""),
+    };
+    if btn(ui, "Copy to project", can_copy, "Copy this part into the project's library. Shift-click to replace a copy already there.", why) {
+        let overwrite = ui.input(|i| i.modifiers.shift);
+        *action = Action::CopyToProject { category: key.0.clone(), name: key.1.clone(), overwrite };
+    }
+    let target = p.datasheet_target.as_deref();
+    if btn(ui, "Open datasheet", target.is_some(), "Open the datasheet in your PDF viewer or browser", "This part has no datasheet") {
+        if let Some(t) = target {
+            let _ = open::that(t);
         }
     }
 }
@@ -127,7 +253,7 @@ impl LibraryTab {
         let (global, project) = (cx.global_root(), cx.project_root());
         match self.show(ui, global.as_ref(), project.as_ref()) {
             Action::None => {}
-            Action::DownloadDatasheets(root) => self.download_datasheets(root, cx),
+            Action::FindDatasheets(root) => self.find_datasheets(root, cx),
             Action::Batch(ops) => self.batch = Some(BatchDialog::Review(batch::plan(ops, global.as_ref(), project.as_ref()))),
             Action::Edit(targets) => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
@@ -156,9 +282,10 @@ impl LibraryTab {
     pub fn handle(&mut self, msg: Msg, cx: &mut AppCtx) {
         match msg {
             Msg::Refresh => self.parts = None,
-            Msg::DownloadDone => {
+            Msg::DatasheetsDone(results) => {
                 self.downloading = false;
                 self.parts = None;
+                self.finder_results = Some(results);
             }
             Msg::RunBatch(plan) => batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p))),
             Msg::Batch(p) => {
@@ -180,6 +307,27 @@ impl LibraryTab {
                 cx.when_kicad_closed(AppMsg::Library(Msg::RunBatch(plan)));
             } else {
                 batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p)));
+            }
+        }
+        if let Some(results) = &self.finder_results {
+            let mut open = true;
+            let found = results.iter().filter(|(_, r)| r.is_ok()).count();
+            egui::Window::new("Find missing datasheets").open(&mut open).collapsible(false).default_width(560.0).show(&cx.ctx, |ui| {
+                if results.is_empty() {
+                    ui.label("Every part already has a datasheet.");
+                }
+                ui.label(format!("{found} found, {} not found", results.len() - found));
+                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                    for (mpn, r) in results {
+                        match r {
+                            Ok(url) => ui.label(format!("✔ {mpn}: from {url}")),
+                            Err(why) => ui.label(RichText::new(format!("✘ {mpn}: {why}")).color(ui.visuals().warn_fg_color)),
+                        };
+                    }
+                });
+            });
+            if !open {
+                self.finder_results = None;
             }
         }
         if self.alternatives.as_mut().is_some_and(|a| !a.window(&cx.ctx, &mut cx.log)) {
@@ -255,24 +403,14 @@ impl LibraryTab {
         self.parts = None;
     }
 
-    /// Downloads a PDF for every part in `root` whose datasheet is only a web link, logging each result.
-    fn download_datasheets(&mut self, root: LibraryRoot, cx: &mut AppCtx) {
+    /// Finds a PDF for every part in `root` without a working local datasheet, on a worker thread.
+    fn find_datasheets(&mut self, root: LibraryRoot, cx: &mut AppCtx) {
         self.downloading = true;
-        let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
-        cx.log.push("Downloading datasheets for parts that only have a link…".into());
+        let (tx, ctx, sources) = (cx.tx.clone(), cx.ctx.clone(), cx.sources.clone());
+        cx.log.push("Looking for datasheets for parts without a working one…".into());
         std::thread::spawn(move || {
-            let results = root.download_missing_datasheets();
-            if results.is_empty() {
-                let _ = tx.send(AppMsg::Log("No parts with a link-only datasheet".into()));
-            }
-            for (mpn, result) in results {
-                let line = match result {
-                    Ok(()) => format!("Downloaded the datasheet for {mpn}"),
-                    Err(e) => format!("Could not download the datasheet for {mpn} (link kept): {e:#}"),
-                };
-                let _ = tx.send(AppMsg::Log(line));
-            }
-            let _ = tx.send(AppMsg::Library(Msg::DownloadDone));
+            let results = root.find_missing_datasheets(&sources).into_iter().map(|(mpn, r)| (mpn, r.map_err(|e| format!("{e:#}")))).collect();
+            let _ = tx.send(AppMsg::Library(Msg::DatasheetsDone(results)));
             ctx.request_repaint();
         });
     }
@@ -322,35 +460,58 @@ impl LibraryTab {
         let mut edit_selected = false;
         let (mut copy_selected, mut relink_all) = (None, false);
         let mut attach_to_selected = None;
+        let has_selection = !self.selected.is_empty();
         ui.horizontal_wrapped(|ui| {
+            ui.strong("View");
             let before = self.scope;
             ui.add_enabled_ui(global.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Global, "Global"));
             ui.add_enabled_ui(project.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Project, "Project"));
             if self.scope != before {
                 self.parts = None;
                 self.selected.clear();
+                self.current = None;
             }
-            ui.separator();
-            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Filter by MPN, maker, category…").desired_width(220.0));
-            edit_selected = ui.add_enabled(!self.selected.is_empty(), egui::Button::new("Edit selected…")).clicked();
-            ui.checkbox(&mut self.only_incomplete, "Only incomplete");
+            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Filter by MPN, maker, category…").desired_width(200.0));
+            let all = |v: &str, what: &str| if v.is_empty() { format!("Any {what}") } else { v.to_string() };
+            let (cats, makers) = self.parts.as_ref().map_or_else(Default::default, |ps| {
+                let set = |f: fn(&PartStatus) -> &String| ps.iter().map(f).filter(|s| !s.is_empty()).cloned().collect::<std::collections::BTreeSet<_>>();
+                (set(|p| &p.category), set(|p| &p.manufacturer))
+            });
+            for (id, value, options, what) in [("cat_filter", &mut self.category, cats, "library"), ("maker_filter", &mut self.maker, makers, "manufacturer")] {
+                egui::ComboBox::from_id_salt(id).selected_text(all(value, what)).show_ui(ui, |ui| {
+                    ui.selectable_value(value, String::new(), format!("Any {what}"));
+                    for o in options {
+                        ui.selectable_value(value, o.clone(), o);
+                    }
+                });
+            }
+            let current = Status::ALL.iter().find(|(s, _)| *s == self.status).map_or("", |(_, l)| l);
+            egui::ComboBox::from_id_salt("status_filter").selected_text(current).show_ui(ui, |ui| {
+                for (s, label) in Status::ALL {
+                    ui.selectable_value(&mut self.status, s, label);
+                }
+            });
             if ui.button("Refresh").clicked() {
                 self.parts = None;
             }
-            let can_copy = self.scope == Scope::Global && project.is_some() && !self.selected.is_empty();
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Library actions");
+            edit_selected = ui.add_enabled(has_selection, egui::Button::new("Edit selected…")).on_disabled_hover_text("Tick parts first").clicked();
+            let can_copy = self.scope == Scope::Global && project.is_some() && has_selection;
             let copy = ui.add_enabled(can_copy, egui::Button::new("Copy selected to project"));
             if copy.on_hover_text("Copy the ticked parts into the project's library. Shift-click to replace copies already there.").clicked() {
                 copy_selected = Some(ui.input(|i| i.modifiers.shift));
             }
-            let attach = ui.add_enabled(!self.selected.is_empty(), egui::Button::new("Attach to selected…"));
+            let attach = ui.add_enabled(has_selection, egui::Button::new("Attach to selected…"));
             if attach.on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked() {
                 attach_to_selected = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
             }
             alternatives = ui.button("Alternatives…").on_hover_text("Find duplicates and equivalent parts, and mark preferred ones").clicked();
             relink_all = ui.button("Relink libraries").on_hover_text("Add every KLM library missing from KiCad's library list").clicked();
             download = ui
-                .add_enabled(!self.downloading, egui::Button::new("Download missing datasheets"))
-                .on_hover_text("Save a local PDF for every part whose datasheet is only a web link")
+                .add_enabled(!self.downloading, egui::Button::new("Find missing datasheets"))
+                .on_hover_text("For parts with no working datasheet, try the existing link, then search the enabled sources by MPN, and save the first real PDF")
                 .clicked();
         });
 
@@ -387,13 +548,21 @@ impl LibraryTab {
         ui.add_space(4.0);
 
         let needle = self.filter.to_lowercase();
-        let shown: Vec<&PartStatus> = parts
+        let mut shown: Vec<&PartStatus> = parts
             .iter()
-            .filter(|p| !self.only_incomplete || incomplete(p))
+            .filter(|p| self.status.matches(p))
+            .filter(|p| self.category.is_empty() || p.category == self.category)
+            .filter(|p| self.maker.is_empty() || p.manufacturer == self.maker)
             .filter(|p| needle.is_empty() || [&p.mpn, &p.manufacturer, &p.category, &p.description].iter().any(|f| f.to_lowercase().contains(&needle)))
             .collect();
+        let issue_count = |p: &PartStatus| self.checks.as_ref().and_then(|c| c.get(&(p.category.clone(), p.name.clone()))).map_or(0, Vec::len);
+        let (col, asc) = self.sort;
+        shown.sort_by(|a, b| {
+            let o = compare(col, a, b, issue_count);
+            if asc { o } else { o.reverse() }
+        });
 
-        let mut action = if download { Action::DownloadDatasheets(root.clone()) } else { Action::None };
+        let mut action = if download { Action::FindDatasheets(root.clone()) } else { Action::None };
         if edit_selected {
             action = Action::Edit(sorted(&self.selected));
         }
@@ -406,12 +575,38 @@ impl LibraryTab {
         if relink_all {
             action = Action::Batch(vec![Op::RelinkAll]);
         }
+        let current = self.current.as_ref().and_then(|k| parts.iter().find(|p| (&p.category, &p.name) == (&k.0, &k.1)));
+        egui::Panel::bottom("library_detail").resizable(false).show(ui, |ui| {
+            match current {
+                Some(p) => {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.strong(&p.mpn);
+                        ui.weak(format!("{} · {}", p.manufacturer, p.category));
+                    });
+                    ui.horizontal_wrapped(|ui| part_actions(ui, p, self.scope, project.is_some(), false, &mut action));
+                }
+                None => {
+                    ui.weak("Click a part to see its actions. Right-click a row for the same actions.");
+                }
+            }
+        });
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-            // Selection tick box, eight status columns, Checks, then the row buttons.
-            egui::Grid::new("library").striped(true).num_columns(11).spacing([14.0, 4.0]).show(ui, |ui| {
+            // Selection tick box, eight status columns, then Checks.
+            egui::Grid::new("library").striped(true).num_columns(10).spacing([14.0, 4.0]).show(ui, |ui| {
                 ui.label("");
-                for h in ["Category", "MPN", "Manufacturer", "Footprint", "3D model", "Datasheet", "Sim model", "In KiCad", "Checks", ""] {
-                    ui.strong(h);
+                for (c, h) in Col::ALL {
+                    let active = self.sort.0 == c;
+                    let clicked = ui
+                        .horizontal(|ui| {
+                            let arrow = if !active { "⇅" } else if self.sort.1 { "▲" } else { "▼" };
+                            let a = ui.add(egui::Label::new(RichText::new(h).strong()).sense(egui::Sense::click()));
+                            let b = ui.add(egui::Label::new(if active { RichText::new(arrow) } else { RichText::new(arrow).weak() }).sense(egui::Sense::click()));
+                            a.clicked() || b.clicked()
+                        })
+                        .inner;
+                    if clicked {
+                        self.sort = (c, if active { !self.sort.1 } else { true });
+                    }
                 }
                 ui.end_row();
                 for p in shown {
@@ -419,49 +614,28 @@ impl LibraryTab {
                     let mut ticked = self.selected.contains(&key);
                     if ui.checkbox(&mut ticked, "").changed() {
                         if ticked {
-                            self.selected.insert(key);
+                            self.selected.insert(key.clone());
                         } else {
                             self.selected.remove(&key);
                         }
                     }
                     ui.label(&p.category);
-                    let mpn = ui.label(RichText::new(&p.mpn).strong());
+                    let is_current = self.current.as_ref() == Some(&key);
+                    let mut mpn = ui.selectable_label(is_current, RichText::new(&p.mpn).strong());
                     if !p.description.is_empty() {
-                        mpn.on_hover_text(&p.description);
+                        mpn = mpn.on_hover_text(&p.description);
                     }
+                    if mpn.clicked() || mpn.secondary_clicked() {
+                        self.current = Some(key.clone());
+                    }
+                    mpn.context_menu(|ui| part_actions(ui, p, self.scope, project.is_some(), true, &mut action));
                     ui.label(&p.manufacturer);
                     check_cell(ui, p.footprint, "Footprint");
                     check_cell(ui, p.model, "3D model");
                     check_cell(ui, p.datasheet, "Datasheet");
                     check_cell(ui, p.sim, "Sim model");
                     check_cell(ui, if p.in_kicad { Check::Ok } else { Check::Missing }, "KiCad library entry");
-                    issues_cell(ui, self.checks.as_ref().map(|c| c.get(&(p.category.clone(), p.name.clone())).unwrap_or(&NO_ISSUES)));
-                    ui.horizontal(|ui| {
-                        if ui.small_button("Edit…").on_hover_text("Edit MPN, maker, description, category, supplier numbers, datasheet and tags").clicked() {
-                            action = Action::Edit(vec![(p.category.clone(), p.name.clone())]);
-                        }
-                        if ui.small_button("Preview").on_hover_text("Show the symbol, footprint and 3D model").clicked() {
-                            action = Action::Preview { category: p.category.clone(), name: p.name.clone() };
-                        }
-                        if ui.small_button("Attach…").on_hover_text("Add a datasheet (PDF), SPICE model or 3D model (STEP/WRL)").clicked() {
-                            let picked = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
-                            if let Some(path) = picked {
-                                action = Action::Attach { scope: self.scope, category: p.category.clone(), name: p.name.clone(), path };
-                            }
-                        }
-                        if self.scope == Scope::Global {
-                            let copy = ui.add_enabled(project.is_some(), egui::Button::new("Copy to project").small());
-                            if copy.on_hover_text("Copy this part into the project's library. Shift-click to replace a copy already there.").clicked() {
-                                let overwrite = ui.input(|i| i.modifiers.shift);
-                                action = Action::CopyToProject { category: p.category.clone(), name: p.name.clone(), overwrite };
-                            }
-                        }
-                        if let Some(target) = &p.datasheet_target {
-                            if ui.small_button("Open datasheet").clicked() {
-                                let _ = open::that(target);
-                            }
-                        }
-                    });
+                    issues_cell(ui, self.checks.as_ref().map(|c| c.get(&key).unwrap_or(&NO_ISSUES)));
                     ui.end_row();
                 }
             });
