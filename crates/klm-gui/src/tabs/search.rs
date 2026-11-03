@@ -121,7 +121,7 @@ impl SearchTab {
     fn show(&mut self, ui: &mut egui::Ui, source_names: &[&str], busy: bool, currency: &mut String) -> Action {
         let mut action = Action::None;
         if source_names.is_empty() {
-            ui.label("No search sources are enabled yet.");
+            ui.label("No search sources are enabled yet. Enable one in Settings.");
             return action;
         }
         if !self.side.loaded {
@@ -140,20 +140,27 @@ impl SearchTab {
             if self.searching {
                 ui.spinner();
             }
-            ui.weak(format!("Searching: {}", source_names.join(", ")));
+            if self.searching {
+                ui.weak(format!("Searching: {}", source_names.join(", ")));
+            }
         });
         ui.add_space(4.0);
-        self.filters_ui(ui, source_names, currency);
+        let shown = {
+            let target = (!currency.is_empty()).then_some(currency.as_str());
+            view(&self.results, &self.filter, None, &|p| price_in(&p.unit_price, target, self.rates.as_ref())).len()
+        };
+        self.filters_ui(ui, source_names, currency, shown);
         let target = (!currency.is_empty()).then_some(currency.as_str());
         let rates = self.rates.as_ref();
-        let rows = view(&self.results, &self.filter, self.sort, &|p| price_in(&p.unit_price, target, rates));
+        let price = |p: &Part| price_in(&p.unit_price, target, rates);
+        let rows = view(&self.results, &self.filter, self.sort, &price);
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             egui::Grid::new("results").striped(true).num_columns(8).spacing([14.0, 4.0]).show(ui, |ui| {
-                for (h, key) in [("Source", SortKey::Source), ("MPN", SortKey::Mpn), ("Manufacturer", SortKey::Manufacturer), ("Description", SortKey::Description), ("Package", SortKey::Package), ("Stock", SortKey::Stock), ("Price", SortKey::Price)] {
-                    let h = if key == SortKey::Price { &format!("Price ({})", target.unwrap_or("native")) } else { h };
+                for (h, key) in [("Source", SortKey::Source), ("MPN", SortKey::Mpn), ("Manufacturer", SortKey::Manufacturer), ("Description", SortKey::Description), ("Package", SortKey::Package), ("Stock", SortKey::Stock), ("Unit price (qty 1)", SortKey::Price)] {
+                    let h = if key == SortKey::Price { &format!("{h} ({})", target.unwrap_or("native")) } else { h };
                     let arrow = match self.sort {
                         Some((k, asc)) if k == key => if asc { " ▲" } else { " ▼" },
-                        _ => "",
+                        _ => " ⇅",
                     };
                     if ui.add(egui::Button::new(RichText::new(format!("{h}{arrow}")).strong()).frame(false)).clicked() {
                         self.sort = match self.sort {
@@ -168,25 +175,41 @@ impl SearchTab {
                 for i in rows {
                     let (src, p) = &self.results[i];
                     ui.label(source_names.get(*src).copied().unwrap_or("?"));
-                    ui.label(RichText::new(&p.mpn).strong());
+                    let starred = self.side.favourites.contains(&p.mpn);
+                    ui.label(RichText::new(&p.mpn).strong()).context_menu(|ui| {
+                        if ui.button(if starred { "Remove from favourites" } else { "Add to favourites" }).clicked() {
+                            action = Action::Star(p.mpn.clone(), !starred);
+                            ui.close();
+                        }
+                    });
                     ui.label(&p.manufacturer);
                     let short: String = p.description.chars().take(60).collect();
                     ui.label(short).on_hover_text(&p.description);
                     ui.label(&p.package);
                     ui.label(p.stock.map_or(String::new(), |s| s.to_string()));
-                    let shown = display_price(&p.unit_price, target, rates);
+                    let mut shown = display_price(&p.unit_price, target, rates);
+                    let cur = if p.price_currency.is_empty() { klm_core::currency::detect(&p.unit_price).unwrap_or_default() } else { p.price_currency.clone() };
+                    if shown == p.unit_price && !cur.is_empty() && !shown.contains(&cur) {
+                        shown = format!("{cur} {}", shown.trim_start_matches(['$', '€', '£']));
+                    }
+                    if let Some(m) = p.moq.filter(|m| *m > 1) {
+                        shown += &format!("  MOQ {m}");
+                    }
+                    if let Some(n) = p.pack_qty.filter(|n| *n > 1) {
+                        shown += &format!("  {} ×{n}", if p.packaging.is_empty() { "Pack" } else { &p.packaging });
+                    }
                     let price = ui.label(&shown);
-                    if shown != p.unit_price {
-                        price.on_hover_text(format!("Converted from {}", p.unit_price));
-                    } else if target.is_some() && !p.unit_price.is_empty() {
+                    let breaks: Vec<String> = p.price_breaks.iter().map(|(q, v)| format!("{q}+: {v} {cur}")).collect();
+                    if !breaks.is_empty() {
+                        price.on_hover_text(format!("Price breaks\n{}", breaks.join("\n")));
+                    } else if target.is_some() && !p.unit_price.is_empty() && shown == p.unit_price {
                         price.on_hover_text("Not converted: unknown currency or no exchange rates");
                     }
                     ui.horizontal(|ui| {
-                        let starred = self.side.favourites.contains(&p.mpn);
-                        if ui.small_button(if starred { "★" } else { "☆" }).on_hover_text("Favourite").clicked() {
-                            action = Action::Star(p.mpn.clone(), !starred);
-                        }
-                        if ui.add_enabled(!busy, egui::Button::new("Get…")).clicked() {
+                        let known = p.supplier_ids.iter().any(|(k, _)| k == "LCSC") || p.source.contains("LCSC");
+                        let icons = format!("{}{}", if p.datasheet_url.is_empty() { "" } else { "📄" }, if known { "🔣⏚" } else { "" });
+                        ui.label(if icons.is_empty() { "?".to_string() } else { icons }).on_hover_text("📄 datasheet available\n🔣 symbol and ⏚ footprint provided (LCSC/EasyEDA)\n? not known until imported");
+                        if ui.add_enabled(!busy, egui::Button::new("Import")).on_hover_text("Fetch symbol, footprint, 3D model and datasheet into your library").clicked() {
                             action = Action::Get(i);
                         }
                     });
@@ -254,7 +277,7 @@ impl SearchTab {
         }
     }
 
-    fn filters_ui(&mut self, ui: &mut egui::Ui, source_names: &[&str], currency: &mut String) {
+    fn filters_ui(&mut self, ui: &mut egui::Ui, source_names: &[&str], currency: &mut String, shown: usize) {
         if self.results.is_empty() {
             return;
         }
@@ -299,8 +322,6 @@ impl SearchTab {
                 (None, false) if self.rates_tried => drop(ui.weak("exchange rates unavailable; showing native prices")),
                 _ => {}
             }
-            let target = (!currency.is_empty()).then_some(currency.as_str());
-            let shown = view(&self.results, &self.filter, None, &|p| price_in(&p.unit_price, target, self.rates.as_ref())).len();
             ui.weak(format!("{shown} of {} results", self.results.len()));
             if ui.add_enabled(!self.filter.is_empty(), egui::Button::new("Clear filters")).clicked() {
                 self.filter = Filter::default();
