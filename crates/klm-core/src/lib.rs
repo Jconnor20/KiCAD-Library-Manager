@@ -6,6 +6,7 @@ pub mod bom;
 pub mod cache;
 pub mod categories;
 pub mod checks;
+pub mod cleanup;
 pub mod convert;
 pub mod credentials;
 pub mod currency;

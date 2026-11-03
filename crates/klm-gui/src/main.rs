@@ -26,7 +26,7 @@ use klm_core::sources::Source;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use tabs::{bom, history, import, library, search, settings};
+use tabs::{bom, cleanup, history, import, library, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
@@ -51,6 +51,7 @@ enum Tab {
     Library,
     Bom,
     History,
+    Cleanup,
 }
 
 /// State every tab can read and change.
@@ -117,6 +118,7 @@ struct App {
     import_tab: import::ImportTab,
     library_tab: library::LibraryTab,
     history_tab: history::HistoryTab,
+    cleanup_tab: cleanup::CleanupTab,
     bom_tab: bom::BomTab,
     settings_tab: settings::SettingsTab,
 }
@@ -182,6 +184,7 @@ impl App {
             search_tab: search::SearchTab::default(),
             library_tab: library::LibraryTab::default(),
             history_tab: history::HistoryTab::default(),
+            cleanup_tab: cleanup::CleanupTab::default(),
             bom_tab: bom::BomTab::default(),
             settings_tab: settings::SettingsTab::new(),
             cx,
@@ -411,6 +414,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.cx.tab, Tab::Library, RichText::new("Library").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::Bom, RichText::new("BOM").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::History, RichText::new("History").heading());
+                ui.selectable_value(&mut self.cx.tab, Tab::Cleanup, RichText::new("Clean up").heading());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Settings…").clicked() {
                         self.settings_tab.open();
@@ -424,12 +428,14 @@ impl eframe::App for App {
                 Tab::Library => self.library_tab.ui(ui, &mut self.cx),
                 Tab::Bom => self.bom_tab.ui(ui, &mut self.cx),
                 Tab::History => self.history_tab.ui(ui, &mut self.cx),
+                Tab::Cleanup => self.cleanup_tab.ui(ui, &mut self.cx),
             }
         });
 
         self.import_tab.dialogs(&mut self.cx);
         self.library_tab.dialogs(&mut self.cx);
         self.history_tab.dialogs(&mut self.cx);
+        self.cleanup_tab.dialogs(&mut self.cx);
         self.settings_tab.dialogs(&mut self.cx);
         self.kicad_open_prompt();
     }
