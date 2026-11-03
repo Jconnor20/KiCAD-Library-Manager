@@ -48,6 +48,8 @@ struct Files {
     /// File name (lowercase) → paths.
     models: HashMap<String, Vec<PathBuf>>,
     foreign: Vec<PathBuf>,
+    /// Altium projects, which hold no library data themselves.
+    libpkgs: Vec<PathBuf>,
 }
 
 fn walk(dir: &Path, f: &mut Files) {
@@ -76,6 +78,7 @@ fn walk(dir: &Path, f: &mut Files) {
                 f.fps.entry(stem).or_default().push((lib, p));
             }
             "step" | "stp" | "wrl" => f.models.entry(name.to_lowercase()).or_default().push(p),
+            "libpkg" => f.libpkgs.push(p),
             _ if is_foreign(&p) => f.foreign.push(p),
             _ => {}
         }
@@ -91,15 +94,18 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
     let mut files = Files::default();
     walk(root, &mut files);
     let mut out = Scan::default();
+    out.unsupported.extend(files.libpkgs.iter().map(|p| format!("{}: an Altium project, not a library; pick the .SchLib and .PcbLib files next to it instead", p.display())));
     // Other tools' libraries: convert into `work`, then treat the result like any KiCad library.
     for (i, p) in std::mem::take(&mut files.foreign).iter().enumerate() {
         let (dir, stem) = (work.join(format!("conv{i}")), lib_stem(p));
         let _ = std::fs::create_dir_all(&dir);
+        let fixed = dir.join(p.file_name().unwrap_or_default());
+        let p = &if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lbr")) && std::fs::read_to_string(p).is_ok_and(|t| std::fs::write(&fixed, fix_eagle_numbers(&t)).is_ok()) { fixed } else { p.clone() };
         let sym = kicad_env::upgrade_symbols(p, &dir.join(format!("{stem}.kicad_sym")));
         let fp = kicad_env::upgrade_footprints(p, &dir.join(format!("{stem}.pretty")));
         if sym.is_err() && fp.is_err() {
-            out.unsupported.push(format!("{}: kicad-cli could not convert it ({})", p.display(), first_line(&sym.unwrap_err())));
-        } else if sym.is_err() {
+            out.unsupported.push(format!("{}: kicad-cli could not convert it. kicad-cli said: {}; {}", p.display(), first_line(&sym.unwrap_err()), first_line(&fp.unwrap_err())));
+        } else if sym.is_err() && !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pcblib")) {
             out.unsupported.push(format!("{}: footprints converted but it has no symbols kicad-cli can read", p.display()));
         }
         walk(&dir, &mut files);
@@ -155,6 +161,27 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
         }
     }
     Ok(out)
+}
+
+/// Ultra Librarian writes Eagle numbers as `.1524` and `-.5`; kicad-cli's Eagle importer rejects those
+/// ("Unable to convert library"), so give them the leading zero.
+fn fix_eagle_numbers(xml: &str) -> String {
+    let mut out = String::with_capacity(xml.len() + 64);
+    let mut rest = xml;
+    while let Some(i) = rest.find("=\"") {
+        let (head, tail) = rest.split_at(i + 2);
+        out.push_str(head);
+        let neg = tail.starts_with('-');
+        let num = &tail[usize::from(neg)..];
+        if num.starts_with('.') && num[1..].starts_with(|c: char| c.is_ascii_digit()) {
+            out.push_str(if neg { "-0" } else { "0" });
+            rest = num;
+        } else {
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn first_line(e: &anyhow::Error) -> String {
@@ -258,6 +285,11 @@ fn find_model(fp: &Path, files: &Files, root: &Path) -> Option<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eagle_numbers_get_leading_zero() {
+        assert_eq!(fix_eagle_numbers(r#"<wire x1="-.5" width=".1524" name=".x" y="2.5"/>"#), r#"<wire x1="-0.5" width="0.1524" name=".x" y="2.5"/>"#);
+    }
 
     #[test]
     fn derived_symbols_are_flattened() {
