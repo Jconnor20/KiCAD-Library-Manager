@@ -242,8 +242,8 @@ impl HistoryTab {
             });
         });
         if yes {
-            // KiCad's tables are restored too, and KiCad writes them back over outside edits.
-            cx.when_kicad_closed(AppMsg::History(Msg::Rollback { scope: self.scope, id: s.id }));
+            // With KiCad open the restored tables are re-checked once it closes.
+            cx.send(AppMsg::History(Msg::Rollback { scope: self.scope, id: s.id }));
         }
         if yes || no {
             self.confirm = None;

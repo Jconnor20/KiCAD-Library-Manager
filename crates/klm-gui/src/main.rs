@@ -9,8 +9,10 @@
 //! - State shared by all tabs (settings, KiCad config dir, project, sources, log, `busy`) is in `AppCtx`,
 //!   passed to every tab method as `cx`. Tabs never reach into each other's state; to affect another tab
 //!   they send it one of its messages (`cx.send(Msg::Library(library::Msg::Refresh))`).
-//! - An action that edits KiCad's library tables is requested with `cx.when_kicad_closed(msg)`: the shell
-//!   delivers `msg` at once, or after the user closes KiCad.
+//! - An action that edits KiCad's library tables that must not run while KiCad is open
+//!   (only "Apply now" today) is requested with `cx.when_kicad_closed(msg)`: the shell delivers `msg` at
+//!   once, or after the user closes KiCad. Everything else writes at once and queues a re-check
+//!   (`kicad_env::defer_table_op`, `register_or_queue`).
 //! - Adding a feature to a tab: add its state and `Msg` variants in that tab's file. Adding a new tab:
 //!   a file in `tabs/`, a `Msg` variant, a `Tab` variant and one line each in `App` for `ui`/`handle`.
 
@@ -144,7 +146,7 @@ impl App {
     fn new(ctx: &egui::Context, project_arg: Option<PathBuf>) -> Self {
         let mut settings = Settings::load();
         kicad_env::set_kicad_cli_override(settings.kicad_cli.clone());
-        kicad_env::set_pending_queue(dirs::config_dir().map(|d| d.join("KiCAD-Library-Manager").join("pending-libs.json")));
+        kicad_env::set_pending_queue(kicad_env::default_queue_path());
         klm_core::snapshot::set_store_path(klm_core::store::Store::default_path());
         klm_core::snapshot::set_policy(&settings.history);
         if let Some(p) = &project_arg {
@@ -244,6 +246,9 @@ impl App {
                 any = true;
             }
         }
+        if any && kicad_env::kicad_running() {
+            cx.log.push("KiCad is open: the changes are queued and re-checked when it closes.".into());
+        }
         if !any {
             cx.log.push("All KLM libraries are already in KiCad's library list.".into());
         }
@@ -328,7 +333,7 @@ impl App {
                     && ui.button("Change location…").on_hover_text("Move the library, or point KLM at where you moved it").clicked()
                 {
                     if let Some(d) = rfd::FileDialog::new().set_title("New location for the global library").pick_folder() {
-                        cx.when_kicad_closed(Msg::MoveGlobal(d));
+                        cx.send(Msg::MoveGlobal(d));
                     }
                 }
                 if cx.pending_libs > 0 {
@@ -338,7 +343,7 @@ impl App {
                     }
                 }
                 if ui.button("Relink libraries").on_hover_text("Add any KLM libraries missing from KiCad's library list").clicked() {
-                    cx.when_kicad_closed(Msg::Relink);
+                    cx.send(Msg::Relink);
                 }
             });
             ui.end_row();

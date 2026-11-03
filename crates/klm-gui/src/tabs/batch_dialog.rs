@@ -52,9 +52,6 @@ pub fn show(batch: &mut Option<BatchDialog>, ctx: &egui::Context) -> Option<Plan
                 for w in &plan.warnings {
                     ui.colored_label(ui.visuals().warn_fg_color, w);
                 }
-                if plan.touches_kicad_tables() {
-                    ui.weak("KiCad will be asked to close before this runs.");
-                }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     apply = ui.add_enabled(plan.items.iter().any(|i| i.error.is_none()), egui::Button::new("Apply")).clicked();

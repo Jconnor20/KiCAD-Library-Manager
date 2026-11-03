@@ -369,8 +369,8 @@ fn prune_to(root: &LibraryRoot, max_minors: usize, max_bytes: u64) -> Result<()>
 }
 
 /// Puts `root` (and KiCad's two tables for it) back exactly as they were when snapshot `id` was taken, which
-/// undoes every change made since, newer snapshots' included. KiCad must be closed: the tables are
-/// restored whole. The current state is snapshotted first, so this can be rolled back too.
+/// undoes every change made since, newer snapshots' included. The tables are restored whole, so with KiCad
+/// open (it saves over them) the restore is also queued for when it closes. The current state is snapshotted first, so this can be rolled back too.
 pub fn rollback(root: &LibraryRoot, id: &str) -> Result<()> {
     check_id(id)?;
     let snap = root.dir.join(DIR).join(id);
@@ -407,9 +407,12 @@ pub fn rollback(root: &LibraryRoot, id: &str) -> Result<()> {
     for t in TABLES {
         let dest = root.table_dir.join(t);
         if m.tables.iter().any(|x| x == t) {
-            copy_replace(&snap.join("tables").join(t), &dest).with_context(|| format!("restoring {t}"))?;
+            let saved = snap.join("tables").join(t);
+            copy_replace(&saved, &dest).with_context(|| format!("restoring {t}"))?;
+            crate::kicad_env::defer_table_op(&dest, crate::kicad_env::TableOp::Restore(std::fs::read_to_string(&saved).ok()))?;
         } else if dest.is_file() {
             std::fs::remove_file(&dest)?;
+            crate::kicad_env::defer_table_op(&dest, crate::kicad_env::TableOp::Restore(None))?;
         }
     }
     prune(root)

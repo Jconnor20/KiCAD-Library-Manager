@@ -119,6 +119,7 @@ fn settings() -> Result<Settings> {
         Some(p) => serde_json::from_str(&std::fs::read_to_string(&p).with_context(|| format!("reading {}", Path::new(&p).display()))?)?,
         None => {
             klm_core::snapshot::set_store_path(klm_core::store::Store::default_path());
+            kicad_env::set_pending_queue(kicad_env::default_queue_path());
             Settings::load()
         }
     };
@@ -131,6 +132,7 @@ fn kicad_config() -> Result<PathBuf> {
     std::env::var_os("KLM_KICAD_CONFIG").map(PathBuf::from).map_or_else(kicad_env::config_dir, Ok)
 }
 
+/// For commands that add libraries; relink and rollback instead queue a re-check for the GUI to run once KiCad closes.
 /// KiCad rewrites its library tables when it closes, which would undo our edits.
 fn ensure_kicad_closed() -> Result<()> {
     // An overridden config dir isn't the real KiCad's, so it can't be clobbered.
@@ -138,6 +140,13 @@ fn ensure_kicad_closed() -> Result<()> {
         bail!("KiCad is running; close it first, since it would overwrite changes to its library list");
     }
     Ok(())
+}
+
+/// Table edits made with KiCad open are queued; the GUI repeats them once KiCad has closed.
+fn note_if_kicad_open() {
+    if kicad_env::pending_count() > 0 && kicad_env::kicad_running() {
+        println!("KiCad is open: its library list is re-checked the next time KLM's window runs after KiCad closes.");
+    }
 }
 
 fn global_root(s: &Settings) -> Result<LibraryRoot> {
@@ -236,7 +245,6 @@ fn health(json: bool, csv: bool, project: Option<PathBuf>) -> Result<ExitCode> {
 
 fn relink(project: Option<&Path>) -> Result<()> {
     let roots = roots(&settings()?, project)?;
-    ensure_kicad_closed()?;
     let mut any = false;
     for root in roots {
         let fixed = root.fix_old_paths()?;
@@ -253,6 +261,7 @@ fn relink(project: Option<&Path>) -> Result<()> {
     if !any {
         println!("All KLM libraries are already in KiCad's library list.");
     }
+    note_if_kicad_open();
     Ok(())
 }
 
@@ -279,9 +288,9 @@ fn history(json: bool, project: Option<&Path>) -> Result<()> {
 /// Restores the library that holds snapshot `id` to the state before that change.
 fn rollback(id: &str, project: Option<&Path>) -> Result<()> {
     let root = roots(&settings()?, project)?.into_iter().find(|r| snapshot::list(r).iter().any(|s| s.id == id)).with_context(|| format!("no snapshot {id}; see `klm-cli history`"))?;
-    ensure_kicad_closed()?;
     snapshot::rollback(&root, id)?;
     println!("Rolled {} back to snapshot {id}", root.dir.display());
+    note_if_kicad_open();
     Ok(())
 }
 
@@ -314,7 +323,7 @@ fn import(zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Opt
         print!("{plan}");
         return Ok(ExitCode::SUCCESS);
     }
-    if plan.touches_kicad_tables() || plan.adds_libraries() {
+    if plan.adds_libraries() {
         ensure_kicad_closed()?;
     }
     let mut failed = false;

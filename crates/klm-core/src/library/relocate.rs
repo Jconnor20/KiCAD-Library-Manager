@@ -37,7 +37,7 @@ impl LibraryRoot {
     }
 
     /// Replaces path prefix `old` with this root's prefix in its libraries and KiCad's tables.
-    /// Returns how many files changed. KiCad must be closed (it saves over its tables).
+    /// Returns how many files changed. While KiCad is open the table edits are queued again for when it closes.
     fn rewrite_prefix(&self, old: &str) -> Result<usize> {
         // The trailing '/' stops ".../Lib" also matching ".../Lib2".
         let (old, new) = (format!("{}/", old.trim_end_matches('/')), format!("{}/", self.var()));
@@ -47,10 +47,14 @@ impl LibraryRoot {
             let Ok(text) = std::fs::read_to_string(&f) else { continue };
             if text.contains(&old) {
                 // Back up KiCad's tables (no extension); a .bak inside a library folder would be clutter.
-                if f.extension().is_none() {
+                let is_table = f.extension().is_none();
+                if is_table {
                     kicad_env::backup(&f)?;
                 }
                 write_atomic(&f, &text.replace(&old, &new))?;
+                if is_table {
+                    kicad_env::defer_table_op(&f, kicad_env::TableOp::Rewrite { old: old.clone(), new: new.clone() })?;
+                }
                 changed += 1;
             }
         }

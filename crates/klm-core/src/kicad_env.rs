@@ -198,6 +198,11 @@ pub struct PendingLib {
 /// Where queued entries are kept. `None` (the CLI, tests) means nothing is ever queued.
 static QUEUE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
+/// Where the GUI and the CLI keep the queue, so either one can queue and the GUI applies it.
+pub fn default_queue_path() -> Option<PathBuf> {
+    Some(dirs::config_dir()?.join("KiCAD-Library-Manager").join("pending-libs.json"))
+}
+
 pub fn set_pending_queue(path: Option<PathBuf>) {
     *QUEUE.lock().unwrap_or_else(|e| e.into_inner()) = path;
 }
@@ -224,9 +229,73 @@ pub fn enqueue_in(queue: &Path, entry: PendingLib) -> Result<bool> {
     Ok(true)
 }
 
-/// Registers every queued entry and empties the queue; entries that fail stay queued. Returns how many were added.
-/// The caller makes sure KiCad is closed.
+/// A change to an existing table, written at once and repeated when KiCad closes in case it saved over it.
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+pub struct PendingTable {
+    pub table: PathBuf,
+    pub op: TableOp,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+pub enum TableOp {
+    /// Path prefix `old` becomes `new`.
+    Rewrite { old: String, new: String },
+    /// The whole table is this text (`None`: the file does not exist).
+    Restore(Option<String>),
+}
+
+fn table_queue(queue: &Path) -> PathBuf {
+    queue.with_file_name("pending-tables.json")
+}
+
+pub fn pending_tables_in(queue: &Path) -> Vec<PendingTable> {
+    std::fs::read_to_string(table_queue(queue)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+fn apply_table_op(table: &Path, op: &TableOp) -> Result<()> {
+    match op {
+        TableOp::Rewrite { old, new } => {
+            if let Ok(text) = std::fs::read_to_string(table).map(|t| t.replace(old, new)) {
+                write_atomic(table, &text)?;
+            }
+        }
+        TableOp::Restore(Some(text)) => write_atomic(table, text)?,
+        TableOp::Restore(None) => {
+            if table.is_file() {
+                std::fs::remove_file(table)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Records that `op` was just done to `table` so it is repeated once KiCad closes. Only while KiCad is open and queueing is on.
+pub fn defer_table_op(table: &Path, op: TableOp) -> Result<()> {
+    let Some(q) = queue_path().filter(|_| kicad_running()) else { return Ok(()) };
+    let mut all = pending_tables_in(&q);
+    all.push(PendingTable { table: table.to_path_buf(), op });
+    if let Some(dir) = q.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    write_atomic(&table_queue(&q), &serde_json::to_string_pretty(&all)?)
+}
+
+/// Repeats the queued table changes, in order, and empties that queue. The caller makes sure KiCad is closed.
+fn apply_tables_in(queue: &Path) -> Result<()> {
+    let tq = table_queue(queue);
+    for e in pending_tables_in(queue) {
+        apply_table_op(&e.table, &e.op)?;
+    }
+    if tq.exists() {
+        std::fs::remove_file(&tq)?;
+    }
+    Ok(())
+}
+
+/// Repeats queued table changes, then registers every queued entry and empties the queue; entries that fail stay queued.
+/// Returns how many libraries were added. The caller makes sure KiCad is closed.
 pub fn apply_in(queue: &Path) -> Result<usize> {
+    apply_tables_in(queue)?;
     let (mut added, mut keep) = (0, vec![]);
     for e in pending_in(queue) {
         match register_lib(&e.table, &e.nickname, &e.uri) {
@@ -244,7 +313,7 @@ pub fn apply_in(queue: &Path) -> Result<usize> {
 }
 
 pub fn pending_count() -> usize {
-    queue_path().map_or(0, |q| pending_in(&q).len())
+    queue_path().map_or(0, |q| pending_in(&q).len() + pending_tables_in(&q).len())
 }
 
 /// Whether `nickname` is waiting to be added to `table`.
@@ -255,7 +324,7 @@ pub fn is_queued(table: &Path, nickname: &str) -> bool {
 /// Applies the queue if KiCad is closed (cached check). Returns how many libraries were added.
 pub fn apply_pending() -> Result<usize> {
     match queue_path() {
-        Some(q) if q.exists() && !kicad_running() => apply_in(&q),
+        Some(q) if (q.exists() || table_queue(&q).exists()) && !kicad_running() => apply_in(&q),
         _ => Ok(0),
     }
 }
@@ -292,6 +361,30 @@ mod tests {
         assert_eq!(apply_in(&queue).unwrap(), 1);
         assert!(is_registered(&table, "KLM_ICs"));
         assert!(pending_in(&queue).is_empty());
+    }
+
+    #[test]
+    fn table_ops_are_repeated_after_kicad_overwrites() {
+        let dir = crate::test_dir("table_ops");
+        let (table, queue) = (dir.join("fp-lib-table"), dir.join("pending-libs.json"));
+        // Stands in for defer_table_op, which only queues while KiCad is running.
+        let defer = |op| {
+            let mut all = pending_tables_in(&queue);
+            all.push(PendingTable { table: table.clone(), op });
+            std::fs::write(table_queue(&queue), serde_json::to_string(&all).unwrap()).unwrap();
+        };
+        defer(TableOp::Rewrite { old: "/old/".into(), new: "/new/".into() });
+        std::fs::write(&table, "(uri \"/old/a\")").unwrap(); // KiCad saved its stale copy
+        assert_eq!(apply_in(&queue).unwrap(), 0);
+        assert_eq!(std::fs::read_to_string(&table).unwrap(), "(uri \"/new/a\")");
+        assert!(pending_tables_in(&queue).is_empty());
+
+        defer(TableOp::Restore(Some("restored".into())));
+        apply_in(&queue).unwrap();
+        assert_eq!(std::fs::read_to_string(&table).unwrap(), "restored");
+        defer(TableOp::Restore(None));
+        apply_in(&queue).unwrap();
+        assert!(!table.exists());
     }
 
     #[test]
