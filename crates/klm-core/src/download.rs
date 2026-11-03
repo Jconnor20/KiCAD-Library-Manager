@@ -1,6 +1,7 @@
 //! Downloading datasheet PDFs, for fresh LCSC imports and for parts that only have a datasheet link.
 
 use crate::library::{AttachKind, Check, LibraryRoot};
+use crate::sources::Source;
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::time::Duration;
@@ -50,11 +51,109 @@ impl LibraryRoot {
     }
 }
 
+/// Finds a real PDF for `mpn`: the part's existing link first, then every `datasheet_url` the
+/// `sources` return for the MPN. `fetch` saves a URL to `dest` (it is `download_pdf` outside tests).
+/// Returns the URL that worked, or why each attempt failed.
+pub fn find_datasheet(mpn: &str, existing: Option<&str>, sources: &[Box<dyn Source>], dest: &Path, fetch: &dyn Fn(&str, &Path) -> Result<()>) -> Result<String> {
+    let mut why = vec![];
+    let mut tried = vec![];
+    let mut try_url = |url: &str, from: &str, why: &mut Vec<String>| {
+        if url.is_empty() || !url.starts_with("http") || tried.iter().any(|t: &String| t == url) {
+            return false;
+        }
+        tried.push(url.to_string());
+        match fetch(url, dest) {
+            Ok(()) => true,
+            Err(e) => {
+                why.push(format!("{from}: {e:#}"));
+                false
+            }
+        }
+    };
+    if let Some(url) = existing {
+        if try_url(url, "existing link", &mut why) {
+            return Ok(url.to_string());
+        }
+    }
+    if mpn.is_empty() {
+        bail!("no MPN to search for{}", if why.is_empty() { String::new() } else { format!("; {}", why.join("; ")) });
+    }
+    if sources.is_empty() {
+        why.push("no distributor source is enabled to search".into());
+    }
+    for source in sources {
+        match source.search(mpn) {
+            Ok(found) => {
+                for url in found.iter().filter(|f| crate::matching::same_mpn(&f.mpn, mpn)).map(|f| f.datasheet_url.as_str()) {
+                    if try_url(url, source.name(), &mut why) {
+                        return Ok(url.to_string());
+                    }
+                }
+            }
+            Err(e) => why.push(format!("{}: {e:#}", source.name())),
+        }
+    }
+    bail!("{}", if why.is_empty() { "no source knows a datasheet for this part".to_string() } else { why.join("; ") })
+}
+
+impl LibraryRoot {
+    /// Gives every part whose datasheet is missing, broken, a web page or a missing file a local PDF
+    /// (see [`find_datasheet`]) and points its `Datasheet` property at it. Returns (MPN, outcome) per
+    /// part tried; the outcome is the URL used. A part that fails is left as it was.
+    pub fn find_missing_datasheets(&self, sources: &[Box<dyn Source>]) -> Vec<(String, Result<String>)> {
+        let todo: Vec<_> = self.list_parts().into_iter().filter(|p| p.datasheet != Check::Ok).collect();
+        if todo.is_empty() {
+            return vec![];
+        }
+        let _snapshot = match crate::snapshot::guard(self, "find missing datasheets") {
+            Ok(g) => g,
+            Err(e) => return vec![(String::new(), Err(e))],
+        };
+        let tmp = std::env::temp_dir().join(format!("klm-datasheet-{}.pdf", std::process::id()));
+        let out = todo
+            .into_iter()
+            .map(|p| {
+                let result = find_datasheet(&p.mpn, p.datasheet_target.as_deref(), sources, &tmp, &download_pdf)
+                    .and_then(|url| self.attach_file(&p.category, &p.name, AttachKind::Datasheet, &tmp).map(|()| url));
+                (if p.mpn.is_empty() { p.name } else { p.mpn }, result)
+            })
+            .collect();
+        let _ = std::fs::remove_file(&tmp);
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+
+
+    struct Stub(&'static str, Vec<&'static str>);
+    impl Source for Stub {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn search(&self, _: &str) -> Result<Vec<crate::part::Part>> {
+            Ok(self.1.iter().map(|u| crate::part::Part { mpn: "ABC123".into(), datasheet_url: u.to_string(), ..Default::default() }).collect())
+        }
+        fn fetch(&self, _: &crate::part::Part, _: &Path) -> Result<Option<crate::part::Part>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn finder_tries_the_link_then_each_source_url_and_explains_failures() {
+        let fetch = |url: &str, _: &Path| if url.ends_with("good.pdf") { Ok(()) } else { bail!("bad {url}") };
+        let dest = Path::new("unused");
+        let sources: Vec<Box<dyn Source>> = vec![Box::new(Stub("A", vec!["http://x/page", ""])), Box::new(Stub("B", vec!["http://x/good.pdf"]))];
+        assert_eq!(find_datasheet("ABC123", Some("http://x/old"), &sources, dest, &fetch).unwrap(), "http://x/good.pdf");
+        assert_eq!(find_datasheet("ABC123", Some("http://x/good.pdf"), &[], dest, &fetch).unwrap(), "http://x/good.pdf", "existing link wins");
+        let e = format!("{:#}", find_datasheet("ABC123", None, &sources[..1], dest, &fetch).unwrap_err());
+        assert!(e.contains("A: bad http://x/page"), "{e}");
+        assert!(format!("{:#}", find_datasheet("ABC123", None, &[], dest, &fetch).unwrap_err()).contains("no distributor source"));
+    }
 
     const PDF: &[u8] = b"%PDF-1.4 fake datasheet";
 
