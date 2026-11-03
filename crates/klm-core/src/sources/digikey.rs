@@ -70,6 +70,7 @@ impl Source for DigiKey {
         let mut parts = parse(&http::send(req)?);
         for p in &mut parts {
             p.price_currency = self.locale.1.into();
+            p.unit_price = coded_price(&p.unit_price, self.locale.1);
         }
         Ok(parts)
     }
@@ -81,6 +82,11 @@ impl Source for DigiKey {
     fn cad_page_url(&self, part: &Part) -> Option<String> {
         super::snapmagic_url(part)
     }
+}
+
+/// `parse` writes "$" whatever the site's currency; swap it for the real ISO code so `currency::detect` is right.
+fn coded_price(text: &str, code: &str) -> String {
+    text.strip_prefix('$').map_or_else(|| text.to_string(), |rest| format!("{code} {rest}"))
 }
 
 /// "Resistors Chip Resistor - Surface Mount": the category chain, for `categories::guess`.
@@ -120,6 +126,8 @@ fn parse(v: &Value) -> Vec<Part> {
             // shortcut: only the first packaging variation is read (may be tape & reel); pick per MOQ if BOMs need it.
             part.price_breaks = variation["StandardPricing"].as_array().into_iter().flatten().filter_map(|b| Some((b["BreakQuantity"].as_u64()?, b["UnitPrice"].as_f64()?))).collect();
             part.moq = variation["MinimumOrderQuantity"].as_u64();
+            part.packaging = http::text(variation, "/PackageType/Name");
+            part.pack_qty = variation["StandardPackage"].as_u64();
             part.lead_time_days = p["ManufacturerLeadWeeks"].as_str().and_then(|w| w.trim().parse::<u32>().ok()).map(|w| w * 7);
             if let Some(b) = variation["StandardPricing"].get(0) {
                 part.unit_price = format!("${} @{}", b["UnitPrice"], b["BreakQuantity"]);
@@ -174,6 +182,14 @@ mod tests {
         assert_eq!(p.datasheet_url, "https://www.yageo.com/upload/media/product/RC_L.pdf");
         assert_eq!(p.category_hint, "Resistors Chip Resistor - Surface Mount");
         assert_eq!(p.supplier_ids, vec![("DigiKey".to_string(), "311-10.0KHRCT-ND".to_string())]);
+    }
+
+    #[test]
+    fn price_text_carries_the_real_currency() {
+        let t = coded_price("$0.1 @1", "CAD");
+        assert_eq!(t, "CAD 0.1 @1");
+        assert_eq!(crate::currency::detect(&t).as_deref(), Some("CAD"));
+        assert_eq!(crate::currency::price_in(&t, None, None), Some(0.1));
     }
 
     #[test]

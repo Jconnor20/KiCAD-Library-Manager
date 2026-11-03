@@ -83,6 +83,7 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
                 price_breaks: p["PriceBreaks"].as_array().into_iter().flatten().filter_map(|b| Some((b["Quantity"].as_u64()?, parse_price(&http::text(b, "/Price"))?))).collect(),
                 price_currency: http::text(b, "/Currency"),
                 moq: http::text(p, "/Min").parse().ok(),
+                pack_qty: http::text(p, "/Mult").parse().ok(),
                 lead_time_days: lead_days(&http::text(p, "/LeadTime")),
                 unit_price: if b.is_null() { String::new() } else { format!("{} @{}", http::text(b, "/Price"), b["Quantity"]) },
                 // The search reply has no package field; ProductAttributes only lists packaging options.

@@ -24,6 +24,10 @@ pub struct Part {
     pub price_currency: String,
     /// Smallest order quantity the source sells, when it says.
     pub moq: Option<u64>,
+    /// Order multiple / standard pack size, when the source says.
+    pub pack_qty: Option<u64>,
+    /// Packaging ("Cut Tape", "Reel"), when the source says.
+    pub packaging: String,
     /// Days until a part that is out of stock ships from the factory, when the source says.
     pub lead_time_days: Option<u32>,
     pub symbol_file: Option<PathBuf>,
