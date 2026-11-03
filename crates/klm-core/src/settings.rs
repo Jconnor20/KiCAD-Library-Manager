@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -60,8 +60,28 @@ impl Default for History {
     }
 }
 
+/// Env var that moves everything KLM keeps (and KiCad's config dir lookup, and credentials) into one folder.
+pub const SANDBOX_ENV: &str = "KLM_CONFIG_DIR";
+
+/// The sandbox folder, when `KLM_CONFIG_DIR` (or `--config`) is set.
+pub fn sandbox_dir() -> Option<PathBuf> {
+    std::env::var_os(SANDBOX_ENV).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// Makes `dir` the sandbox for this process. Call first thing in `main`, before any thread starts.
+pub fn set_sandbox(dir: &Path) {
+    // SAFETY: only called at startup, single-threaded.
+    unsafe { std::env::set_var(SANDBOX_ENV, dir) };
+}
+
+/// Where KLM keeps settings, the part database, caches, queues and history: the one place every
+/// per-user path goes through, so a sandbox redirects all of it.
+pub fn app_dir() -> Option<PathBuf> {
+    sandbox_dir().or_else(|| Some(dirs::config_dir()?.join("KiCAD-Library-Manager")))
+}
+
 fn path() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("KiCAD-Library-Manager").join("settings.json"))
+    Some(app_dir()?.join("settings.json"))
 }
 
 impl Settings {

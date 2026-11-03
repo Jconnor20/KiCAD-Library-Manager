@@ -4,6 +4,15 @@ A running list of what each merged work package left undone, cut short or made r
 
 ---
 
+## Wave 6
+
+### W6.0 Test sandbox
+
+- Only `--config` / `KLM_CONFIG_DIR` runs are isolated. The older tests (`cli_e2e`, `cli_cleanup`, `snapshot_e2e`, `credentials::tests`) still use the real Credential Manager and let `kicad-cli` rewrite the real `kicad_common.json`.
+- Sandbox API keys are plain text in `<dir>/credentials.json`; use it for test keys only.
+- Temporary scratch folders (`klm-zip-*`, `klm-batch-*`, ...) still go to the OS temp dir, not the sandbox; they are unique per run and not user data.
+- The GUI's native file dialogs open in the user's real folders and can browse anywhere; the sandbox does not restrict what the user picks.
+
 ## Wave 5
 
 ### W5.1 Search by part type

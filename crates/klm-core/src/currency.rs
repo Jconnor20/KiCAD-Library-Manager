@@ -65,7 +65,7 @@ impl Rates {
 }
 
 fn cache_path() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("KiCAD-Library-Manager").join("rates.json"))
+    Some(crate::settings::app_dir()?.join("rates.json"))
 }
 
 fn fetch(now: u64) -> Result<Rates> {

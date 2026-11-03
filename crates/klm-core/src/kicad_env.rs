@@ -22,8 +22,28 @@ fn newest_version_dir(dir: &Path) -> Option<PathBuf> {
 
 /// KiCad's per-user config dir for the newest installed version, e.g. `%APPDATA%\kicad\10.0`.
 pub fn config_dir() -> Result<PathBuf> {
+    if let Some(sb) = crate::settings::sandbox_dir() {
+        return sandbox_kicad_dir(&sb.join("kicad"));
+    }
     let base = dirs::preference_dir().context("no user config directory")?.join("kicad");
     newest_version_dir(&base).with_context(|| format!("no KiCad config found in {}", base.display()))
+}
+
+/// The newest version folder under a sandbox's `kicad/`, created with empty library tables if there is none,
+/// so a test never falls back to the real KiCad config.
+fn sandbox_kicad_dir(base: &Path) -> Result<PathBuf> {
+    if let Some(d) = newest_version_dir(base) {
+        return Ok(d);
+    }
+    let d = base.join("10.0");
+    std::fs::create_dir_all(&d)?;
+    for (file, root) in [("sym-lib-table", "sym_lib_table"), ("fp-lib-table", "fp_lib_table")] {
+        std::fs::write(d.join(file), format!("({root}
+  (version 7)
+)
+"))?;
+    }
+    Ok(d)
 }
 
 /// The Settings override for `kicad-cli`. Process-wide so the GUI, the CLI and the core all honour it
@@ -72,6 +92,10 @@ pub fn kicad_cli_version() -> Result<String> {
 
 fn quiet(program: &Path) -> Command {
     let mut cmd = Command::new(program);
+    // kicad-cli rewrites its own kicad_common.json on every run; keep that inside the sandbox too.
+    if let Some(sb) = crate::settings::sandbox_dir() {
+        cmd.env("KICAD_CONFIG_HOME", sb.join("kicad"));
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -104,6 +128,10 @@ pub fn kicad_running_now() -> bool {
 }
 
 fn scan_processes() -> bool {
+    // A sandbox's tables are not the running KiCad's, so it cannot overwrite them (and a test must not be blocked by the user's KiCad).
+    if crate::settings::sandbox_dir().is_some() {
+        return false;
+    }
     let (prog, args): (&str, &[&str]) = if cfg!(windows) { ("tasklist", &["/NH", "/FO", "CSV"]) } else { ("ps", &["-A", "-o", "comm="]) };
     let Ok(out) = quiet(Path::new(prog)).args(args).output() else { return false };
     String::from_utf8_lossy(&out.stdout).lines().any(|l| {
@@ -200,7 +228,7 @@ static QUEUE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// Where the GUI and the CLI keep the queue, so either one can queue and the GUI applies it.
 pub fn default_queue_path() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("KiCAD-Library-Manager").join("pending-libs.json"))
+    Some(crate::settings::app_dir()?.join("pending-libs.json"))
 }
 
 pub fn set_pending_queue(path: Option<PathBuf>) {

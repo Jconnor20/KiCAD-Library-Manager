@@ -222,7 +222,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
 
 No new features. Prove what's built works, fix what doesn't, and leave tests behind so it stays fixed. Findings that aren't fixed go into LIMITS.md.
 
-- [ ] **W6.0 Test sandbox (run first, here)** (S)
+- [x] **W6.0 Test sandbox (run first, here)** (S)
   - **Owns:** `core/settings.rs` (config dir), `gui/main.rs` (one argument)
   - A `KLM_CONFIG_DIR` env var / `--config <dir>` that moves `settings.json`, `parts.db`, caches, the pending-table queue and KiCad's config dir lookup into a temp folder, so tests and agents never touch the real library.
   - **Done when:** the GUI and `klm-cli` run end to end against a temp folder, and the real `%APPDATA%` folder is unchanged afterwards.
