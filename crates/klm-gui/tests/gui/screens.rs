@@ -32,7 +32,11 @@ use egui_kittest::kittest::Queryable;
 fn settings_and_every_library_dialog_open() {
     let _env = setup();
     for size in SIZES {
-        let lib = || app(size, Tab::Library);
+        let lib = || {
+            let mut h = app(size, Tab::Library);
+            settle(&mut h);
+            h
+        };
         let mut h = lib();
         snap(&mut h, "library-list");
 
@@ -59,7 +63,7 @@ fn settings_and_every_library_dialog_open() {
 
         let mut h = lib();
         click(&mut h, "LM358");
-        click(&mut h, "Restyle symbol");
+        click(&mut h, "Restyle symbol…");
         snap(&mut h, "library-restyle-logged");
 
         let mut h = lib();

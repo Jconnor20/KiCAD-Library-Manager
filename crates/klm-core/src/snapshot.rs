@@ -326,6 +326,55 @@ fn entries(root: &LibraryRoot, sized: bool) -> Vec<Info> {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChangeKind {
+    Added,
+    Removed,
+    Modified,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Change {
+    pub kind: ChangeKind,
+    /// Relative to the library root, `/`-separated.
+    pub path: String,
+}
+
+/// The files the change that snapshot `id` was taken for added, removed or modified: the library as it was in `id`
+/// compared with the next newer snapshot, or with the library as it is now for the newest. Sorted by path.
+pub fn changes(root: &LibraryRoot, id: &str) -> Result<Vec<Change>> {
+    check_id(id)?;
+    let hist = root.dir.join(DIR);
+    let all = manifests(root);
+    let at = all.iter().position(|(i, _)| i == id).with_context(|| format!("no snapshot {id}"))?;
+    let old = &all[at].1;
+    let (new_files, new_dir) = match at.checked_sub(1) {
+        Some(n) => (all[n].1.files.clone(), hist.join(&all[n].0).join("files")),
+        None => (walk(&root.dir)?.0, root.dir.clone()),
+    };
+    let old_dir = hist.join(id).join("files");
+    let has: HashSet<&String> = old.files.iter().collect();
+    let mut out: Vec<Change> = new_files.iter().filter(|f| !has.contains(f)).map(|f| Change { kind: ChangeKind::Added, path: f.clone() }).collect();
+    let now: HashSet<&String> = new_files.iter().collect();
+    for f in &old.files {
+        let kind = if !now.contains(f) {
+            ChangeKind::Removed
+        } else {
+            let (a, b) = (old_dir.join(f), new_dir.join(f));
+            let same = match (std::fs::metadata(&a), std::fs::metadata(&b)) {
+                (Ok(x), Ok(y)) if x.len() == y.len() => {
+                    if is_text(f) { std::fs::read(&a)? == std::fs::read(&b)? } else { x.modified()? == y.modified()? }
+                }
+                _ => false,
+            };
+            if same { continue } else { ChangeKind::Modified }
+        };
+        out.push(Change { kind, path: f.clone() });
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
 /// Space used by a snapshot: its copies, plus linked files that the library has since replaced or deleted.
 fn snapshot_bytes(root: &LibraryRoot, snap: &Path, seen: &mut HashSet<(String, u64, Option<SystemTime>)>) -> u64 {
     let Ok((files, _)) = walk(snap) else { return 0 };
@@ -459,6 +508,25 @@ mod tests {
         root.link("ICs").unwrap();
         std::fs::remove_dir_all(root.dir.join(DIR)).unwrap(); // linking snapshotted; tests start with none
         root
+    }
+
+    #[test]
+    fn changes_lists_added_removed_modified() {
+        let root = fixture("snap_changes");
+        let new_model = root.dir.parent().unwrap().join("new.step");
+        std::fs::write(&new_model, "NEW MODEL").unwrap();
+        root.attach_file("ICs", "B", AttachKind::Model, &new_model).unwrap();
+        let wrl = root.dir.parent().unwrap().join("new.wrl");
+        std::fs::write(&wrl, "#VRML").unwrap();
+        root.attach_file("ICs", "B", AttachKind::Model, &wrl).unwrap();
+        let ids: Vec<String> = list(&root).into_iter().map(|s| s.id).collect(); // newest first
+        let step = |k| Change { kind: k, path: "3dmodels/ICs.3dshapes/FP2.step".into() };
+        // Snapshot 1 (the older) was taken before the first attach: the .step was replaced.
+        assert!(changes(&root, &ids[1]).unwrap().contains(&step(ChangeKind::Modified)));
+        // Snapshot 0 was taken before the second: the .step is gone and the .wrl is new, as the live library shows.
+        let c = changes(&root, &ids[0]).unwrap();
+        assert!(c.contains(&step(ChangeKind::Removed)));
+        assert!(c.iter().any(|c| c.kind == ChangeKind::Added && c.path.ends_with(".wrl")));
     }
 
     #[test]

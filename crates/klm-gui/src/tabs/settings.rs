@@ -1,131 +1,192 @@
-use super::{import, search, standards};
+//! The Settings popup: a search box over a tree of pages on the left, the chosen page on the right.
+//! It edits a copy of `Settings` that Apply or OK saves and Cancel or ✕ throws away. API keys are the one
+//! exception: "Save keys" writes to the credential store at once.
+
+mod pages;
+
+use super::ui_kit::{Level, Section};
+use super::{import, search};
 use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui;
 use klm_core::credentials::{self, SOURCES};
 use klm_core::kicad_env;
-use klm_core::rules::{MpnCase, Rules, TEMPLATE_FIELDS};
 use klm_core::settings::Settings;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 pub enum Msg {
-    TestDone,
+    /// A Test button finished: what it tested (a source name or "kicad-cli") and `Ok(what was found)` or `Err(why not)`.
+    Tested(&'static str, Result<String, String>),
 }
 
-enum Action {
-    None,
-    /// Source switches or stored credentials changed: save the settings and rebuild the sources.
+/// Something a page asks the popup to do that needs the app.
+enum Cmd {
+    /// Stored credentials changed: rebuild the sources from them.
     Rebuild,
-    /// Run a search with the stored credentials of this source.
     Test(&'static str),
-    /// New list of folders to watch (empty = the OS default).
-    Downloads(Vec<PathBuf>),
-    /// New `kicad-cli` to use (`None` = find it automatically).
-    KicadCli(Option<PathBuf>),
-    TestCli,
-    Note(String),
-    /// Naming rules, shipping region or similar changed: save the settings.
-    Save,
-    Standards(standards::Action),
+    MoveLibrary(PathBuf),
+    Log(Level, String),
+}
+
+enum Footer {
+    None,
+    Ok,
+    Apply,
+    Cancel,
+}
+
+const KICAD_CLI: &str = "kicad-cli";
+
+const TREE: &[(&str, &[(Section, &str)])] = &[
+    ("General", &[(Section::Libraries, "Libraries"), (Section::WatchFolders, "Watch folders"), (Section::KiCad, "KiCad")]),
+    ("Sources", &[(Section::Lcsc, "LCSC"), (Section::DigiKey, "DigiKey"), (Section::Mouser, "Mouser"), (Section::Nexar, "Nexar"), (Section::SnapMagic, "SnapMagic")]),
+    ("Search", &[(Section::Search, "Search")]),
+    ("Import", &[(Section::Import, "Import")]),
+    ("Standards", &[(Section::Symbols, "Symbols"), (Section::Footprints, "Footprints")]),
+    ("BOM", &[(Section::Bom, "BOM")]),
+    ("History", &[(Section::History, "History")]),
+];
+
+/// The page a section opens: a group opens on its first page.
+fn page_of(s: Section) -> Section {
+    match s {
+        Section::General => Section::Libraries,
+        Section::Sources => Section::Lcsc,
+        Section::Standards => Section::Symbols,
+        s => s,
+    }
 }
 
 /// The Settings popup. Credential entry boxes only ever hold what the user is typing; stored secrets are never read back into the UI.
+#[derive(Default)]
 pub struct SettingsTab {
-    open: bool,
-    testing: bool,
+    /// The copy being edited; `None` while the popup is closed.
+    draft: Option<Settings>,
+    section: Section,
+    query: String,
+    /// Tests running, and the last result of each, shown on the page.
+    testing: HashSet<&'static str>,
+    results: HashMap<&'static str, Result<String, String>>,
     inputs: HashMap<(&'static str, &'static str), String>,
     stored: HashSet<(&'static str, &'static str)>,
     /// Key boxes whose typed text is shown instead of dots.
     shown: HashSet<(&'static str, &'static str)>,
-    standards: standards::Standards,
 }
 
 impl SettingsTab {
     pub fn new() -> Self {
-        let mut v = Self { open: false, testing: false, inputs: HashMap::new(), stored: HashSet::new(), shown: HashSet::new(), standards: Default::default() };
-        v.refresh();
-        v
+        Self::default()
     }
 
-    pub fn open(&mut self) {
-        self.open = true;
+    pub fn open(&mut self, section: Section, live: &Settings) {
+        self.draft = Some(live.clone());
+        self.section = page_of(section);
+        self.query.clear();
+        self.inputs.clear();
+        self.shown.clear();
+        self.refresh();
     }
 
-    pub fn handle(&mut self, msg: Msg, _cx: &mut AppCtx) {
-        match msg {
-            Msg::TestDone => self.testing = false,
-        }
+    pub fn handle(&mut self, msg: Msg, cx: &mut AppCtx) {
+        let Msg::Tested(what, result) = msg;
+        self.testing.remove(what);
+        let (level, line) = match &result {
+            Ok(found) => (Level::Ok, format!("{what}: test OK, {found}")),
+            Err(e) => (Level::Error, format!("{what}: test failed: {e}")),
+        };
+        cx.log(level, line);
+        self.results.insert(what, result);
     }
 
     /// The popup itself; shown whatever tab is selected.
     pub fn dialogs(&mut self, cx: &mut AppCtx) {
-        if !self.open {
-            return;
-        }
+        let Some(mut draft) = self.draft.take() else { return };
         let ctx = cx.ctx.clone();
-        let mut action = Action::None;
-        let modal = egui::Modal::new(egui::Id::unique("settings")).show(&ctx, |ui| {
-            ui.set_width(700.0);
-            ui.set_max_height(520.0);
-            action = self.show(ui, &mut cx.settings, self.testing);
+        let screen = ctx.content_rect();
+        egui::Area::new(egui::Id::unique("settings_backdrop")).order(egui::Order::Middle).fixed_pos(screen.min).show(&ctx, |ui| {
+            let (rect, _) = ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
+            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_black_alpha(110));
         });
-        if modal.should_close() {
-            self.open = false;
+        let escape = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let mut open = true;
+        let (mut footer, mut cmd) = (Footer::None, None);
+        egui::Window::new("Settings")
+            .order(egui::Order::Foreground)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(screen.center())
+            .default_size(screen.size() * 0.8)
+            .min_size(egui::vec2(520.0, 320.0))
+            .max_size(screen.size())
+            .show(&ctx, |ui| (footer, cmd) = self.contents(ui, &mut draft, &cx.settings));
+        match footer {
+            Footer::Ok => {
+                self.apply(draft, cx);
+            }
+            Footer::Apply => {
+                self.apply(draft, cx);
+                self.draft = Some(cx.settings.clone());
+            }
+            Footer::Cancel => self.discard(cx),
+            Footer::None if !open || escape => self.discard(cx),
+            Footer::None => self.draft = Some(draft),
         }
-        match action {
-            Action::None => {}
-            Action::Rebuild => self.apply_sources(cx),
-            Action::Test(name) => self.test_source(name, cx),
-            Action::Note(n) => cx.log.push(n),
-            Action::Downloads(dir) => {
-                cx.settings.watch_dirs = dir;
-                cx.save_settings();
-                cx.send(AppMsg::Import(import::Msg::RestartWatcher));
+        match cmd {
+            None => {}
+            Some(Cmd::Rebuild) => {
+                cx.sources = Arc::new(klm_core::sources::all(&cx.settings));
+                cx.send(AppMsg::Search(search::Msg::ClearResults));
             }
-            Action::KicadCli(path) => {
-                kicad_env::set_kicad_cli_override(path.clone());
-                cx.settings.kicad_cli = path;
-                cx.save_settings();
-            }
-            Action::TestCli => self.test_cli(cx),
-            Action::Save => cx.save_settings(),
-            Action::Standards(a) => self.standards.act(a, cx),
+            Some(Cmd::Test(what)) => self.test(what, cx),
+            Some(Cmd::MoveLibrary(dir)) => cx.send(AppMsg::MoveGlobal(dir)),
+            Some(Cmd::Log(level, text)) => cx.log(level, text),
         }
     }
 
-    fn test_cli(&mut self, cx: &mut AppCtx) {
-        self.testing = true;
-        let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
-        std::thread::spawn(move || {
-            let line = match kicad_env::kicad_cli_version() {
-                Ok(v) => format!("kicad-cli: test OK, version {v}"),
-                Err(e) => format!("kicad-cli: test failed: {e:#}"),
-            };
-            let _ = tx.send(AppMsg::Log(line));
-            let _ = tx.send(AppMsg::Settings(Msg::TestDone));
-            ctx.request_repaint();
-        });
+    fn discard(&mut self, cx: &AppCtx) {
+        // A kicad-cli test may have tried the draft's path.
+        kicad_env::set_kicad_cli_override(cx.settings.kicad_cli.clone());
+        self.draft = None;
     }
 
-    /// Saves the settings and rebuilds the source list from them and the stored credentials.
-    fn apply_sources(&mut self, cx: &mut AppCtx) {
+    /// Makes `draft` the live settings and saves it. The library's location and the open project are changed
+    /// elsewhere while the popup is open, so those two keep their live values.
+    fn apply(&mut self, mut draft: Settings, cx: &mut AppCtx) {
+        draft.global_root = cx.settings.global_root.clone();
+        draft.last_project = cx.settings.last_project.clone();
+        draft.display_currency = draft.display_currency.trim().to_uppercase();
+        let old = std::mem::replace(&mut cx.settings, draft);
         cx.save_settings();
-        cx.sources = Arc::new(klm_core::sources::all(&cx.settings));
-        cx.send(AppMsg::Search(search::Msg::ClearResults));
+        let s = &cx.settings;
+        kicad_env::set_kicad_cli_override(s.kicad_cli.clone());
+        klm_core::snapshot::set_policy(&s.history);
+        klm_core::symbols::configure(s);
+        if s.source_enabled != old.source_enabled {
+            cx.sources = Arc::new(klm_core::sources::all(&cx.settings));
+            cx.send(AppMsg::Search(search::Msg::ClearResults));
+        }
+        if cx.settings.watch_dirs != old.watch_dirs {
+            cx.send(AppMsg::Import(import::Msg::RestartWatcher));
+        }
     }
 
-    fn test_source(&mut self, name: &'static str, cx: &mut AppCtx) {
-        self.testing = true;
+    fn test(&mut self, what: &'static str, cx: &mut AppCtx) {
+        self.testing.insert(what);
+        self.results.remove(what);
+        if what == KICAD_CLI {
+            kicad_env::set_kicad_cli_override(self.draft.as_ref().map_or(cx.settings.kicad_cli.clone(), |d| d.kicad_cli.clone()));
+        }
         let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
         std::thread::spawn(move || {
-            let result = klm_core::sources::build(name).ok_or_else(|| anyhow::anyhow!("keys missing")).and_then(|s| s.search("LM358"));
-            let line = match result {
-                Ok(parts) => format!("{name}: test OK, {} results for LM358", parts.len()),
-                Err(e) => format!("{name}: test failed: {e:#}"),
+            let result = if what == KICAD_CLI {
+                kicad_env::kicad_cli_version().map(|v| format!("version {v}"))
+            } else {
+                klm_core::sources::build(what).ok_or_else(|| anyhow::anyhow!("keys missing")).and_then(|s| s.search("LM358")).map(|p| format!("{} results", p.len()))
             };
-            let _ = tx.send(AppMsg::Log(line));
-            let _ = tx.send(AppMsg::Settings(Msg::TestDone));
+            let _ = tx.send(AppMsg::Settings(Msg::Tested(what, result.map_err(|e| format!("{e:#}")))));
             ctx.request_repaint();
         });
     }
@@ -138,185 +199,73 @@ impl SettingsTab {
             .collect();
     }
 
-    fn show(&mut self, ui: &mut egui::Ui, settings: &mut Settings, testing: bool) -> Action {
-        let mut action = Action::None;
-        egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
-            ui.heading("Settings");
-            ui.strong("Search sources");
-            ui.weak("Keys are kept in Windows Credential Manager, not in the settings file. A source is searched when it is ticked and has all its keys.");
-            for info in SOURCES {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.strong(info.name);
-                    if info.searchable {
-                        let mut on = settings.is_enabled(info.name);
-                        if ui.checkbox(&mut on, "Enabled").changed() {
-                            settings.source_enabled.insert(info.name.into(), on);
-                            action = Action::Rebuild;
-                        }
-                    } else {
-                        ui.weak("stored for later, no search source yet");
-                    }
-                });
-                egui::Grid::new(info.name).num_columns(4).spacing([8.0, 4.0]).show(ui, |ui| {
-                    for (key, label) in info.fields {
-                        ui.label(*label);
-                        let text = self.inputs.entry((info.name, key)).or_default();
-                        let show = self.shown.contains(&(info.name, *key));
-                        ui.add(egui::TextEdit::singleline(text).password(!show).desired_width((ui.available_width() - 160.0).max(240.0)));
-                        if ui.selectable_label(show, "👁").on_hover_text("Show or hide what you type").clicked() {
-                            if !self.shown.remove(&(info.name, *key)) {
-                                self.shown.insert((info.name, *key));
-                            }
-                        }
-                        ui.weak(if self.stored.contains(&(info.name, *key)) { "stored" } else { "not set" });
-                        ui.end_row();
-                    }
-                });
-                ui.horizontal(|ui| {
-                    let typed = info.fields.iter().any(|f| self.inputs.get(&(info.name, f.0)).is_some_and(|t| !t.trim().is_empty()));
-                    // LCSC needs no keys, so it only gets the Test button.
-                    if !info.fields.is_empty() && ui.add_enabled(typed, egui::Button::new("Save keys")).clicked() {
-                        for (key, _) in info.fields {
-                            let text = self.inputs.remove(&(info.name, *key)).unwrap_or_default();
-                            if text.trim().is_empty() {
-                                continue;
-                            }
-                            if let Err(e) = credentials::set(info.name, key, text.trim()) {
-                                action = Action::Note(format!("{}: {e:#}", info.name));
-                            }
-                        }
-                        self.refresh();
-                        if matches!(action, Action::None) {
-                            action = Action::Rebuild;
-                        }
-                    }
-                    if !info.fields.is_empty() && ui.button("Clear keys").clicked() {
-                        for (key, _) in info.fields {
-                            self.inputs.remove(&(info.name, *key));
-                            if let Err(e) = credentials::clear(info.name, key) {
-                                action = Action::Note(format!("{}: {e:#}", info.name));
-                            }
-                        }
-                        self.refresh();
-                        if matches!(action, Action::None) {
-                            action = Action::Rebuild;
-                        }
-                    }
-                    let complete = info.fields.iter().all(|f| self.stored.contains(&(info.name, f.0)));
-                    if info.searchable && ui.add_enabled(complete && !testing, egui::Button::new("Test")).on_hover_text("Runs a search for LM358").clicked() {
-                        action = Action::Test(info.name);
-                    }
-                });
-            }
-
-            ui.add_space(16.0);
-            ui.strong("Downloads folder");
-            ui.weak("KLM watches these folders for vendor ZIPs (SnapMagic, Ultra Librarian, SamacSys). With none added, the OS Downloads folder is used.");
-            let mut dirs = settings.watch_dirs.clone();
-            let mut remove = None;
-            for (i, d) in dirs.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(d.display().to_string());
-                    if ui.small_button("Remove").clicked() {
-                        remove = Some(i);
-                    }
-                });
-            }
-            if settings.watch_dirs.is_empty() {
-                ui.label(settings.downloads().first().map_or("none found".into(), |d| format!("{} (default)", d.display())));
-            }
-            if let Some(i) = remove {
-                dirs.remove(i);
-                action = Action::Downloads(dirs.clone());
-            }
-            if ui.button("Add folder…").clicked() {
-                if let Some(d) = rfd::FileDialog::new().set_title("Folder to watch for vendor ZIPs").pick_folder() {
-                    if !dirs.contains(&d) {
-                        dirs.push(d);
-                    }
-                    action = Action::Downloads(dirs);
-                }
-            }
-
-            ui.add_space(16.0);
-            ui.strong("kicad-cli");
-            ui.weak("Used to upgrade imported parts to your KiCad's format. Set it if KiCad isn't installed in the usual place.");
+    fn contents(&mut self, ui: &mut egui::Ui, d: &mut Settings, live: &Settings) -> (Footer, Option<Cmd>) {
+        let mut footer = Footer::None;
+        egui::Panel::bottom("settings_footer").show(ui, |ui| {
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label(kicad_env::kicad_cli().map_or("none found".into(), |p| p.display().to_string()));
-                if ui.button("Browse…").clicked() {
-                    if let Some(f) = rfd::FileDialog::new().set_title("kicad-cli executable").pick_file() {
-                        action = Action::KicadCli(Some(f));
+                if ui.add_enabled(pages::has_defaults(self.section), egui::Button::new("Restore defaults")).on_hover_text("Puts this page's options back to their defaults; Apply or OK saves them").clicked() {
+                    pages::restore(d, self.section);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("OK").clicked() {
+                        footer = Footer::Ok;
                     }
-                }
-                if settings.kicad_cli.is_some() && ui.button("Use default").clicked() {
-                    action = Action::KicadCli(None);
-                }
-                if ui.add_enabled(!testing, egui::Button::new("Test")).on_hover_text("Runs kicad-cli version").clicked() {
-                    action = Action::TestCli;
-                }
+                    if ui.button("Cancel").clicked() {
+                        footer = Footer::Cancel;
+                    }
+                    if ui.button("Apply").clicked() {
+                        footer = Footer::Apply;
+                    }
+                });
             });
-
-            ui.add_space(16.0);
-            ui.strong("Shipping region");
-            ui.weak("Country code (US, DE, ...) used for BOM stock and prices; each project can override it. Only DigiKey uses it so far.");
-            if ui.add(egui::TextEdit::singleline(&mut settings.shipping_region).hint_text("e.g. DE").desired_width(80.0)).lost_focus() {
-                action = Action::Save;
-            }
-
-            if naming_section(ui, &mut settings.rules) {
-                action = Action::Save;
-            }
-            ui.add_space(16.0);
-            if ui.checkbox(&mut settings.house_symbols_on_import, "Redraw imported symbols in the house style (resistor, capacitor, IC box…)").on_hover_text("Parts that can't be mapped with certainty keep the vendor's symbol. \"Restyle symbol\" in the Library tab does the same for existing parts.").changed() {
-                action = Action::Save;
-            }
-            match self.standards.show(ui, &mut settings.standards) {
-                standards::Action::None => {}
-                a => action = Action::Standards(a),
-            }
-            // Cheap, and keeps the import step in step with the rules above.
-            klm_core::symbols::configure(settings);
+            ui.add_space(2.0);
         });
-        action
+        egui::Panel::left("settings_tree").resizable(true).default_size(170.0).size_range(120.0..=300.0).show(ui, |ui| self.tree(ui));
+        let mut cmd = None;
+        egui::CentralPanel::default().show(ui, |ui| {
+            ui.heading(pages::title(self.section));
+            ui.separator();
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| cmd = self.page(ui, d, live));
+        });
+        (footer, cmd)
     }
-}
 
-/// The "Naming" section; true when a rule changed.
-fn naming_section(ui: &mut egui::Ui, rules: &mut Rules) -> bool {
-    let before = rules.clone();
-    ui.add_space(16.0);
-    ui.strong("Naming");
-    ui.weak("Category rules are checked in order before the built-in guess: text containing the keyword (a word or a package such as SOT-23) goes to that category.");
-    let mut remove = None;
-    for (i, r) in rules.categories.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut r.keyword).hint_text("keyword or package").desired_width(180.0));
-            ui.label("→");
-            ui.add(egui::TextEdit::singleline(&mut r.category).hint_text("category").desired_width(180.0));
-            if ui.small_button("Remove").clicked() {
-                remove = Some(i);
+    fn tree(&mut self, ui: &mut egui::Ui) {
+        ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("Search settings").desired_width(f32::INFINITY));
+        ui.add_space(4.0);
+        let q = self.query.trim().to_lowercase();
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            // Compact, so the whole tree fits at the default window size.
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.spacing_mut().button_padding.y = 0.0;
+            let mut any = false;
+            for (group, pages) in TREE {
+                let group_hit = group.to_lowercase().contains(&q);
+                let shown: Vec<_> = pages.iter().filter(|(_, label)| group_hit || label.to_lowercase().contains(&q)).collect();
+                if shown.is_empty() {
+                    continue;
+                }
+                any = true;
+                let nested = pages.len() > 1;
+                if nested {
+                    ui.add_space(4.0);
+                    ui.strong(*group);
+                }
+                for (section, label) in shown {
+                    ui.horizontal(|ui| {
+                        if nested {
+                            ui.add_space(10.0);
+                        }
+                        if ui.selectable_label(self.section == *section, *label).clicked() {
+                            self.section = *section;
+                        }
+                    });
+                }
+            }
+            if !any {
+                ui.weak("No page matches");
             }
         });
     }
-    if let Some(i) = remove {
-        rules.categories.remove(i);
-    }
-    if ui.button("Add category rule").clicked() {
-        rules.categories.push(Default::default());
-    }
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.label("Name template");
-        ui.add(egui::TextEdit::singleline(&mut rules.name_template).hint_text("{Manufacturer}_{MPN}").desired_width(240.0));
-    });
-    ui.weak(format!("Placeholders: {}. Empty means just the MPN.", TEMPLATE_FIELDS.iter().map(|f| format!("{{{f}}}")).collect::<Vec<_>>().join(" ")));
-    ui.horizontal(|ui| {
-        ui.label("MPN case");
-        for (case, label) in [(MpnCase::Keep, "Keep"), (MpnCase::Upper, "UPPER"), (MpnCase::Lower, "lower")] {
-            ui.selectable_value(&mut rules.mpn_case, case, label);
-        }
-    });
-    ui.weak(format!("Example: {}", rules.name(&[("MPN", "Lm358n"), ("Manufacturer", "TI"), ("Package", "DIP-8")])));
-    *rules != before
 }

@@ -6,3 +6,9 @@
 mod harness;
 mod screens;
 mod bugs;
+mod kit;
+mod settings;
+mod shell;
+mod search;
+mod other_tabs;
+mod library;

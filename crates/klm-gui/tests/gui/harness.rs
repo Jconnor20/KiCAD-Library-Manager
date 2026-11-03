@@ -39,6 +39,7 @@ const FOOTPRINT: &str = r#"(module FP (layer F.Cu) (tedit 5A02FF57)
 pub const PARTS: [(&str, &str, &str); 3] = [("LM358", "Texas Instruments", "ICs"), ("RP2040", "Raspberry Pi", "ICs"), ("RC0603FR-0710KL", "Yageo", "Resistors")];
 
 /// Holds the lock that serialises the tests (they share one sandbox) and the sandbox's paths.
+#[allow(dead_code)] // paths for tests that need them; most only hold the lock
 pub struct Env {
     _guard: MutexGuard<'static, ()>,
     pub dir: PathBuf,
@@ -180,6 +181,7 @@ pub fn with_probe(h: &mut Gui) {
     h.run_ok();
 }
 
+#[allow(dead_code)] // debugging aid: print it to see what a test can click
 /// Every named node on screen as `role "label" rect`, for working out what a test can click.
 pub fn dump(h: &Gui) -> String {
     use egui_kittest::kittest::NodeT;

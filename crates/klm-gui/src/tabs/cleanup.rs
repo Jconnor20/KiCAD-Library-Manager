@@ -1,6 +1,7 @@
+use super::ui_kit::{self, Col, Level, Sort};
 use crate::AppCtx;
-use eframe::egui::{self, RichText};
-use klm_core::cleanup::{self, Action, Entry, IssueKind, Kind, Move, Report};
+use eframe::egui;
+use klm_core::cleanup::{self, Action, Entry, Issue, IssueKind, Kind, Move, Report};
 use klm_core::kicad_env;
 use std::path::PathBuf;
 
@@ -77,62 +78,103 @@ impl CleanupTab {
             self.projects.remove(i);
         }
         ui.weak("Shows what is wrong in your global and project library tables. \"Unused\" only means none of the chosen projects use a library; check your other projects before removing it.");
+        let (mut apply, mut discard) = (false, false);
+        if !self.queue.is_empty() {
+            egui::Panel::bottom("cleanup_queue").resizable(false).show(ui, |ui| {
+                ui.strong("Changes to apply");
+                match &self.preview {
+                    Some(Ok((lines, warnings))) => {
+                        lines.iter().for_each(|l| {
+                            ui.label(l);
+                        });
+                        warnings.iter().for_each(|w| {
+                            ui.colored_label(Level::Warn.color(ui.visuals()), w);
+                        });
+                    }
+                    Some(Err(e)) => {
+                        ui.colored_label(Level::Error.color(ui.visuals()), e);
+                    }
+                    None => {}
+                }
+                let running = kicad_env::kicad_running();
+                if running {
+                    ui.colored_label(Level::Warn.color(ui.visuals()), "KiCad is open and would overwrite these changes. Close it to apply.");
+                }
+                ui.horizontal(|ui| {
+                    apply = ui.add_enabled(!running, egui::Button::new("Apply (a backup of each table is made first)")).clicked();
+                    discard = ui.button("Discard").clicked();
+                });
+            });
+        }
+        if apply {
+            self.apply(cx);
+        }
+        if discard {
+            self.queue.clear();
+            self.preview = None;
+        }
         let Some(report) = &self.report else { return };
+        for e in &report.errors {
+            ui.colored_label(Level::Error.color(ui.visuals()), e);
+        }
+        for c in &report.other_configs {
+            ui.weak(format!("Not scanned (another KiCad version): {}", c.display()));
+        }
+        let rows: Vec<(usize, bool, &Issue)> = (0..report.entries.len())
+            .flat_map(|i| report.issues_of(i).enumerate().map(move |(n, x)| (i, n == 0, x)))
+            .collect();
+        ui.weak(format!("{} libraries, {} project(s) searched, {} problem(s) found", report.entries.len(), report.projects.len(), rows.len()));
         let mut want: Option<Action> = None;
         let mut move_of: Option<usize> = None;
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            for e in &report.errors {
-                ui.colored_label(ui.visuals().error_fg_color, e);
-            }
-            for c in &report.other_configs {
-                ui.weak(format!("Not scanned (another KiCad version): {}", c.display()));
-            }
-            ui.weak(format!("{} libraries, {} project(s) searched", report.entries.len(), report.projects.len()));
-            for (i, e) in report.entries.iter().enumerate() {
-                let issues: Vec<_> = report.issues_of(i).collect();
-                if issues.is_empty() {
-                    continue;
+        let cols = [Col::new("Library", 170.0).no_sort(), Col::new("Problem", 90.0).no_sort(), Col::rest("Detail").no_sort(), Col::new("Fix", 260.0).no_sort()];
+        ui_kit::table(ui, "cleanup", &cols, &mut Sort { col: usize::MAX, asc: true }, rows.len(), |n, row| {
+            let (i, first, x) = rows[n];
+            let e = &report.entries[i];
+            row.col(|ui| {
+                if first {
+                    ui.strong(tag(e)).on_hover_text(format!("{} in {}", e.uri, e.table.display()));
                 }
-                ui.separator();
+            });
+            row.col(|ui| {
+                let (label, level) = match x.kind {
+                    IssueKind::Broken => ("Broken", Level::Error),
+                    IssueKind::Unverifiable => ("Can't check", Level::Info),
+                    IssueKind::Unused => ("Unused?", Level::Warn),
+                    IssueKind::Duplicate => ("Duplicate", Level::Warn),
+                };
+                ui_kit::badge(ui, label, level);
+            });
+            row.col(|ui| {
+                ui.label(&x.message).on_hover_text(&x.message);
+            });
+            row.col(|ui| {
                 ui.horizontal(|ui| {
-                    ui.strong(tag(e));
-                    ui.weak(format!("{} in {}", e.uri, e.table.display()));
-                });
-                for x in issues {
-                    let (label, bad) = match x.kind {
-                        IssueKind::Broken => ("Broken", true),
-                        IssueKind::Unverifiable => ("Can't check", false),
-                        IssueKind::Unused => ("Unused?", false),
-                        IssueKind::Duplicate => ("Duplicate", false),
-                    };
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(label).color(if bad { ui.visuals().error_fg_color } else { ui.visuals().warn_fg_color }));
-                        ui.label(&x.message);
-                    });
-                }
-                if let Some(why) = e.locked {
-                    ui.weak(format!("Can't be changed here: {why}"));
-                    continue;
-                }
-                let queued = self.queue.iter().any(|a| matches!(a, Action::Remove { table, name } | Action::FixPath { table, name, .. } if *table == e.table && *name == e.name));
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(!queued, egui::Button::new("Remove from table")).on_hover_text("Only the table entry goes; the library's files stay").clicked() {
+                    if !first {
+                        return;
+                    }
+                    if let Some(why) = e.locked {
+                        ui.weak("locked").on_hover_text(format!("Can't be changed here: {why}"));
+                        return;
+                    }
+                    let queued = self.queue.iter().any(|a| matches!(a, Action::Remove { table, name } | Action::FixPath { table, name, .. } if *table == e.table && *name == e.name));
+                    if queued {
+                        ui.weak("queued");
+                        return;
+                    }
+                    if ui.small_button("Remove").on_hover_text("Remove from table: only the table entry goes; the library's files stay").clicked() {
                         want = Some(Action::Remove { table: e.table.clone(), name: e.name.clone() });
                     }
-                    if ui.add_enabled(!queued, egui::Button::new("Fix path…")).clicked() {
+                    if ui.small_button("Fix path…").clicked() {
                         let picked = if e.kind == Kind::Symbol { rfd::FileDialog::new().add_filter("Symbol library", &["kicad_sym", "lib"]).pick_file() } else { rfd::FileDialog::new().pick_folder() };
                         if let Some(new_path) = picked {
                             want = Some(Action::FixPath { table: e.table.clone(), name: e.name.clone(), new_path });
                         }
                     }
-                    if e.kind == Kind::Symbol && e.path.as_ref().is_some_and(|p| p.is_file()) && ui.button("Move into KLM…").clicked() {
+                    if e.kind == Kind::Symbol && e.path.as_ref().is_some_and(|p| p.is_file()) && ui.small_button("Move into KLM…").clicked() {
                         move_of = Some(i);
                     }
-                    if queued {
-                        ui.weak("queued");
-                    }
                 });
-            }
+            });
         });
         if let Some(a) = want {
             self.queue.push(a);
@@ -150,37 +192,6 @@ impl CleanupTab {
                 _ => cx.log.push("Set up a global library in Settings first.".into()),
             }
         }
-        if !self.queue.is_empty() {
-            ui.separator();
-            ui.strong("Changes to apply");
-            match &self.preview {
-                Some(Ok((lines, warnings))) => {
-                    lines.iter().for_each(|l| {
-                        ui.label(l);
-                    });
-                    warnings.iter().for_each(|w| {
-                        ui.colored_label(ui.visuals().warn_fg_color, w);
-                    });
-                }
-                Some(Err(e)) => {
-                    ui.colored_label(ui.visuals().error_fg_color, e);
-                }
-                None => {}
-            }
-            let running = kicad_env::kicad_running();
-            if running {
-                ui.colored_label(ui.visuals().warn_fg_color, "KiCad is open and would overwrite these changes. Close it to apply.");
-            }
-            ui.horizontal(|ui| {
-                if ui.add_enabled(!running, egui::Button::new("Apply (a backup of each table is made first)")).clicked() {
-                    self.apply(cx);
-                }
-                if ui.button("Discard").clicked() {
-                    self.queue.clear();
-                    self.preview = None;
-                }
-            });
-        }
     }
 
     pub fn dialogs(&mut self, cx: &mut AppCtx) {
@@ -189,7 +200,7 @@ impl CleanupTab {
         egui::Window::new(format!("Move {name} into KLM")).collapsible(false).show(&cx.ctx.clone(), |ui| {
             ui.label(mv.plan.to_string());
             for c in &mv.caveats {
-                ui.colored_label(ui.visuals().warn_fg_color, c);
+                ui.colored_label(Level::Warn.color(ui.visuals()), c);
             }
             ui.weak("This copies the library into KLM. The old table entry and its files stay as they are; remove the entry afterwards if the copy is complete.");
             ui.horizontal(|ui| {

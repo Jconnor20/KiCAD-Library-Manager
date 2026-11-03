@@ -7,6 +7,7 @@ use crate::Tab;
 use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::Queryable;
 
+#[allow(unused_macros)] // no known bug open right now; kept for the next one
 macro_rules! bug {
     ($cond:expr, $($msg:tt)+) => {
         assert!($cond, "KNOWN BUG {}", format!($($msg)+))
@@ -19,39 +20,24 @@ fn select(h: &mut Gui, mpn: &str) {
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
-fn b1_settings_key_fields_are_at_least_300px_wide() {
-    let _env = setup();
-    for size in SIZES {
-        let mut h = app(size, Tab::Library);
-        click(&mut h, "Settings…");
-        let widths: Vec<f32> = h.query_all_by_role(Role::PasswordInput).map(|n| n.rect().width()).collect();
-        assert!(!widths.is_empty(), "no key fields found");
-        bug!(widths.iter().all(|w| *w >= 300.0), "W7: key field widths at {size:?}: {widths:?}");
-    }
-}
-
-#[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b2_alternatives_window_stays_on_its_tab() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     click(&mut h, "Alternatives…");
     assert!(h.query_by_label("Alternatives and duplicates").is_some(), "Alternatives did not open");
-    click(&mut h, "History");
-    bug!(h.query_by_label("Alternatives and duplicates").is_none(), "Alternatives window is still shown on the History tab");
+    super::shell::goto(&mut h, Tab::History);
+    assert!(h.query_by_label("Alternatives and duplicates").is_none(), "Alternatives window is still shown on the History tab");
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b2_preview_window_stays_on_its_tab() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     select(&mut h, "RP2040");
     click(&mut h, "Preview");
     assert!(h.query_by_label("Preview: RP2040").is_some(), "Preview did not open");
-    click(&mut h, "History");
-    bug!(h.query_by_label("Preview: RP2040").is_none(), "Preview window is still shown on the History tab");
+    super::shell::goto(&mut h, Tab::History);
+    assert!(h.query_by_label("Preview: RP2040").is_none(), "Preview window is still shown on the History tab");
 }
 
 /// Everything the Search tab draws that matters must sit inside the window, and the log may take 25% at most.
@@ -79,7 +65,7 @@ fn b3_search_header_is_not_clipped_at_both_sizes() {
         let mut h = app(size, Tab::Search);
         with_probe(&mut h);
         let search = h.get_all_by_label("Search").last().unwrap().rect();
-        let top = h.get_by_label("Relink libraries").rect().max.y;
+        let top = h.get_by_label("Choose project…").rect().max.y;
         assert!(search.min.y > top && search.max.y <= size.1, "Search box misplaced at {size:?}: {search:?}");
         assert_nothing_clipped(&h, size, "Search");
     }
@@ -90,6 +76,7 @@ fn b3_library_header_is_not_clipped_at_both_sizes() {
     let _env = setup();
     for size in SIZES {
         let mut h = app(size, Tab::Library);
+        settle(&mut h);
         assert_nothing_clipped(&h, size, "Library");
         let table = h.get_by_label("RP2040").rect();
         assert!(table.max.y <= size.1 * 0.75, "first table row hidden behind the log at {size:?}: {table:?}");
@@ -97,62 +84,61 @@ fn b3_library_header_is_not_clipped_at_both_sizes() {
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b4_search_sidebar_icons_have_glyphs() {
     let _env = setup();
     for size in SIZES {
         let mut h = app(size, Tab::Search);
         with_probe(&mut h);
         settle(&mut h);
+        // The side list starts closed on narrow windows (W7.4).
+        if h.query_by_label("Recently imported").is_none() {
+            click(&mut h, "Saved & recent");
+        }
         assert!(h.query_by_label("Recently imported").is_some(), "side list missing");
         let missing = missing_glyphs(&h);
-        bug!(missing.is_empty(), "W7: Search at {size:?} draws {missing:?} as empty boxes (star buttons, sort arrows)");
+        assert!(missing.is_empty(), " Search at {size:?} draws {missing:?} as empty boxes (star buttons, sort arrows)");
     }
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b4b_library_table_has_no_tofu() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     settle(&mut h);
     let missing = missing_glyphs(&h);
-    bug!(missing.is_empty(), "W7: the Library table draws {missing:?} as empty boxes (the ✔ cells, sort arrows)");
+    assert!(missing.is_empty(), " the Library table draws {missing:?} as empty boxes (the ✔ cells, sort arrows)");
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b4c_settings_has_no_tofu() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     click(&mut h, "Settings…");
     let missing = missing_glyphs(&h);
-    bug!(missing.is_empty(), "W7: Settings draws {missing:?} as an empty box (the show/hide-key button)");
+    assert!(missing.is_empty(), " Settings draws {missing:?} as an empty box (the show/hide-key button)");
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b5_alternatives_opens_on_the_selected_part() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
+    settle(&mut h);
     select(&mut h, "RC0603FR-0710KL");
     click(&mut h, "Alternatives…");
     settle(&mut h);
     let shown = h.get_by_role_and_label(Role::ComboBox, "For part").value().unwrap_or_default();
-    // Control: the box is readable, and today it holds the first part.
-    assert!(shown.contains("LM358"), "cannot read the 'For part' box: {shown:?}");
-    bug!(shown.contains("RC0603FR-0710KL"), "W7: Alternatives' 'For part' box shows {shown:?}, not the selected RC0603FR-0710KL");
+    assert!(shown.contains("RC0603FR-0710KL"), "Alternatives' 'For part' box shows {shown:?}, not the selected RC0603FR-0710KL");
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b6_missing_sim_model_is_not_flagged_like_a_real_gap() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     settle(&mut h);
     let col = h.get_by_label("Sim model").rect().min.x;
-    let flagged = h.query_all_by_label("missing").filter(|n| (n.rect().min.x - col).abs() < 3.0).count();
-    bug!(flagged == 0, "W7: {flagged} rows show a 'missing' sim model, though sim models are optional (drawn orange like a real gap)");
+    let in_col = |label: &str| h.query_all_by_label(label).filter(|n| (n.rect().min.x - col).abs() < 3.0).count();
+    assert_eq!(in_col("missing"), 0, "rows show a 'missing' sim model, though sim models are optional");
+    assert_eq!(in_col("—"), 3, "an absent sim model should read '—'");
 }
 
 #[test]
