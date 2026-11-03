@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.104"
-klm-core = { version = "0.1.0", path = "../klm-core" }
+klm-core = { path = "../klm-core" }
 serde_json = "1.0.154"
 
 [dev-dependencies]

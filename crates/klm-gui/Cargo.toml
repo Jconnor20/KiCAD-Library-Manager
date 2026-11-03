@@ -14,6 +14,6 @@ dirs = "7.0.0"
 eframe = "0.37.0"
 egui_extras = { version = "0.37.0", features = ["svg", "image", "file"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
-klm-core = { version = "0.1.0", path = "../klm-core" }
+klm-core = { path = "../klm-core" }
 open = "5.4.5"
 rfd = "0.17.2"

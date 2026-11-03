@@ -10,7 +10,7 @@
       "name": "Library Manager",
       "description": "Open KiCad Library Manager for this project",
       "show-button": true,
-      "scopes": ["pcb"],
+      "scopes": ["pcb", "schematic"],
       "entrypoint": "launch.py",
       "icons-light": ["klm-24.png"],
       "icons-dark": ["klm-24.png"]
