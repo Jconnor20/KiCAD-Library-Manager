@@ -89,7 +89,8 @@ fn b3_search_header_is_not_clipped_at_both_sizes() {
 fn b3_library_header_is_not_clipped_at_both_sizes() {
     let _env = setup();
     for size in SIZES {
-        let h = app(size, Tab::Library);
+        let mut h = app(size, Tab::Library);
+        settle(&mut h);
         assert_nothing_clipped(&h, size, "Library");
         let table = h.get_by_label("RP2040").rect();
         assert!(table.max.y <= size.1 * 0.75, "first table row hidden behind the log at {size:?}: {table:?}");
@@ -128,28 +129,26 @@ fn b4c_settings_has_no_tofu() {
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b5_alternatives_opens_on_the_selected_part() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
+    settle(&mut h);
     select(&mut h, "RC0603FR-0710KL");
     click(&mut h, "Alternatives…");
     settle(&mut h);
     let shown = h.get_by_role_and_label(Role::ComboBox, "For part").value().unwrap_or_default();
-    // Control: the box is readable, and today it holds the first part.
-    assert!(shown.contains("LM358"), "cannot read the 'For part' box: {shown:?}");
-    bug!(shown.contains("RC0603FR-0710KL"), "W7: Alternatives' 'For part' box shows {shown:?}, not the selected RC0603FR-0710KL");
+    assert!(shown.contains("RC0603FR-0710KL"), "Alternatives' 'For part' box shows {shown:?}, not the selected RC0603FR-0710KL");
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b6_missing_sim_model_is_not_flagged_like_a_real_gap() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     settle(&mut h);
     let col = h.get_by_label("Sim model").rect().min.x;
-    let flagged = h.query_all_by_label("missing").filter(|n| (n.rect().min.x - col).abs() < 3.0).count();
-    bug!(flagged == 0, "W7: {flagged} rows show a 'missing' sim model, though sim models are optional (drawn orange like a real gap)");
+    let in_col = |label: &str| h.query_all_by_label(label).filter(|n| (n.rect().min.x - col).abs() < 3.0).count();
+    assert_eq!(in_col("missing"), 0, "rows show a 'missing' sim model, though sim models are optional");
+    assert_eq!(in_col("—"), 3, "an absent sim model should read '—'");
 }
 
 #[test]

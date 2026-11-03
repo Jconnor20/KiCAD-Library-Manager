@@ -11,6 +11,10 @@ use klm_core::preview::{self, Kind, Sources};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+/// A thumbnail's size when there is room (the Library window); a narrower host such as the import dialog gets smaller ones.
+pub const THUMB: Vec2 = Vec2::new(240.0, 180.0);
+const ZOOM: Vec2 = Vec2::new(THUMB.x * 3.0 + 16.0, 300.0);
+
 const KINDS: [(Kind, &str); 3] = [(Kind::Symbol, "Symbol"), (Kind::Footprint, "Footprint"), (Kind::Model, "3D")];
 
 enum Slot {
@@ -100,8 +104,9 @@ impl PreviewPanel {
     pub fn window(&mut self, ctx: &egui::Context, title: &str) -> bool {
         let mut open = true;
         egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.set_width(460.0);
-            self.show(ui);
+            ui.set_width(ZOOM.x);
+            // The zoomed picture must not push the window off a small screen.
+            egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 90.0).max(200.0)).show(ui, |ui| self.show(ui));
         });
         open
     }
@@ -121,13 +126,15 @@ impl PreviewPanel {
         if let Ok(issues) = self.issues_rx.try_recv() {
             self.issues = Some(issues);
         }
+        let w = ((ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0).clamp(140.0, THUMB.x).floor();
+        let thumb = Vec2::new(w, (w * 0.75).floor());
         ui.horizontal(|ui| {
             for (i, (kind, label)) in KINDS.iter().enumerate() {
                 ui.vertical(|ui| {
                     let mut picked = None;
                     if i == 0 && self.symbols.len() > 1 {
                         let shown = self.symbol.clone().unwrap_or_default();
-                        egui::ComboBox::from_id_salt("symbol_pick").selected_text(shown).width(140.0).show_ui(ui, |ui| {
+                        egui::ComboBox::from_id_salt("symbol_pick").selected_text(shown).width(thumb.x).show_ui(ui, |ui| {
                             for name in &self.symbols {
                                 if ui.selectable_label(self.symbol.as_ref() == Some(name), name).clicked() {
                                     picked = Some(name.clone());
@@ -140,7 +147,7 @@ impl PreviewPanel {
                     if let Some(name) = picked.filter(|n| self.symbol.as_ref() != Some(n)) {
                         self.pick_symbol(name);
                     }
-                    if slot(ui, &self.slots[i], *kind, Vec2::new(140.0, 105.0)) {
+                    if slot(ui, &self.slots[i], *kind, thumb) {
                         self.zoomed = if self.zoomed == Some(i) { None } else { Some(i) };
                     }
                 });
@@ -148,7 +155,7 @@ impl PreviewPanel {
         });
         if let Some(i) = self.zoomed {
             ui.add_space(4.0);
-            if slot(ui, &self.slots[i], KINDS[i].0, Vec2::new(440.0, 300.0)) {
+            if slot(ui, &self.slots[i], KINDS[i].0, Vec2::new(ui.available_width().min(ZOOM.x), ZOOM.y)) {
                 self.zoomed = None;
             }
         }

@@ -70,6 +70,39 @@ pub fn show(batch: &mut Option<BatchDialog>, ctx: &egui::Context) -> Option<Plan
     None
 }
 
+/// The dry-run dialog for work that isn't a `batch::Plan` (standardise, restyle, export): a heading per item with
+/// its lines under it, and whatever `extra` adds above the buttons. `Some(true)` is Apply, `Some(false)` Cancel.
+pub fn review(ctx: &egui::Context, id: &str, title: &str, sections: &[(String, Vec<String>)], can_apply: bool, extra: impl FnOnce(&mut egui::Ui)) -> Option<bool> {
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::NULL.with(id)).show(ctx, |ui| {
+        ui.set_width(520.0);
+        ui.heading(title);
+        if sections.is_empty() {
+            ui.label("Nothing to do.");
+        }
+        egui::ScrollArea::vertical().max_height(340.0).auto_shrink([false, true]).show(ui, |ui| {
+            for (label, lines) in sections {
+                ui.add_space(4.0);
+                ui.label(RichText::new(label).strong());
+                for l in lines {
+                    ui.label(format!("    {l}"));
+                }
+            }
+        });
+        extra(ui);
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui.add_enabled(can_apply, egui::Button::new("Apply")).clicked() {
+                answer = Some(true);
+            }
+            if ui.button(if can_apply { "Cancel" } else { "Close" }).clicked() {
+                answer = Some(false);
+            }
+        });
+    });
+    answer.or(modal.should_close().then_some(false))
+}
+
 /// Applies `plan` on a worker, which reports back as `wrap(Progress)`.
 pub fn start(batch: &mut Option<BatchDialog>, plan: Plan, cx: &mut AppCtx, wrap: fn(Progress) -> AppMsg) {
     cx.busy = true;
