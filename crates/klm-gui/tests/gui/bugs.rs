@@ -7,6 +7,7 @@ use crate::Tab;
 use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::Queryable;
 
+#[allow(unused_macros)] // no known bug open right now; kept for the next one
 macro_rules! bug {
     ($cond:expr, $($msg:tt)+) => {
         assert!($cond, "KNOWN BUG {}", format!($($msg)+))
