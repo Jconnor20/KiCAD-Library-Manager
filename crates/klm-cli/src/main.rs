@@ -16,7 +16,7 @@ use std::process::ExitCode;
 const USAGE: &str = "usage:
   klm-cli check [--json] [--deep] [--project <dir>]
   klm-cli relink [--project <dir>]
-  klm-cli history [--project <dir>]
+  klm-cli history [--json] [--project <dir>]
   klm-cli rollback <id> [--project <dir>]
   klm-cli standardise [--project <dir>] [--dry-run]
   klm-cli health [--json | --csv] [--project <dir>]
@@ -27,7 +27,7 @@ const USAGE: &str = "usage:
 enum Command {
     Check { json: bool, deep: bool, project: Option<PathBuf> },
     Relink { project: Option<PathBuf> },
-    History { project: Option<PathBuf> },
+    History { json: bool, project: Option<PathBuf> },
     Rollback { id: String, project: Option<PathBuf> },
     Standardise { project: Option<PathBuf>, dry_run: bool },
     Health { json: bool, csv: bool, project: Option<PathBuf> },
@@ -75,11 +75,12 @@ fn parse(args: &[String]) -> Result<Command> {
             }
         }
         "history" | "rollback" => {
-            only_for(category.is_none() && to.is_none() && !overwrite && !json && !deep && !dry_run, "that option")?;
+            only_for(category.is_none() && to.is_none() && !overwrite && !deep && !dry_run, "that option")?;
             if name == "history" {
                 only_for(zips.is_empty(), "that argument")?;
-                Ok(Command::History { project })
+                Ok(Command::History { json, project })
             } else {
+                only_for(!json, "--json")?;
                 // The positional argument is the snapshot id here, not a ZIP.
                 only_for(zips.len() <= 1, "more than one snapshot id")?;
                 let id = zips.pop().context("rollback needs a snapshot id from `history`")?;
@@ -255,12 +256,22 @@ fn relink(project: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-fn history(project: Option<&Path>) -> Result<()> {
+fn history(json: bool, project: Option<&Path>) -> Result<()> {
+    let mut out = vec![];
     for root in roots(&settings()?, project)? {
-        println!("{}", root.dir.display());
-        for s in snapshot::list(&root) {
-            println!("  {}  {:>9} bytes  {}", s.id, s.bytes, s.label);
+        let list = snapshot::list(&root);
+        if json {
+            let snaps: Vec<_> = list.iter().map(|s| json!({ "id": s.id, "kind": s.kind_name(), "version": s.version, "bytes": s.bytes, "label": s.label, "time": s.ts })).collect();
+            out.push(json!({ "library": root.dir.display().to_string(), "snapshots": snaps }));
+        } else {
+            println!("{}", root.dir.display());
+            for s in list {
+                println!("  {}  {:<8}  {:>9} bytes  {}", s.id, s.kind_name(), s.bytes, s.label);
+            }
         }
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&out)?);
     }
     Ok(())
 }
@@ -336,7 +347,7 @@ fn main() -> ExitCode {
     let result = parse(&args).and_then(|cmd| match cmd {
         Command::Check { json, deep, project } => check(json, deep, project.as_deref()),
         Command::Relink { project } => relink(project.as_deref()).map(|_| ExitCode::SUCCESS),
-        Command::History { project } => history(project.as_deref()).map(|_| ExitCode::SUCCESS),
+        Command::History { json, project } => history(json, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Rollback { id, project } => rollback(&id, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Standardise { project, dry_run } => standardise(project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
         Command::Health { json, csv, project } => health(json, csv, project),
@@ -367,7 +378,9 @@ mod tests {
         assert_eq!(parse(&args("relink --project D:/p")).unwrap(), Command::Relink { project: Some("D:/p".into()) });
         assert_eq!(parse(&args("health --csv --project D:/p")).unwrap(), Command::Health { json: false, csv: true, project: Some("D:/p".into()) });
         assert!(parse(&args("health --csv --json")).is_err() && parse(&args("check --csv")).is_err());
-        assert_eq!(parse(&args("history")).unwrap(), Command::History { project: None });
+        assert_eq!(parse(&args("history")).unwrap(), Command::History { json: false, project: None });
+        assert_eq!(parse(&args("history --json")).unwrap(), Command::History { json: true, project: None });
+        assert!(parse(&args("rollback 0001 --json")).is_err());
         assert_eq!(parse(&args("rollback 0001 --project D:/p")).unwrap(), Command::Rollback { id: "0001".into(), project: Some("D:/p".into()) });
         assert!(parse(&args("rollback")).is_err());
         assert_eq!(parse(&args("standardise --dry-run --project D:/p")).unwrap(), Command::Standardise { project: Some("D:/p".into()), dry_run: true });
