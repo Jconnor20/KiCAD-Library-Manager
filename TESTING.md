@@ -11,7 +11,7 @@ These have passed automated tests but haven't been checked by hand in the app or
 
 ## KiCad integration
 
-- [ ] **Install the toolbar plugin.** In KiCad: *Plugin and Content Manager → Install from File…*, then pick `dist\klm-pcm-0.2.0.zip`. Expect it to install with no "metadata" error.
+- [ ] **Install the toolbar plugin.** In KiCad: *Plugin and Content Manager → Install from File…*, then pick `dist\klm-pcm-0.3.0.zip`. Expect it to install with no "metadata" error.
 - [ ] **Toolbar button.** Open a board in the PCB editor (KiCad's API must be on: *Preferences → Plugins*) and click **Library Manager**. Expect KLM to open with that board's project already chosen.
 - [ ] **New category library.** Import a part into a new category while KiCad is open. Expect no close-KiCad prompt, and "N pending" in the top bar. After you reopen KiCad, the new `KLM_<Category>` library is in the symbol chooser.
 - [ ] **Placed part is complete.** Place an imported part from KiCad's symbol chooser. Expect its footprint to be assigned, the 3D viewer to show its model, and *Show datasheet* to open the local PDF.
@@ -127,6 +127,28 @@ Do this one last, and on a copy if you're nervous. History can roll it back.
   - "Make minor" and "Delete" work on a version.
 - [ ] **Responsiveness.** Alternatives on a large library, and Standards Dry run and Apply, keep the window responsive.
 - [ ] **Log.** **Clear** empties the log, and **Copy** pastes every line.
+
+## Wave 5
+
+- [ ] **Browse by category** (needs DigiKey/Nexar keys). Pick a category from each source and expect filtered results. Thumbnails, including JPEGs, should render. Hover the CAD icons on an LCSC part.
+- [ ] **Restyle symbol.**
+  - Restyle a resistor, LED, NPN and IC box. Place each one in KiCad 10 and check the pin numbers match the footprint pads, including K/A and B/C/E.
+  - The Reference and Value text on IC boxes shouldn't overlap.
+  - History undoes the restyle.
+  - A MOSFET is refused with a reason.
+- [ ] **Restyle on import.** Turn on the house-symbols setting and import a resistor. Expect it to arrive restyled. A refused part keeps its vendor symbol and a note.
+- [ ] **Alternatives online.**
+  - In Library → Alternatives…, find equivalents for a 10k 0603 and add one. Expect `MPN_Alt1` and the supplier fields in the symbol.
+  - Try "Add and import CAD…" and the hand-entered form, and check the panel's layout.
+- [ ] **Clean up.**
+  - With KiCad closed, run `klm-cli cleanup` against your real config and read the findings for false "broken" ones.
+  - Do a `--remove` or `--fix`, first without `--apply`, then with it. Check the table and its `.klm-cleanup-*.bak` backup.
+  - On the Clean up tab, check the scan, queue, preview, Apply and the "KiCad is open" warning.
+  - Run "Move into KLM" on a symbol library and expect its footprints to come too.
+- [ ] **KiCad open.** With KiCad open, run Relink, Change location… and a rollback. Close KiCad and check the tables are right after the next re-check.
+- [ ] **Attach ZIPs.** Attach a footprint-only ZIP and then a model-only ZIP to a part from the Library tab.
+- [ ] **History kinds.** Run `klm-cli history` and `klm-cli history --json`. Expect each snapshot shown as minor, named or interval.
+- [ ] **MOQ.** In LCSC and Nexar search results, check the MOQ and pack size columns are filled.
 
 ## Already verified
 

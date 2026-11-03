@@ -4,16 +4,44 @@ A running list of what each merged work package left undone, cut short or made r
 
 ---
 
+## Wave 5
+
+### W5.1 Search by part type
+- **Category APIs never called live.** The Nexar `supCategories`/`category_id` query and DigiKey's `CategoryFilter` search with an empty keyword follow the docs but are untested.
+- **Mouser has no category browsing.** It's assumed to have no category list; not checked against its docs.
+- **CAD icons** are known ahead of import only for LCSC/EasyEDA parts. Nothing ever shows a SPICE model.
+- **No LCSC thumbnails.** The image field in LCSC's search reply is unknown.
+
+### W5.2 House-style symbols
+- **Wires can come loose.** Restyling moves pins, so schematics already using the symbol may need wires fixed.
+- **Refused kinds:** MOSFETs, Zener/TVS/Schottky diodes, polarised caps, batteries, thermistors, multi-unit symbols, `extends` and power symbols.
+- **No KiCad-open check on the Library-tab button** (the CLI has one). This matches the Edit action.
+- **Not handled:** two visible pins stacked on one point. Templates aren't editable.
+- **Tests:** one test briefly turns on the import setting and could race another importing test. The tests use KiCad's installed Device/Transistor_BJT libraries, and skip without KiCad.
+
+### W5.3 Alternatives beyond the library
+- **Equivalents are matched as text,** so "0.1uF" won't match "100nF". This is marked `shortcut:` in the code.
+- The search fixture was written by hand, not captured live.
+
+### W5.4 Clean up existing KiCad libraries
+- **Only the newest KiCad version's config is scanned.** Older ones are listed as "not scanned".
+- **Footprint-only libraries can't be moved into KLM.**
+- **Path rules from memory.** How it resolves env vars, text variables and relative project paths comes from Opus's memory of how KiCad does it, not from KiCad's source.
+
+### W5.5 Rest of W4.5
+- **KiCad open:** rollback, move-global and relink apply at once and queue their table edits in `pending-tables.json`. The queue is replayed after KiCad closes, but only when the GUI next re-checks. A table edit made outside KLM in between is overwritten. Never tried with real KiCad.
+- **`klm-cli import`** that adds libraries still refuses while KiCad is open.
+
 ## Wave 4.5
 
-- **Symbol-less ZIPs.** A footprint-only or 3D-only ZIP still fails with "part has no symbol file" unless an Import dialog for the same MPN is open. Attaching it to an existing part isn't built yet (W5.5).
+- ~~**Symbol-less ZIPs.** Attaching a footprint-only or 3D-only ZIP to an existing part isn't built yet.~~ Fixed in W5.5: Attach… takes them. Importing one on its own still fails with "part has no symbol file" unless an Import dialog for the same MPN is open.
 - **STL models.** These are attached with a warning. Whether KiCad's 3D viewer shows them isn't confirmed.
 - **Formats still untested on real files:** EasyEDA, and Altium files outside Ultra Librarian ZIPs.
-- **KiCad open.** New libraries are written while KiCad runs and re-checked when it closes. Rollback, move-global, relink and old `${KLM_LIB}` path rewrites still ask you to close KiCad. It isn't known whether KiCad picks up a table edited while it runs.
+- **KiCad open.** New libraries are written while KiCad runs and re-checked when it closes. ~~Rollback, move-global and relink still ask you to close KiCad~~ (queued since W5.5). Old `${KLM_LIB}` path rewrites still ask you to close KiCad. It isn't known whether KiCad picks up a table edited while it runs.
 - **Watcher.** It only sees ZIPs saved after the app starts, or after the folder list changes.
 - **Search.**
   - Availability icons show what is known before import, not what the import will find.
-  - LCSC and Nexar MOQ and pack fields aren't filled.
+  - ~~LCSC and Nexar MOQ and pack fields aren't filled.~~ Fixed in W5.5.
   - The DigiKey `StandardPackage` field name is untested.
 - **Datasheet finder.** With no distributor source enabled, it can only retry existing links. Search results are used only when their MPN matches the part's.
 - **History.**

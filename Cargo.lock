@@ -2212,7 +2212,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "klm-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "klm-core",
@@ -2222,7 +2222,7 @@ dependencies = [
 
 [[package]]
 name = "klm-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2236,7 +2236,7 @@ dependencies = [
 
 [[package]]
 name = "klm-gui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "dirs",

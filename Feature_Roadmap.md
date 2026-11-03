@@ -186,13 +186,16 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
 - [x] **W4.5.7 History:** automatic minors (count and size cap), named majors, and auto-versions at a regular interval.
 - [x] **W4.5.8 Rough edges:** Alternatives and Standards run off the UI thread, the log has Clear and Copy, and labels are consistent.
 
-## Wave 5: Features from the Wave 4 review
+## Wave 5: Features from the Wave 4 review (5 in parallel, ships 0.3.0)
 
-- [ ] **W5.1 Search by part type, with images:** browse and filter by category using the DigiKey/Mouser/Nexar category APIs, show thumbnails, and check what a part has (symbol, footprint, 3D, SPICE) before import.
-- [ ] **W5.2 House-style symbols:** generate consistent symbols for each class (R, C, L, diodes, LEDs, transistors, IC boxes) from templates, whatever the source, mapping pins from the imported symbol.
-- [ ] **W5.3 Alternatives beyond the library:** search distributors for equivalents, define alternates by hand, and import them.
-- [ ] **W5.4 Clean up existing KiCad libraries:** scan every global and project library, report duplicates, broken entries and unused libraries, then remove or fix each one, or move it into KLM.
-- [ ] **W5.5 Rest of W4.5:**
+- [x] **W5.1 Search by part type, with images:** browse and filter by category using the DigiKey/Mouser/Nexar category APIs, show thumbnails, and check what a part has (symbol, footprint, 3D, SPICE) before import.
+  - Built: "Browse by category" for DigiKey and Nexar (Mouser has no category list), cached for 7 days. Thumbnails are cached in `thumbs/`, and CAD icons are known ahead of import only for LCSC/EasyEDA.
+- [x] **W5.2 House-style symbols:** generate consistent symbols for each class (R, C, L, diodes, LEDs, transistors, IC boxes) from templates, whatever the source, mapping pins from the imported symbol.
+  - Built: `symbols/` restyles R, C, L, diode, LED, NPN, PNP and IC box, refusing whenever a pin can't be placed with certainty. Available as "Restyle symbol", `klm-cli restyle`, and an opt-in import setting. Templates aren't editable in Settings.
+- [x] **W5.3 Alternatives beyond the library:** search distributors for equivalents, define alternates by hand, and import them.
+- [x] **W5.4 Clean up existing KiCad libraries:** scan every global and project library, report duplicates, broken entries and unused libraries, then remove or fix each one, or move it into KLM.
+  - Built: `cleanup.rs`, a "Clean up" tab, and `klm-cli cleanup`, which only previews unless you pass `--apply`. Every table is backed up first and library files are never deleted.
+- [x] **W5.5 Rest of W4.5:**
   - attach footprint-only or 3D-only ZIPs to an existing part
   - make rollback, move-global and relink safe while KiCad is open
   - LCSC/Nexar MOQ fields
