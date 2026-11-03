@@ -92,6 +92,7 @@ impl Item {
                     match root.add_part(part, category, *overwrite) {
                         Ok(new_lib) => {
                             notes.push(format!("Imported {} into {nick}", part.mpn));
+                            notes.extend(crate::symbols::take_note());
                             if new_lib {
                                 notes.push(format!("Added library {nick} to KiCad"));
                             }

@@ -6,7 +6,7 @@
 // TODO(W3.3): apply the naming rules from `rules.rs` here once they are merged.
 
 mod footprint;
-mod symbol;
+pub(crate) mod symbol;
 
 use crate::convert::easyeda::geom::fmt;
 use crate::kicad_env::write_atomic;

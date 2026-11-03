@@ -132,6 +132,7 @@ impl LibraryRoot {
             self.attach_sim(&mut symbol, sim, mpn)?;
         }
 
+        crate::symbols::restyle_imported(cat, &mut symbol);
         merge_symbol(&self.symbol_lib(cat), &vendor_lib, symbol)
     }
 }

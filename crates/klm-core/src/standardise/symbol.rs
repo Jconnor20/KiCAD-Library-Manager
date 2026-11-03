@@ -6,7 +6,7 @@ use crate::sexpr::Sexpr;
 const GRAPHICS: &[&str] = &["rectangle", "polyline", "circle", "arc", "bezier"];
 
 /// Applies the symbol rules to one top-level symbol and says what changed.
-pub(super) fn fix(sym: &mut Sexpr, r: &Rules) -> Vec<String> {
+pub(crate) fn fix(sym: &mut Sexpr, r: &Rules) -> Vec<String> {
     let mut out = vec![];
     out.extend(r.symbol_text_size.and_then(|s| text_size(sym, s)));
     out.extend(r.pin_length_min.and_then(|l| pin_length(sym, l)));
@@ -116,7 +116,7 @@ fn body(sym: &Sexpr) -> Option<(f64, f64, f64, f64)> {
     bbox(&pts)
 }
 
-fn field_positions(sym: &mut Sexpr) -> Option<String> {
+pub(crate) fn field_positions(sym: &mut Sexpr) -> Option<String> {
     let (x0, y0, x1, y1) = body(sym)?;
     let cx = (x0 + x1) / 2.0;
     let mut moved = vec![];

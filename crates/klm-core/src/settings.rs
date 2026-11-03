@@ -23,6 +23,8 @@ pub struct Settings {
     pub rules: crate::rules::Rules,
     /// Which standardise rules run, and their values; KLC's when unset.
     pub standards: crate::standardise::Rules,
+    /// Redraw imported symbols in the house style of their class (see `symbols`); off unless asked for.
+    pub house_symbols_on_import: bool,
     /// How long distributor search results are reused, in minutes; unset is a day, 0 turns the cache off.
     pub cache_ttl_minutes: Option<u64>,
     /// Default shipping region (ISO country, e.g. "DE") for BOM stock and prices; a project can override it.
