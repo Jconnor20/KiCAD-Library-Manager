@@ -84,6 +84,8 @@ pub(crate) fn parse_search(body: &Value, query: &str) -> Vec<Part> {
                 supplier_ids: vec![("LCSC".into(), s(c, "componentCode"))],
                 datasheet_url: datasheet.unwrap_or_default(),
                 package: s(c, "componentSpecificationEn"),
+                // `componentImageUrl` is usually empty; the OSS links are signed and expire after 30 minutes.
+                image_url: [s(c, "minImageAccessIdUrl"), s(c, "componentImageUrl")].into_iter().find(|u| !u.is_empty()).unwrap_or_default(),
                 stock: c["stockCount"].as_u64(),
                 moq: c["minPurchaseNum"].as_u64().filter(|&n| n > 0),
                 pack_qty: c["encapsulationNumber"].as_u64().filter(|&n| n > 0),
@@ -176,6 +178,20 @@ mod tests {
         assert_eq!((p.moq, p.pack_qty), (Some(1), Some(3400)));
         assert!(p.stock.is_some() && p.unit_price.starts_with('$') && p.unit_price.contains(" @1"));
         assert!(p.datasheet_url.starts_with("https://") && p.category_hint.contains("Microcontrollers"));
+    }
+
+    #[test]
+    fn live_search_reply_maps_every_field() {
+        let body: Value = serde_json::from_str(include_str!("../../tests/fixtures/live/jlcpcb_search_LM358.json")).unwrap();
+        let parts = parse_search(&body, "LM358");
+        let p = parts.iter().find(|p| p.supplier_ids[0].1 == "C5213").unwrap();
+        assert_eq!((p.mpn.as_str(), p.manufacturer.as_str(), p.package.as_str()), ("LM358P", "Texas Instruments", "DIP-8"));
+        assert_eq!((p.moq, p.pack_qty, p.stock, p.price_currency.as_str()), (Some(1), Some(50), Some(4), "USD"));
+        assert_eq!(p.price_breaks[..2], [(1, 0.2216), (50, 0.1716)]);
+        assert!(p.image_url.starts_with("https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/") && p.image_url.contains("C5213"), "{}", p.image_url);
+        assert_eq!(p.datasheet_url, "https://jlcpcb.com/api/file/downloadByFileSystemAccessId/8588905303245541376");
+        assert_eq!(p.category_hint, "Operational Amplifier Amplifiers/Comparators");
+        assert_eq!(p.lead_time_days, None, "the reply has no lead time");
     }
 
     #[test]

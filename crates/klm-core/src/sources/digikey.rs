@@ -205,6 +205,29 @@ mod tests {
         assert_eq!(p.supplier_ids, vec![("DigiKey".to_string(), "311-10.0KHRCT-ND".to_string())]);
     }
 
+    // Recorded from the live API (W6.1).
+    #[test]
+    fn live_keyword_reply_maps_every_field() {
+        let parts = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/digikey_search_LM358.json")).unwrap());
+        let p = parts.iter().find(|p| p.mpn == "LM358DT").unwrap();
+        assert_eq!((p.manufacturer.as_str(), p.package.as_str(), p.packaging.as_str()), ("STMicroelectronics", "8-SOIC (0.154\", 3.90mm Width)", "Tape & Reel (TR)"));
+        assert_eq!((p.stock, p.moq, p.pack_qty, p.lead_time_days), (Some(76865), Some(2500), Some(2500), Some(30 * 7)));
+        assert_eq!(p.price_breaks[..2], [(2500, 0.08508), (5000, 0.08225)]);
+        assert_eq!(p.supplier_ids, [("DigiKey".to_string(), "497-1591-2-ND".to_string())]);
+        assert!(p.datasheet_url.starts_with("https://www.st.com/") && p.image_url.starts_with("https://mm.digikey.com/"));
+        assert!(p.category_hint.starts_with("Integrated Circuits (ICs)"), "{}", p.category_hint);
+        // Tubes have no StandardPackage, so the pack size stays unknown rather than wrong.
+        let tube = parts.iter().find(|p| p.mpn == "LM358P").unwrap();
+        assert_eq!((tube.moq, tube.pack_qty, tube.packaging.as_str()), (Some(1), None, "Tube"));
+    }
+
+    #[test]
+    fn live_category_filtered_reply_parses() {
+        let parts = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/digikey_search_category.json")).unwrap());
+        assert_eq!(parts.len(), 3);
+        assert!(parts.iter().all(|p| p.category_hint.starts_with("Resistors")), "{:?}", parts.iter().map(|p| &p.category_hint).collect::<Vec<_>>());
+    }
+
     #[test]
     fn price_text_carries_the_real_currency() {
         let t = coded_price("$0.1 @1", "CAD");

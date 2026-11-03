@@ -1,0 +1,1561 @@
+{
+  "AppliedParametricFiltersDto": [],
+  "FilterOptions": {
+    "Manufacturers": [
+      {
+        "Id": 5503,
+        "ProductCount": 19,
+        "Value": "3PEAK"
+      },
+      {
+        "Id": 4900,
+        "ProductCount": 9,
+        "Value": "3RLab, Inc."
+      },
+      {
+        "Id": 1528,
+        "ProductCount": 9,
+        "Value": "Adafruit Industries LLC"
+      },
+      {
+        "Id": 5433,
+        "ProductCount": 31,
+        "Value": "AEM, Inc."
+      },
+      {
+        "Id": 4680,
+        "ProductCount": 2,
+        "Value": "AideTek"
+      },
+      {
+        "Id": 600470,
+        "ProductCount": 378,
+        "Value": "Aillen"
+      },
+      {
+        "Id": 1284,
+        "ProductCount": 1,
+        "Value": "American Technical Ceramics"
+      },
+      {
+        "Id": 505,
+        "ProductCount": 100,
+        "Value": "Analog Devices Inc."
+      },
+      {
+        "Id": 175,
+        "ProductCount": 49,
+        "Value": "Analog Devices Inc./Maxim Integrated"
+      },
+      {
+        "Id": 600261,
+        "ProductCount": 582,
+        "Value": "ARCOL"
+      },
+      {
+        "Id": 6650,
+        "ProductCount": 4983,
+        "Value": "ATE Electronics s.r.l."
+      },
+      {
+        "Id": 118,
+        "ProductCount": 18362,
+        "Value": "Bourns Inc."
+      },
+      {
+        "Id": 4506,
+        "ProductCount": 4394,
+        "Value": "C&B/RESI"
+      },
+      {
+        "Id": 683,
+        "ProductCount": 392,
+        "Value": "Caddock Electronics Inc."
+      },
+      {
+        "Id": 4713,
+        "ProductCount": 15276,
+        "Value": "Cal-Chip Electronics, Inc."
+      },
+      {
+        "Id": 60,
+        "ProductCount": 8490,
+        "Value": "CTS Resistor Products"
+      },
+      {
+        "Id": 603,
+        "ProductCount": 1,
+        "Value": "Delta Electronics"
+      },
+      {
+        "Id": 2037,
+        "ProductCount": 566,
+        "Value": "Delta Electronics/Cyntec"
+      },
+      {
+        "Id": 283,
+        "ProductCount": 631,
+        "Value": "Eaton - Electronics Division"
+      },
+      {
+        "Id": 602025,
+        "ProductCount": 2,
+        "Value": "Electrocube"
+      },
+      {
+        "Id": 602448,
+        "ProductCount": 148,
+        "Value": "ETM"
+      },
+      {
+        "Id": 3584,
+        "ProductCount": 1,
+        "Value": "Formosa Microsemi Co., Ltd."
+      },
+      {
+        "Id": 601570,
+        "ProductCount": 4,
+        "Value": "Honeywell"
+      },
+      {
+        "Id": 480,
+        "ProductCount": 34,
+        "Value": "Honeywell Sensing and Productivity Solutions"
+      },
+      {
+        "Id": 1566,
+        "ProductCount": 1,
+        "Value": "Honeywell Sensing and Productivity Solutions T&M"
+      },
+      {
+        "Id": 4423,
+        "ProductCount": 1042,
+        "Value": "Isabellenhuette USA"
+      },
+      {
+        "Id": 2315,
+        "ProductCount": 21365,
+        "Value": "Kamaya Inc."
+      },
+      {
+        "Id": 399,
+        "ProductCount": 1,
+        "Value": "KEMET"
+      },
+      {
+        "Id": 36,
+        "ProductCount": 8,
+        "Value": "Keystone Electronics"
+      },
+      {
+        "Id": 2019,
+        "ProductCount": 321575,
+        "Value": "KOA Speer Electronics, Inc."
+      },
+      {
+        "Id": 478,
+        "ProductCount": 459,
+        "Value": "KYOCERA AVX"
+      },
+      {
+        "Id": 18,
+        "ProductCount": 5549,
+        "Value": "Littelfuse Inc."
+      },
+      {
+        "Id": 4491,
+        "ProductCount": 1029,
+        "Value": "Lumimax Optoelectronic Technology"
+      },
+      {
+        "Id": 1465,
+        "ProductCount": 5,
+        "Value": "MACOM Technology Solutions"
+      },
+      {
+        "Id": 2997,
+        "ProductCount": 2653,
+        "Value": "Meritek"
+      },
+      {
+        "Id": 5934,
+        "ProductCount": 65,
+        "Value": "Miba Resistors"
+      },
+      {
+        "Id": 1033,
+        "ProductCount": 4,
+        "Value": "Micro-Measurements (Division of Vishay Precision Group)"
+      },
+      {
+        "Id": 5705,
+        "ProductCount": 4750,
+        "Value": "Milliohm Electronics"
+      },
+      {
+        "Id": 811,
+        "ProductCount": 108,
+        "Value": "Murata Power Solutions Inc."
+      },
+      {
+        "Id": 3372,
+        "ProductCount": 8,
+        "Value": "NextGen Components"
+      },
+      {
+        "Id": 601926,
+        "ProductCount": 61,
+        "Value": "NIC Components"
+      },
+      {
+        "Id": 4835,
+        "ProductCount": 347,
+        "Value": "NIC Components Corp"
+      },
+      {
+        "Id": 273,
+        "ProductCount": 14598,
+        "Value": "Ohmite"
+      },
+      {
+        "Id": 600464,
+        "ProductCount": 36,
+        "Value": "Panasonic"
+      },
+      {
+        "Id": 10,
+        "ProductCount": 81098,
+        "Value": "Panasonic Industry"
+      },
+      {
+        "Id": 5994,
+        "ProductCount": 62,
+        "Value": "PCN"
+      },
+      {
+        "Id": 5440,
+        "ProductCount": 112,
+        "Value": "Prosperity Dielectrics Co. Ltd"
+      },
+      {
+        "Id": 4855,
+        "ProductCount": 3732,
+        "Value": "RCD Components"
+      },
+      {
+        "Id": 696,
+        "ProductCount": 2506,
+        "Value": "Riedon products by Bourns"
+      },
+      {
+        "Id": 846,
+        "ProductCount": 19778,
+        "Value": "Rohm Semiconductor"
+      },
+      {
+        "Id": 1276,
+        "ProductCount": 9161,
+        "Value": "Samsung Electro-Mechanics"
+      },
+      {
+        "Id": 4367,
+        "ProductCount": 4,
+        "Value": "SETsafe | SETfuse"
+      },
+      {
+        "Id": 1882,
+        "ProductCount": 2,
+        "Value": "SICK, Inc."
+      },
+      {
+        "Id": 3258,
+        "ProductCount": 1,
+        "Value": "SimpleChips"
+      },
+      {
+        "Id": 4378,
+        "ProductCount": 4,
+        "Value": "Songtian Electronic Technology (HK) Limited"
+      },
+      {
+        "Id": 1568,
+        "ProductCount": 11,
+        "Value": "SparkFun Electronics"
+      },
+      {
+        "Id": 738,
+        "ProductCount": 221743,
+        "Value": "Stackpole Electronics Inc"
+      },
+      {
+        "Id": 408,
+        "ProductCount": 37830,
+        "Value": "Susumu"
+      },
+      {
+        "Id": 994,
+        "ProductCount": 308,
+        "Value": "TE Connectivity"
+      },
+      {
+        "Id": 844,
+        "ProductCount": 12,
+        "Value": "TE Connectivity Aerospace, Defense and Marine"
+      },
+      {
+        "Id": 17,
+        "ProductCount": 153,
+        "Value": "TE Connectivity AMP Connectors"
+      },
+      {
+        "Id": 223,
+        "ProductCount": 110,
+        "Value": "TE Connectivity Measurement Specialties"
+      },
+      {
+        "Id": 1712,
+        "ProductCount": 60380,
+        "Value": "TE Connectivity Passive Product"
+      },
+      {
+        "Id": 41,
+        "ProductCount": 661,
+        "Value": "TE Connectivity Potter & Brumfield Relays"
+      },
+      {
+        "Id": 484,
+        "ProductCount": 6,
+        "Value": "TE Connectivity Raychem Cable Protection"
+      },
+      {
+        "Id": 4075,
+        "ProductCount": 1,
+        "Value": "Tecdia Inc."
+      },
+      {
+        "Id": 6322,
+        "ProductCount": 210,
+        "Value": "Tepro-Vamistor"
+      },
+      {
+        "Id": 296,
+        "ProductCount": 54,
+        "Value": "Texas Instruments"
+      },
+      {
+        "Id": 4463,
+        "ProductCount": 723,
+        "Value": "Thin Film Technology Corp."
+      },
+      {
+        "Id": 602463,
+        "ProductCount": 186,
+        "Value": "Thunder Components Ltd."
+      },
+      {
+        "Id": 987,
+        "ProductCount": 13669,
+        "Value": "TT Electronics/BI"
+      },
+      {
+        "Id": 1575,
+        "ProductCount": 14,
+        "Value": "TT Electronics/BI Magnetics"
+      },
+      {
+        "Id": 989,
+        "ProductCount": 661,
+        "Value": "TT Electronics/IRC"
+      },
+      {
+        "Id": 985,
+        "ProductCount": 1344,
+        "Value": "TT Electronics/Welwyn"
+      },
+      {
+        "Id": 1173,
+        "ProductCount": 27,
+        "Value": "TTM Technologies, Inc."
+      },
+      {
+        "Id": 2679,
+        "ProductCount": 2389,
+        "Value": "Venkel"
+      },
+      {
+        "Id": 2577,
+        "ProductCount": 36651,
+        "Value": "Viking Tech"
+      },
+      {
+        "Id": 2056,
+        "ProductCount": 19,
+        "Value": "Visaton GmbH & Co. KG"
+      },
+      {
+        "Id": 749,
+        "ProductCount": 37041,
+        "Value": "Vishay"
+      },
+      {
+        "Id": 4353,
+        "ProductCount": 8,
+        "Value": "Vishay Barry"
+      },
+      {
+        "Id": 56,
+        "ProductCount": 15481,
+        "Value": "Vishay Beyschlag/Draloric/BC Components"
+      },
+      {
+        "Id": 541,
+        "ProductCount": 429845,
+        "Value": "Vishay Dale"
+      },
+      {
+        "Id": 764,
+        "ProductCount": 69086,
+        "Value": "Vishay Dale Thin Film"
+      },
+      {
+        "Id": 909,
+        "ProductCount": 4197,
+        "Value": "Vishay Electro-Films"
+      },
+      {
+        "Id": 274,
+        "ProductCount": 467,
+        "Value": "Vishay Huntington Electric Inc."
+      },
+      {
+        "Id": 716,
+        "ProductCount": 48565,
+        "Value": "Vishay Sfernice"
+      },
+      {
+        "Id": 3579,
+        "ProductCount": 777,
+        "Value": "Vishay Techno"
+      },
+      {
+        "Id": 3964,
+        "ProductCount": 87,
+        "Value": "Vitrohm"
+      },
+      {
+        "Id": 804,
+        "ProductCount": 40898,
+        "Value": "VPG Foil Resistors"
+      },
+      {
+        "Id": 2946,
+        "ProductCount": 1,
+        "Value": "WAGO Corporation"
+      },
+      {
+        "Id": 1292,
+        "ProductCount": 11013,
+        "Value": "Walsin Technology Corporation"
+      },
+      {
+        "Id": 2266,
+        "ProductCount": 367,
+        "Value": "WEC"
+      },
+      {
+        "Id": 281,
+        "ProductCount": 2,
+        "Value": "Weidmüller"
+      },
+      {
+        "Id": 5977,
+        "ProductCount": 5,
+        "Value": "Wieland-Werke AG"
+      },
+      {
+        "Id": 732,
+        "ProductCount": 566,
+        "Value": "Würth Elektronik"
+      },
+      {
+        "Id": 13,
+        "ProductCount": 210767,
+        "Value": "YAGEO"
+      },
+      {
+        "Id": 311,
+        "ProductCount": 674,
+        "Value": "Yageo America"
+      }
+    ]
+  },
+  "Products": [
+    {
+      "BackOrderNotAllowed": false,
+      "BaseProductNumber": {
+        "Id": 603871,
+        "Name": "ERJ-2GE"
+      },
+      "Category": {
+        "CategoryId": 2,
+        "ChildCategories": [
+          {
+            "CategoryId": 52,
+            "ChildCategories": [],
+            "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/002/683/989/MFG_RMC%20SERIES_tmb%2864x64%29.jpg",
+            "Name": "Chip Resistor - Surface Mount",
+            "NewProductCount": 0,
+            "ParentId": 2,
+            "ProductCount": 0,
+            "SeoDescription": "Resistors provide opposition to current flow, in a manner that is proportional to the electric potential (voltage) imposed across them, and which is ideally unaffected by signal frequency or changes in temperature. Resistors described as surface mount chip types are designed to be affixed to the surface of a printed circuit board and incorporate a single resistor per device package."
+          }
+        ],
+        "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/002/639/316/FVT%20SERIES_tmb%2864x64%29.jpg",
+        "Name": "Resistors",
+        "NewProductCount": 0,
+        "ParentId": 0,
+        "ProductCount": 0,
+        "SeoDescription": "Products within this category include fixed-value (non-adjustable) resistors and related mounting accessories, organized according to their physical form factor or the method by which they are physically and electrically connected within an end application. Adjustable or variable-value resistors (also known as potentiometers or rheostats) are found separately, in a category of their own."
+      },
+      "Classifications": {
+        "ExportControlClassNumber": "EAR99",
+        "HtsusCode": "8533.21.0030",
+        "MoistureSensitivityLevel": "1  (Unlimited)",
+        "ReachStatus": "REACH Unaffected",
+        "RohsStatus": "ROHS3 Compliant"
+      },
+      "DatasheetUrl": "https://industrial.panasonic.com/ww/products/pt/general-purpose-chip-resistors/models/ERJ2GE0R00X",
+      "Description": {
+        "DetailedDescription": "0 Ohms Jumper Chip Resistor 0402 (1005 Metric) Automotive AEC-Q200 Thick Film",
+        "ProductDescription": "RES SMD 0 OHM JUMPER 1/10W 0402"
+      },
+      "Discontinued": false,
+      "EndOfLife": false,
+      "Manufacturer": {
+        "Id": 10,
+        "Name": "Panasonic Industry"
+      },
+      "ManufacturerLeadWeeks": "15",
+      "ManufacturerProductNumber": "ERJ-2GE0R00X",
+      "ManufacturerPublicQuantity": 0,
+      "Ncnr": false,
+      "NormallyStocking": true,
+      "OtherNames": [
+        "ERJ-2GEJ0R00X",
+        "P0.0JCT",
+        "ERJ2GE0R00",
+        "ERJ-2GE0R00",
+        "P0.0JTR-NDR",
+        "P0.0JDKR",
+        "P0.0JDKR-NDR",
+        "ERJ-2GEJ0R00",
+        "P0.0JCT-NDR",
+        "ERJ2GEJ0R00X",
+        "ERJ2GE0R00X",
+        "ERJ2GEJ0R00",
+        "P0.0JTR"
+      ],
+      "Parameters": [
+        {
+          "ParameterId": 2085,
+          "ParameterText": "Resistance",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "0 Ohms",
+          "ValueText": "0 Ohms"
+        },
+        {
+          "ParameterId": 3,
+          "ParameterText": "Tolerance",
+          "ParameterType": "String",
+          "ValueId": "362150",
+          "ValueText": "Jumper"
+        },
+        {
+          "ParameterId": 2,
+          "ParameterText": "Power (Watts)",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 174,
+          "ParameterText": "Composition",
+          "ParameterType": "String",
+          "ValueId": "411742",
+          "ValueText": "Thick Film"
+        },
+        {
+          "ParameterId": 5,
+          "ParameterText": "Features",
+          "ParameterType": "String",
+          "ValueId": "316914",
+          "ValueText": "Automotive AEC-Q200"
+        },
+        {
+          "ParameterId": 17,
+          "ParameterText": "Temperature Coefficient",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 252,
+          "ParameterText": "Operating Temperature",
+          "ParameterType": "String",
+          "ValueId": "242934",
+          "ValueText": "-55°C ~ 155°C"
+        },
+        {
+          "ParameterId": 16,
+          "ParameterText": "Package / Case",
+          "ParameterType": "String",
+          "ValueId": "39158",
+          "ValueText": "0402 (1005 Metric)"
+        },
+        {
+          "ParameterId": 1291,
+          "ParameterText": "Supplier Device Package",
+          "ParameterType": "String",
+          "ValueId": "39157",
+          "ValueText": "0402"
+        },
+        {
+          "ParameterId": 707,
+          "ParameterText": "Ratings",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 46,
+          "ParameterText": "Size / Dimension",
+          "ParameterType": "String",
+          "ValueId": "6310",
+          "ValueText": "0.039\" L x 0.020\" W (1.00mm x 0.50mm)"
+        },
+        {
+          "ParameterId": 1500,
+          "ParameterText": "Height - Seated (Max)",
+          "ParameterType": "String",
+          "ValueId": "4914",
+          "ValueText": "0.016\" (0.40mm)"
+        },
+        {
+          "ParameterId": 1127,
+          "ParameterText": "Number of Terminations",
+          "ParameterType": "Double",
+          "ValueId": "2",
+          "ValueText": "2"
+        },
+        {
+          "ParameterId": 1531,
+          "ParameterText": "Failure Rate",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        }
+      ],
+      "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/957/ERJ-PA2-Series.jpg",
+      "PrimaryVideoUrl": "",
+      "ProductStatus": {
+        "Id": 0,
+        "Status": "Active"
+      },
+      "ProductUrl": "https://www.digikey.com/en/products/detail/panasonic-industry/ERJ-2GE0R00X/146727",
+      "ProductVariations": [
+        {
+          "DigiKeyProductNumber": "P0.0JTR-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 10000,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 1,
+            "Name": "Tape & Reel (TR)"
+          },
+          "QuantityAvailableforPackageType": 14556377,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 10000,
+              "TotalPrice": 46.7,
+              "UnitPrice": 0.00467
+            },
+            {
+              "BreakQuantity": 20000,
+              "TotalPrice": 84.8,
+              "UnitPrice": 0.00424
+            },
+            {
+              "BreakQuantity": 30000,
+              "TotalPrice": 120.3,
+              "UnitPrice": 0.00401
+            },
+            {
+              "BreakQuantity": 50000,
+              "TotalPrice": 188.0,
+              "UnitPrice": 0.00376
+            },
+            {
+              "BreakQuantity": 70000,
+              "TotalPrice": 252.0,
+              "UnitPrice": 0.0036
+            },
+            {
+              "BreakQuantity": 100000,
+              "TotalPrice": 346.0,
+              "UnitPrice": 0.00346
+            }
+          ],
+          "Supplier": {
+            "Id": 10,
+            "Name": "Panasonic Industry"
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "P0.0JCT-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 2,
+            "Name": "Cut Tape (CT)"
+          },
+          "QuantityAvailableforPackageType": 14556377,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.1,
+              "UnitPrice": 0.1
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 0.15,
+              "UnitPrice": 0.015
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 0.31,
+              "UnitPrice": 0.0124
+            },
+            {
+              "BreakQuantity": 50,
+              "TotalPrice": 0.55,
+              "UnitPrice": 0.011
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 0.95,
+              "UnitPrice": 0.0095
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 2.01,
+              "UnitPrice": 0.00804
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 3.53,
+              "UnitPrice": 0.00706
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 6.25,
+              "UnitPrice": 0.00625
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 24.0,
+              "UnitPrice": 0.0048
+            }
+          ],
+          "Supplier": {
+            "Id": 10,
+            "Name": "Panasonic Industry"
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "P0.0JDKR-ND",
+          "DigiReelFee": 7.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 243,
+            "Name": "Digi-Reel®"
+          },
+          "QuantityAvailableforPackageType": 14556377,
+          "StandardPackage": 1,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.1,
+              "UnitPrice": 0.1
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 0.15,
+              "UnitPrice": 0.015
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 0.31,
+              "UnitPrice": 0.0124
+            },
+            {
+              "BreakQuantity": 50,
+              "TotalPrice": 0.55,
+              "UnitPrice": 0.011
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 0.95,
+              "UnitPrice": 0.0095
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 2.01,
+              "UnitPrice": 0.00804
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 3.53,
+              "UnitPrice": 0.00706
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 6.25,
+              "UnitPrice": 0.00625
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 24.0,
+              "UnitPrice": 0.0048
+            }
+          ],
+          "Supplier": {
+            "Id": 10,
+            "Name": "Panasonic Industry"
+          },
+          "TariffActive": true
+        }
+      ],
+      "QuantityAvailable": 14556377,
+      "Series": {
+        "Id": 88686,
+        "Name": "ERJ-2G"
+      },
+      "UnitPrice": 0.1
+    },
+    {
+      "BackOrderNotAllowed": false,
+      "BaseProductNumber": {
+        "Id": 469342,
+        "Name": "RK73H1E"
+      },
+      "Category": {
+        "CategoryId": 2,
+        "ChildCategories": [
+          {
+            "CategoryId": 52,
+            "ChildCategories": [],
+            "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/002/683/989/MFG_RMC%20SERIES_tmb%2864x64%29.jpg",
+            "Name": "Chip Resistor - Surface Mount",
+            "NewProductCount": 0,
+            "ParentId": 2,
+            "ProductCount": 0,
+            "SeoDescription": "Resistors provide opposition to current flow, in a manner that is proportional to the electric potential (voltage) imposed across them, and which is ideally unaffected by signal frequency or changes in temperature. Resistors described as surface mount chip types are designed to be affixed to the surface of a printed circuit board and incorporate a single resistor per device package."
+          }
+        ],
+        "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/002/639/316/FVT%20SERIES_tmb%2864x64%29.jpg",
+        "Name": "Resistors",
+        "NewProductCount": 0,
+        "ParentId": 0,
+        "ProductCount": 0,
+        "SeoDescription": "Products within this category include fixed-value (non-adjustable) resistors and related mounting accessories, organized according to their physical form factor or the method by which they are physically and electrically connected within an end application. Adjustable or variable-value resistors (also known as potentiometers or rheostats) are found separately, in a category of their own."
+      },
+      "Classifications": {
+        "ExportControlClassNumber": "EAR99",
+        "HtsusCode": "8533.21.0030",
+        "MoistureSensitivityLevel": "1  (Unlimited)",
+        "ReachStatus": "REACH Unaffected",
+        "RohsStatus": "ROHS3 Compliant"
+      },
+      "DatasheetUrl": "https://www.koaspeer.com/pdfs/RK73H.pdf",
+      "Description": {
+        "DetailedDescription": "10 kOhms ±1% 0.1W, 1/10W Chip Resistor 0402 (1005 Metric) Automotive AEC-Q200 Thick Film",
+        "ProductDescription": "RES 10K OHM 1% 1/10W 0402"
+      },
+      "Discontinued": false,
+      "EndOfLife": false,
+      "Manufacturer": {
+        "Id": 2019,
+        "Name": "KOA Speer Electronics, Inc."
+      },
+      "ManufacturerLeadWeeks": "7",
+      "ManufacturerProductNumber": "RK73H1ETTP1002F",
+      "ManufacturerPublicQuantity": 0,
+      "Ncnr": false,
+      "NormallyStocking": true,
+      "OtherNames": [
+        "2019-RK73H1ETTP1002FTR",
+        "2019-RK73H1ETTP1002FCT",
+        "2019-RK73H1ETTP1002FDKR"
+      ],
+      "Parameters": [
+        {
+          "ParameterId": 2085,
+          "ParameterText": "Resistance",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "10 kOhms",
+          "ValueText": "10 kOhms"
+        },
+        {
+          "ParameterId": 3,
+          "ParameterText": "Tolerance",
+          "ParameterType": "String",
+          "ValueId": "1131",
+          "ValueText": "±1%"
+        },
+        {
+          "ParameterId": 2,
+          "ParameterText": "Power (Watts)",
+          "ParameterType": "String",
+          "ValueId": "14064",
+          "ValueText": "0.1W, 1/10W"
+        },
+        {
+          "ParameterId": 174,
+          "ParameterText": "Composition",
+          "ParameterType": "String",
+          "ValueId": "411742",
+          "ValueText": "Thick Film"
+        },
+        {
+          "ParameterId": 5,
+          "ParameterText": "Features",
+          "ParameterType": "String",
+          "ValueId": "316914",
+          "ValueText": "Automotive AEC-Q200"
+        },
+        {
+          "ParameterId": 17,
+          "ParameterText": "Temperature Coefficient",
+          "ParameterType": "String",
+          "ValueId": "1378",
+          "ValueText": "±100ppm/°C"
+        },
+        {
+          "ParameterId": 252,
+          "ParameterText": "Operating Temperature",
+          "ParameterType": "String",
+          "ValueId": "242934",
+          "ValueText": "-55°C ~ 155°C"
+        },
+        {
+          "ParameterId": 16,
+          "ParameterText": "Package / Case",
+          "ParameterType": "String",
+          "ValueId": "39158",
+          "ValueText": "0402 (1005 Metric)"
+        },
+        {
+          "ParameterId": 1291,
+          "ParameterText": "Supplier Device Package",
+          "ParameterType": "String",
+          "ValueId": "39157",
+          "ValueText": "0402"
+        },
+        {
+          "ParameterId": 707,
+          "ParameterText": "Ratings",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 46,
+          "ParameterText": "Size / Dimension",
+          "ParameterType": "String",
+          "ValueId": "6310",
+          "ValueText": "0.039\" L x 0.020\" W (1.00mm x 0.50mm)"
+        },
+        {
+          "ParameterId": 1500,
+          "ParameterText": "Height - Seated (Max)",
+          "ParameterType": "String",
+          "ValueId": "4914",
+          "ValueText": "0.016\" (0.40mm)"
+        },
+        {
+          "ParameterId": 1127,
+          "ParameterText": "Number of Terminations",
+          "ParameterType": "Double",
+          "ValueId": "2",
+          "ValueText": "2"
+        },
+        {
+          "ParameterId": 1531,
+          "ParameterText": "Failure Rate",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        }
+      ],
+      "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/5572/MFG_RK73H1HTTCM12R7D.jpg",
+      "PrimaryVideoUrl": "",
+      "ProductStatus": {
+        "Id": 0,
+        "Status": "Active"
+      },
+      "ProductUrl": "https://www.digikey.com/en/products/detail/koa-speer-electronics-inc/RK73H1ETTP1002F/9844154",
+      "ProductVariations": [
+        {
+          "DigiKeyProductNumber": "2019-RK73H1ETTP1002FTR-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 10000,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 1,
+            "Name": "Tape & Reel (TR)"
+          },
+          "QuantityAvailableforPackageType": 11814615,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 10000,
+              "TotalPrice": 48.1,
+              "UnitPrice": 0.00481
+            },
+            {
+              "BreakQuantity": 20000,
+              "TotalPrice": 86.6,
+              "UnitPrice": 0.00433
+            },
+            {
+              "BreakQuantity": 30000,
+              "TotalPrice": 122.7,
+              "UnitPrice": 0.00409
+            },
+            {
+              "BreakQuantity": 50000,
+              "TotalPrice": 191.5,
+              "UnitPrice": 0.00383
+            },
+            {
+              "BreakQuantity": 70000,
+              "TotalPrice": 258.3,
+              "UnitPrice": 0.00369
+            },
+            {
+              "BreakQuantity": 100000,
+              "TotalPrice": 355.0,
+              "UnitPrice": 0.00355
+            }
+          ],
+          "Supplier": {
+            "Id": 2019,
+            "Name": "KOA Speer Electronics, Inc."
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "2019-RK73H1ETTP1002FCT-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 2,
+            "Name": "Cut Tape (CT)"
+          },
+          "QuantityAvailableforPackageType": 11815021,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.1,
+              "UnitPrice": 0.1
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 0.28,
+              "UnitPrice": 0.028
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 0.52,
+              "UnitPrice": 0.0208
+            },
+            {
+              "BreakQuantity": 50,
+              "TotalPrice": 0.84,
+              "UnitPrice": 0.0168
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 1.37,
+              "UnitPrice": 0.0137
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 2.66,
+              "UnitPrice": 0.01064
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 4.45,
+              "UnitPrice": 0.0089
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 7.55,
+              "UnitPrice": 0.00755
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 27.15,
+              "UnitPrice": 0.00543
+            }
+          ],
+          "Supplier": {
+            "Id": 2019,
+            "Name": "KOA Speer Electronics, Inc."
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "2019-RK73H1ETTP1002FDKR-ND",
+          "DigiReelFee": 7.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 243,
+            "Name": "Digi-Reel®"
+          },
+          "QuantityAvailableforPackageType": 11815021,
+          "StandardPackage": 1,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.1,
+              "UnitPrice": 0.1
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 0.28,
+              "UnitPrice": 0.028
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 0.52,
+              "UnitPrice": 0.0208
+            },
+            {
+              "BreakQuantity": 50,
+              "TotalPrice": 0.84,
+              "UnitPrice": 0.0168
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 1.37,
+              "UnitPrice": 0.0137
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 2.66,
+              "UnitPrice": 0.01064
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 4.45,
+              "UnitPrice": 0.0089
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 7.55,
+              "UnitPrice": 0.00755
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 27.15,
+              "UnitPrice": 0.00543
+            }
+          ],
+          "Supplier": {
+            "Id": 2019,
+            "Name": "KOA Speer Electronics, Inc."
+          },
+          "TariffActive": true
+        }
+      ],
+      "QuantityAvailable": 11815021,
+      "Series": {
+        "Id": 70124,
+        "Name": "RK73H"
+      },
+      "UnitPrice": 0.1
+    },
+    {
+      "BackOrderNotAllowed": false,
+      "BaseProductNumber": {
+        "Id": 469350,
+        "Name": "RK73Z1E"
+      },
+      "Category": {
+        "CategoryId": 2,
+        "ChildCategories": [
+          {
+            "CategoryId": 52,
+            "ChildCategories": [],
+            "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/002/683/989/MFG_RMC%20SERIES_tmb%2864x64%29.jpg",
+            "Name": "Chip Resistor - Surface Mount",
+            "NewProductCount": 0,
+            "ParentId": 2,
+            "ProductCount": 0,
+            "SeoDescription": "Resistors provide opposition to current flow, in a manner that is proportional to the electric potential (voltage) imposed across them, and which is ideally unaffected by signal frequency or changes in temperature. Resistors described as surface mount chip types are designed to be affixed to the surface of a printed circuit board and incorporate a single resistor per device package."
+          }
+        ],
+        "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/002/639/316/FVT%20SERIES_tmb%2864x64%29.jpg",
+        "Name": "Resistors",
+        "NewProductCount": 0,
+        "ParentId": 0,
+        "ProductCount": 0,
+        "SeoDescription": "Products within this category include fixed-value (non-adjustable) resistors and related mounting accessories, organized according to their physical form factor or the method by which they are physically and electrically connected within an end application. Adjustable or variable-value resistors (also known as potentiometers or rheostats) are found separately, in a category of their own."
+      },
+      "Classifications": {
+        "ExportControlClassNumber": "EAR99",
+        "HtsusCode": "8533.21.0030",
+        "MoistureSensitivityLevel": "1  (Unlimited)",
+        "ReachStatus": "REACH Unaffected",
+        "RohsStatus": "ROHS3 Compliant"
+      },
+      "DatasheetUrl": "https://www.koaspeer.com/pdfs/RK73Z.pdf",
+      "Description": {
+        "DetailedDescription": "0 Ohms Jumper Chip Resistor 0402 (1005 Metric) Automotive AEC-Q200, Moisture Resistant Thick Film",
+        "ProductDescription": "RES 0 OHM JUMPER 0402"
+      },
+      "Discontinued": false,
+      "EndOfLife": false,
+      "Manufacturer": {
+        "Id": 2019,
+        "Name": "KOA Speer Electronics, Inc."
+      },
+      "ManufacturerLeadWeeks": "7",
+      "ManufacturerProductNumber": "RK73Z1ETTP",
+      "ManufacturerPublicQuantity": 0,
+      "Ncnr": false,
+      "NormallyStocking": true,
+      "OtherNames": [
+        "3149-RK73Z1ETTPTR",
+        "2019-RK73Z1ETTPDKR",
+        "2019-RK73Z1ETTPTR",
+        "2019-RK73Z1ETTPCT"
+      ],
+      "Parameters": [
+        {
+          "ParameterId": 2085,
+          "ParameterText": "Resistance",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "0 Ohms",
+          "ValueText": "0 Ohms"
+        },
+        {
+          "ParameterId": 3,
+          "ParameterText": "Tolerance",
+          "ParameterType": "String",
+          "ValueId": "362150",
+          "ValueText": "Jumper"
+        },
+        {
+          "ParameterId": 2,
+          "ParameterText": "Power (Watts)",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 174,
+          "ParameterText": "Composition",
+          "ParameterType": "String",
+          "ValueId": "411742",
+          "ValueText": "Thick Film"
+        },
+        {
+          "ParameterId": 5,
+          "ParameterText": "Features",
+          "ParameterType": "String",
+          "ValueId": "316924",
+          "ValueText": "Automotive AEC-Q200, Moisture Resistant"
+        },
+        {
+          "ParameterId": 17,
+          "ParameterText": "Temperature Coefficient",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 252,
+          "ParameterText": "Operating Temperature",
+          "ParameterType": "String",
+          "ValueId": "242934",
+          "ValueText": "-55°C ~ 155°C"
+        },
+        {
+          "ParameterId": 16,
+          "ParameterText": "Package / Case",
+          "ParameterType": "String",
+          "ValueId": "39158",
+          "ValueText": "0402 (1005 Metric)"
+        },
+        {
+          "ParameterId": 1291,
+          "ParameterText": "Supplier Device Package",
+          "ParameterType": "String",
+          "ValueId": "39157",
+          "ValueText": "0402"
+        },
+        {
+          "ParameterId": 707,
+          "ParameterText": "Ratings",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 46,
+          "ParameterText": "Size / Dimension",
+          "ParameterType": "String",
+          "ValueId": "6310",
+          "ValueText": "0.039\" L x 0.020\" W (1.00mm x 0.50mm)"
+        },
+        {
+          "ParameterId": 1500,
+          "ParameterText": "Height - Seated (Max)",
+          "ParameterType": "String",
+          "ValueId": "4914",
+          "ValueText": "0.016\" (0.40mm)"
+        },
+        {
+          "ParameterId": 1127,
+          "ParameterText": "Number of Terminations",
+          "ParameterType": "Double",
+          "ValueId": "2",
+          "ValueText": "2"
+        },
+        {
+          "ParameterId": 1531,
+          "ParameterText": "Failure Rate",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        }
+      ],
+      "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/7210/MFG_2019_RK73Z_series.jpg",
+      "PrimaryVideoUrl": "",
+      "ProductStatus": {
+        "Id": 0,
+        "Status": "Active"
+      },
+      "ProductUrl": "https://www.digikey.com/en/products/detail/koa-speer-electronics-inc/RK73Z1ETTP/9844696",
+      "ProductVariations": [
+        {
+          "DigiKeyProductNumber": "2019-RK73Z1ETTPTR-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 10000,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 1,
+            "Name": "Tape & Reel (TR)"
+          },
+          "QuantityAvailableforPackageType": 9775460,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 10000,
+              "TotalPrice": 29.1,
+              "UnitPrice": 0.00291
+            },
+            {
+              "BreakQuantity": 20000,
+              "TotalPrice": 52.6,
+              "UnitPrice": 0.00263
+            },
+            {
+              "BreakQuantity": 30000,
+              "TotalPrice": 74.4,
+              "UnitPrice": 0.00248
+            },
+            {
+              "BreakQuantity": 50000,
+              "TotalPrice": 116.0,
+              "UnitPrice": 0.00232
+            },
+            {
+              "BreakQuantity": 70000,
+              "TotalPrice": 155.4,
+              "UnitPrice": 0.00222
+            },
+            {
+              "BreakQuantity": 100000,
+              "TotalPrice": 212.0,
+              "UnitPrice": 0.00212
+            }
+          ],
+          "Supplier": {
+            "Id": 2019,
+            "Name": "KOA Speer Electronics, Inc."
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "2019-RK73Z1ETTPCT-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 2,
+            "Name": "Cut Tape (CT)"
+          },
+          "QuantityAvailableforPackageType": 9775548,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.1,
+              "UnitPrice": 0.1
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 0.1,
+              "UnitPrice": 0.01
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 0.22,
+              "UnitPrice": 0.0088
+            },
+            {
+              "BreakQuantity": 50,
+              "TotalPrice": 0.38,
+              "UnitPrice": 0.0076
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 0.66,
+              "UnitPrice": 0.0066
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 1.37,
+              "UnitPrice": 0.00548
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 2.41,
+              "UnitPrice": 0.00482
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 4.26,
+              "UnitPrice": 0.00426
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 16.2,
+              "UnitPrice": 0.00324
+            }
+          ],
+          "Supplier": {
+            "Id": 2019,
+            "Name": "KOA Speer Electronics, Inc."
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "2019-RK73Z1ETTPDKR-ND",
+          "DigiReelFee": 7.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 243,
+            "Name": "Digi-Reel®"
+          },
+          "QuantityAvailableforPackageType": 9775548,
+          "StandardPackage": 1,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.1,
+              "UnitPrice": 0.1
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 0.1,
+              "UnitPrice": 0.01
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 0.22,
+              "UnitPrice": 0.0088
+            },
+            {
+              "BreakQuantity": 50,
+              "TotalPrice": 0.38,
+              "UnitPrice": 0.0076
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 0.66,
+              "UnitPrice": 0.0066
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 1.37,
+              "UnitPrice": 0.00548
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 2.41,
+              "UnitPrice": 0.00482
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 4.26,
+              "UnitPrice": 0.00426
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 16.2,
+              "UnitPrice": 0.00324
+            }
+          ],
+          "Supplier": {
+            "Id": 2019,
+            "Name": "KOA Speer Electronics, Inc."
+          },
+          "TariffActive": true
+        }
+      ],
+      "QuantityAvailable": 9775548,
+      "Series": {
+        "Id": 70125,
+        "Name": "RK73Z"
+      },
+      "UnitPrice": 0.1
+    }
+  ],
+  "ProductsCount": 1791597,
+  "SearchLocaleUsed": {
+    "Currency": "USD",
+    "Language": "en",
+    "Site": "US"
+  }
+}

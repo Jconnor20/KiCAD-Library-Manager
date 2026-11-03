@@ -1,0 +1,17 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "extensions": {
+        "remote": {
+          "message": "You have exceeded your part limit of 10. Please upgrade your plan. Contact us at api@nexar.com for assistance."
+        },
+        "schemaName": "Supply"
+      },
+      "message": "You have exceeded your part limit of 10. Please upgrade your plan. Contact us at api@nexar.com for assistance."
+    }
+  ],
+  "extensions": {
+    "requestId": "8f9e1a21-87f0-4c0d-adc4-384630afbd97"
+  }
+}

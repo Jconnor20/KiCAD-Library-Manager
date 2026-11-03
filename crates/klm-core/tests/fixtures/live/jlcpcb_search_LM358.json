@@ -1,0 +1,1141 @@
+{
+  "code": 200,
+  "data": {
+    "basePart": null,
+    "brandList": [],
+    "componentPageInfo": {
+      "endRow": 0,
+      "hasNextPage": false,
+      "hasPreviousPage": false,
+      "isFirstPage": false,
+      "isLastPage": false,
+      "list": [
+        {
+          "allowPostFlag": true,
+          "assemblyComponentFlag": false,
+          "attributes": [
+            {
+              "attribute_name_en": "Operating Temperature",
+              "attribute_value_name": "0℃~+70℃"
+            },
+            {
+              "attribute_name_en": "Vos - Input Offset Voltage",
+              "attribute_value_name": "3mV"
+            },
+            {
+              "attribute_name_en": "Input Offset Current(Ios)",
+              "attribute_value_name": "2nA"
+            },
+            {
+              "attribute_name_en": "Output Current",
+              "attribute_value_name": "30mA"
+            },
+            {
+              "attribute_name_en": "Input Offset Voltage Drift(Vos TC)",
+              "attribute_value_name": "7uV/℃"
+            },
+            {
+              "attribute_name_en": "Gain Bandwidth Product",
+              "attribute_value_name": "700kHz"
+            },
+            {
+              "attribute_name_en": "Slew Rate",
+              "attribute_value_name": "300V/ms"
+            },
+            {
+              "attribute_name_en": "Single supply",
+              "attribute_value_name": "3V~32V"
+            },
+            {
+              "attribute_name_en": "Common Mode Rejection Ratio(CMRR)",
+              "attribute_value_name": "80dB"
+            },
+            {
+              "attribute_name_en": "Rail to Rail",
+              "attribute_value_name": "-"
+            },
+            {
+              "attribute_name_en": "Number of Channels",
+              "attribute_value_name": "2"
+            },
+            {
+              "attribute_name_en": "Input Voltage Noise Density",
+              "attribute_value_name": "40nV/√Hz@1kHz"
+            },
+            {
+              "attribute_name_en": "Quiescent Current",
+              "attribute_value_name": "700uA"
+            },
+            {
+              "attribute_name_en": "Features",
+              "attribute_value_name": "-"
+            },
+            {
+              "attribute_name_en": "Ib - Input Bias Current",
+              "attribute_value_name": "20nA"
+            },
+            {
+              "attribute_name_en": "Dual Supply",
+              "attribute_value_name": "-16V~-1.5V、1.5V~16V"
+            }
+          ],
+          "buyComponentPrices": [
+            {
+              "endNumber": 49,
+              "productPrice": 0.2135,
+              "startNumber": 1
+            },
+            {
+              "endNumber": 4999,
+              "productPrice": 0.1152,
+              "startNumber": 2500
+            },
+            {
+              "endNumber": -1,
+              "productPrice": 0.1117,
+              "startNumber": 5000
+            },
+            {
+              "endNumber": 149,
+              "productPrice": 0.1653,
+              "startNumber": 50
+            },
+            {
+              "endNumber": 499,
+              "productPrice": 0.1419,
+              "startNumber": 150
+            },
+            {
+              "endNumber": 2499,
+              "productPrice": 0.1209,
+              "startNumber": 500
+            }
+          ],
+          "canPresaleNumber": 2,
+          "componentAlternativesCode": null,
+          "componentBrandEn": "Texas Instruments",
+          "componentBrandHigh": null,
+          "componentCode": "C5213",
+          "componentCodeHigh": null,
+          "componentId": 5634,
+          "componentImageUrl": "",
+          "componentLibraryType": "expand",
+          "componentModelEn": "LM358P",
+          "componentModelHigh": "<span class='lucene_highlight_class'>LM358</span>P",
+          "componentName": "TI LM358P",
+          "componentNameEn": null,
+          "componentPrices": [
+            {
+              "endNumber": 49,
+              "productPrice": 0.2216,
+              "startNumber": 1
+            },
+            {
+              "endNumber": 149,
+              "productPrice": 0.1716,
+              "startNumber": 50
+            },
+            {
+              "endNumber": 499,
+              "productPrice": 0.1473,
+              "startNumber": 150
+            },
+            {
+              "endNumber": 2499,
+              "productPrice": 0.1255,
+              "startNumber": 500
+            },
+            {
+              "endNumber": 4999,
+              "productPrice": 0.1196,
+              "startNumber": 2500
+            },
+            {
+              "endNumber": -1,
+              "productPrice": 0.116,
+              "startNumber": 5000
+            }
+          ],
+          "componentProductType": 0,
+          "componentSource": "shop",
+          "componentSpecificationEn": "DIP-8",
+          "componentSpecificationHigh": null,
+          "componentTypeEn": "Operational Amplifier",
+          "dataManualFileAccessId": "",
+          "dataManualFileAccessIdUrl": null,
+          "dataManualOfficialLink": "http://www.ti.com/cn/lit/gpn/lm358",
+          "dataManualUrl": "https://jlcpcb.com/api/file/downloadByFileSystemAccessId/8588905303245541376",
+          "describe": "-16V~-1.5V、1.5V~16V 0℃~+70℃ 2 20nA 2nA 300V/ms 30mA 3V~32V 3mV 40nV/√Hz@1kHz 700kHz 700uA 7uV/℃ 80dB DIP-8 Operational Amplifier ROHS",
+          "encapsulationNumber": 50,
+          "erpComponentName": "双通道运算放大器 【插件】",
+          "estimateDate": null,
+          "firstSortAccessId": "e3e42cbeca794b379734d72eb85f2f43",
+          "firstSortName": "Operational Amplifier",
+          "fullReelPrice": null,
+          "idleFlag": null,
+          "imageList": [
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            }
+          ],
+          "initialPrice": 0.2216,
+          "isBuyComponent": "1",
+          "lcscGoodsUrl": "https://www.lcsc.com/product-detail/operational-amplifier_texas-instruments-lm358p_C5213.html",
+          "leastPatchNumber": 2,
+          "lossNumber": 0,
+          "manufacturerBlackFlag": null,
+          "mergedComponentCode": null,
+          "minImage": "",
+          "minImageAccessId": null,
+          "minImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8583412981581012992-C5213/C5213-%E6%AD%A3%E9%9D%A2.jpg?REDACTED",
+          "minPurchaseNum": 1,
+          "noBuyReason": null,
+          "preMinPurchaseNum": 41,
+          "preferredComponentFlag": false,
+          "productBigImageAccessId": null,
+          "productBigImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8583412980662865920-C5213/C5213-%E6%AD%A3%E9%9D%A2.jpg?REDACTED",
+          "rankScore": null,
+          "remarkHigh": null,
+          "replaceUrlSuffix": null,
+          "rohsFileId": null,
+          "rohsFlag": 1,
+          "rohsUrl": null,
+          "score": null,
+          "secondSortAccessId": "9001250c3c8d428bbf92232d2998ed62",
+          "secondSortName": "Amplifiers/Comparators",
+          "shopCostPrice": 0.60695,
+          "shopRealPriceFlag": true,
+          "shopShowForeignPriceFlag": true,
+          "shopShowPriceFlag": true,
+          "stockCount": 4,
+          "urlSuffix": "TexasInstruments-LM358P/C5213"
+        },
+        {
+          "allowPostFlag": true,
+          "assemblyComponentFlag": false,
+          "attributes": [
+            {
+              "attribute_name_en": "Operating Temperature",
+              "attribute_value_name": "0℃~+70℃"
+            },
+            {
+              "attribute_name_en": "Vos - Input Offset Voltage",
+              "attribute_value_name": "3mV"
+            },
+            {
+              "attribute_name_en": "Input Offset Current(Ios)",
+              "attribute_value_name": "2nA"
+            },
+            {
+              "attribute_name_en": "Output Current",
+              "attribute_value_name": "20mA"
+            },
+            {
+              "attribute_name_en": "Input Offset Voltage Drift(Vos TC)",
+              "attribute_value_name": "7uV/℃"
+            },
+            {
+              "attribute_name_en": "Gain Bandwidth Product",
+              "attribute_value_name": "700kHz"
+            },
+            {
+              "attribute_name_en": "Slew Rate",
+              "attribute_value_name": "300V/ms"
+            },
+            {
+              "attribute_name_en": "Single supply",
+              "attribute_value_name": "3V~32V"
+            },
+            {
+              "attribute_name_en": "Common Mode Rejection Ratio(CMRR)",
+              "attribute_value_name": "99dB"
+            },
+            {
+              "attribute_name_en": "Rail to Rail",
+              "attribute_value_name": "-"
+            },
+            {
+              "attribute_name_en": "Number of Channels",
+              "attribute_value_name": "2"
+            },
+            {
+              "attribute_name_en": "Input Voltage Noise Density",
+              "attribute_value_name": "40nV/√Hz@1kHz"
+            },
+            {
+              "attribute_name_en": "Quiescent Current",
+              "attribute_value_name": "700uA"
+            },
+            {
+              "attribute_name_en": "Features",
+              "attribute_value_name": "EMI filtering/RF suppression"
+            },
+            {
+              "attribute_name_en": "Ib - Input Bias Current",
+              "attribute_value_name": "20nA"
+            },
+            {
+              "attribute_name_en": "Dual Supply",
+              "attribute_value_name": "-16V~16V"
+            }
+          ],
+          "buyComponentPrices": [
+            {
+              "endNumber": 4999,
+              "productPrice": 0.0359,
+              "startNumber": 2500
+            },
+            {
+              "endNumber": 149,
+              "productPrice": 0.0508,
+              "startNumber": 50
+            },
+            {
+              "endNumber": 49,
+              "productPrice": 0.0643,
+              "startNumber": 1
+            },
+            {
+              "endNumber": -1,
+              "productPrice": 0.0345,
+              "startNumber": 5000
+            },
+            {
+              "endNumber": 499,
+              "productPrice": 0.0437,
+              "startNumber": 150
+            },
+            {
+              "endNumber": 2499,
+              "productPrice": 0.038,
+              "startNumber": 500
+            }
+          ],
+          "canPresaleNumber": 145422,
+          "componentAlternativesCode": null,
+          "componentBrandEn": "Texas Instruments",
+          "componentBrandHigh": null,
+          "componentCode": "C5423",
+          "componentCodeHigh": null,
+          "componentId": 5864,
+          "componentImageUrl": "",
+          "componentLibraryType": "expand",
+          "componentModelEn": "LM358DR",
+          "componentModelHigh": "<span class='lucene_highlight_class'>LM358</span>DR",
+          "componentName": "TI LM358DR",
+          "componentNameEn": null,
+          "componentPrices": [
+            {
+              "endNumber": 49,
+              "productPrice": 0.0668,
+              "startNumber": 1
+            },
+            {
+              "endNumber": 149,
+              "productPrice": 0.0527,
+              "startNumber": 50
+            },
+            {
+              "endNumber": 499,
+              "productPrice": 0.0453,
+              "startNumber": 150
+            },
+            {
+              "endNumber": 2499,
+              "productPrice": 0.0394,
+              "startNumber": 500
+            },
+            {
+              "endNumber": 4999,
+              "productPrice": 0.0373,
+              "startNumber": 2500
+            },
+            {
+              "endNumber": -1,
+              "productPrice": 0.0358,
+              "startNumber": 5000
+            }
+          ],
+          "componentProductType": 0,
+          "componentSource": "shop",
+          "componentSpecificationEn": "SOIC-8",
+          "componentSpecificationHigh": null,
+          "componentTypeEn": "Operational Amplifier",
+          "dataManualFileAccessId": null,
+          "dataManualFileAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtDataManualFile/8579711580646670336-C5423.pdf?REDACTED",
+          "dataManualOfficialLink": "https://www.ti.com/cn/lit/gpn/lm358",
+          "dataManualUrl": "https://www.lcsc.com/datasheet/lcsc_datasheet_1810181640_Texas-Instruments-LM358DR_C5423.pdf",
+          "describe": "-16V~16V 0℃~+70℃ 2 20mA 20nA 2nA 300V/ms 3V~32V 3mV 40nV/√Hz@1kHz 700kHz 700uA 7uV/℃ 99dB EMI filtering/RF suppression SOIC-8 Operational Amplifier ROHS",
+          "encapsulationNumber": 2500,
+          "erpComponentName": "行业标准双路运算放大器",
+          "estimateDate": null,
+          "firstSortAccessId": "e3e42cbeca794b379734d72eb85f2f43",
+          "firstSortName": "Operational Amplifier",
+          "fullReelPrice": null,
+          "idleFlag": null,
+          "imageList": [
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            }
+          ],
+          "initialPrice": 0.0668,
+          "isBuyComponent": "1",
+          "lcscGoodsUrl": "https://www.lcsc.com/product-detail/operational-amplifier_texas-instruments-lm358dr_C5423.html",
+          "leastPatchNumber": 0,
+          "lossNumber": 1,
+          "manufacturerBlackFlag": null,
+          "mergedComponentCode": null,
+          "minImage": "",
+          "minImageAccessId": null,
+          "minImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8553224761489707008-C5423-%25E6%25AD%25A3%25E9%259D%25A2.jpg?REDACTED",
+          "minPurchaseNum": 1,
+          "noBuyReason": null,
+          "preMinPurchaseNum": 200,
+          "preferredComponentFlag": false,
+          "productBigImageAccessId": null,
+          "productBigImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8553224760772075520-C5423-front.jpg?REDACTED",
+          "rankScore": null,
+          "remarkHigh": null,
+          "replaceUrlSuffix": null,
+          "rohsFileId": null,
+          "rohsFlag": 1,
+          "rohsUrl": null,
+          "score": null,
+          "secondSortAccessId": "9001250c3c8d428bbf92232d2998ed62",
+          "secondSortName": "Amplifiers/Comparators",
+          "shopCostPrice": 0.2058,
+          "shopRealPriceFlag": true,
+          "shopShowForeignPriceFlag": true,
+          "shopShowPriceFlag": true,
+          "stockCount": 148717,
+          "urlSuffix": "TexasInstruments-LM358DR/C5423"
+        },
+        {
+          "allowPostFlag": true,
+          "assemblyComponentFlag": false,
+          "attributes": [
+            {
+              "attribute_name_en": "Operating Temperature",
+              "attribute_value_name": "0℃~+70℃"
+            },
+            {
+              "attribute_name_en": "Vos - Input Offset Voltage",
+              "attribute_value_name": "7mV"
+            },
+            {
+              "attribute_name_en": "Input Offset Current(Ios)",
+              "attribute_value_name": "5nA"
+            },
+            {
+              "attribute_name_en": "Output Current",
+              "attribute_value_name": "40mA"
+            },
+            {
+              "attribute_name_en": "Input Offset Voltage Drift(Vos TC)",
+              "attribute_value_name": "7uV/℃"
+            },
+            {
+              "attribute_name_en": "Slew Rate",
+              "attribute_value_name": "-"
+            },
+            {
+              "attribute_name_en": "Gain Bandwidth Product",
+              "attribute_value_name": "-"
+            },
+            {
+              "attribute_name_en": "Single supply",
+              "attribute_value_name": "3V~32V"
+            },
+            {
+              "attribute_name_en": "Common Mode Rejection Ratio(CMRR)",
+              "attribute_value_name": "70dB"
+            },
+            {
+              "attribute_name_en": "Rail to Rail",
+              "attribute_value_name": "-"
+            },
+            {
+              "attribute_name_en": "Number of Channels",
+              "attribute_value_name": "2"
+            },
+            {
+              "attribute_name_en": "Input Voltage Noise Density",
+              "attribute_value_name": "-"
+            },
+            {
+              "attribute_name_en": "Quiescent Current",
+              "attribute_value_name": "700uA"
+            },
+            {
+              "attribute_name_en": "Features",
+              "attribute_value_name": "Built-in compensation、ESD Protection"
+            },
+            {
+              "attribute_name_en": "Ib - Input Bias Current",
+              "attribute_value_name": "45nA"
+            },
+            {
+              "attribute_name_en": "Dual Supply",
+              "attribute_value_name": "-16V~16V"
+            }
+          ],
+          "buyComponentPrices": [
+            {
+              "endNumber": -1,
+              "productPrice": 0.028,
+              "startNumber": 10000
+            },
+            {
+              "endNumber": 4999,
+              "productPrice": 0.0307,
+              "startNumber": 2500
+            },
+            {
+              "endNumber": 99,
+              "productPrice": 0.0523,
+              "startNumber": 1
+            },
+            {
+              "endNumber": 2499,
+              "productPrice": 0.0356,
+              "startNumber": 300
+            },
+            {
+              "endNumber": 299,
+              "productPrice": 0.0413,
+              "startNumber": 100
+            },
+            {
+              "endNumber": 9999,
+              "productPrice": 0.0291,
+              "startNumber": 5000
+            }
+          ],
+          "canPresaleNumber": 575049,
+          "componentAlternativesCode": null,
+          "componentBrandEn": "onsemi",
+          "componentBrandHigh": null,
+          "componentCode": "C7950",
+          "componentCodeHigh": null,
+          "componentId": 8427,
+          "componentImageUrl": "",
+          "componentLibraryType": "base",
+          "componentModelEn": "LM358DR2G",
+          "componentModelHigh": "<span class='lucene_highlight_class'>LM358</span>DR2G",
+          "componentName": "onsemi LM358DR2G",
+          "componentNameEn": null,
+          "componentPrices": [
+            {
+              "endNumber": 99,
+              "productPrice": 0.0543,
+              "startNumber": 1
+            },
+            {
+              "endNumber": 299,
+              "productPrice": 0.0429,
+              "startNumber": 100
+            },
+            {
+              "endNumber": 2499,
+              "productPrice": 0.037,
+              "startNumber": 300
+            },
+            {
+              "endNumber": 4999,
+              "productPrice": 0.0319,
+              "startNumber": 2500
+            },
+            {
+              "endNumber": 9999,
+              "productPrice": 0.0302,
+              "startNumber": 5000
+            },
+            {
+              "endNumber": -1,
+              "productPrice": 0.0291,
+              "startNumber": 10000
+            }
+          ],
+          "componentProductType": 0,
+          "componentSource": "shop",
+          "componentSpecificationEn": "SOIC-8",
+          "componentSpecificationHigh": null,
+          "componentTypeEn": "Operational Amplifier",
+          "dataManualFileAccessId": null,
+          "dataManualFileAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtDataManualFile/8579708932857913344-C7950.pdf?REDACTED",
+          "dataManualOfficialLink": "",
+          "dataManualUrl": "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_onsemi-LM358DR2G_C7950.pdf",
+          "describe": "-16V~16V 0℃~+70℃ 2 3V~32V 40mA 45nA 5nA 700uA 70dB 7mV 7uV/℃ Built-in compensation、ESD protection SOIC-8 Operational Amplifier ROHS",
+          "encapsulationNumber": 2500,
+          "erpComponentName": "单电源双运算放大器",
+          "estimateDate": null,
+          "firstSortAccessId": "e3e42cbeca794b379734d72eb85f2f43",
+          "firstSortName": "Operational Amplifier",
+          "fullReelPrice": null,
+          "idleFlag": null,
+          "imageList": [
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            }
+          ],
+          "initialPrice": 0.0543,
+          "isBuyComponent": "1",
+          "lcscGoodsUrl": "https://www.lcsc.com/product-detail/operational-amplifier_onsemi-lm358dr2g_C7950.html",
+          "leastPatchNumber": 0,
+          "lossNumber": 0,
+          "manufacturerBlackFlag": null,
+          "mergedComponentCode": null,
+          "minImage": "",
+          "minImageAccessId": null,
+          "minImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8553216840223911936-C7950-%25E6%25AD%25A3%25E9%259D%25A2.jpg?REDACTED",
+          "minPurchaseNum": 1,
+          "noBuyReason": null,
+          "preMinPurchaseNum": 211,
+          "preferredComponentFlag": false,
+          "productBigImageAccessId": null,
+          "productBigImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8553216839606943744-C7950-front.jpg?REDACTED",
+          "rankScore": null,
+          "remarkHigh": null,
+          "replaceUrlSuffix": null,
+          "rohsFileId": null,
+          "rohsFlag": 1,
+          "rohsUrl": null,
+          "score": null,
+          "secondSortAccessId": "9001250c3c8d428bbf92232d2998ed62",
+          "secondSortName": "Amplifiers/Comparators",
+          "shopCostPrice": 0.16659,
+          "shopRealPriceFlag": true,
+          "shopShowForeignPriceFlag": true,
+          "shopShowPriceFlag": true,
+          "stockCount": 600713,
+          "urlSuffix": "onsemi-LM358DR2G/C7950"
+        },
+        {
+          "allowPostFlag": true,
+          "assemblyComponentFlag": false,
+          "attributes": [
+            {
+              "attribute_name_en": "Operating Temperature",
+              "attribute_value_name": "0℃~+70℃"
+            },
+            {
+              "attribute_name_en": "Vos - Input Offset Voltage",
+              "attribute_value_name": "3mV"
+            },
+            {
+              "attribute_name_en": "Input Offset Current(Ios)",
+              "attribute_value_name": "50nA"
+            },
+            {
+              "attribute_name_en": "Output Current",
+              "attribute_value_name": "30mA"
+            },
+            {
+              "attribute_name_en": "Input Offset Voltage Drift(Vos TC)",
+              "attribute_value_name": "7uV/℃"
+            },
+            {
+              "attribute_name_en": "Gain Bandwidth Product",
+              "attribute_value_name": "700kHz"
+            },
+            {
+              "attribute_name_en": "Slew Rate",
+              "attribute_value_name": "300V/ms"
+            },
+            {
+              "attribute_name_en": "Single supply",
+              "attribute_value_name": "3V~30V"
+            },
+            {
+              "attribute_name_en": "Common Mode Rejection Ratio(CMRR)",
+              "attribute_value_name": "80dB"
+            },
+            {
+              "attribute_name_en": "Rail to Rail",
+              "attribute_value_name": "-"
+            },
+            {
+              "attribute_name_en": "Number of Channels",
+              "attribute_value_name": "2"
+            },
+            {
+              "attribute_name_en": "Input Voltage Noise Density",
+              "attribute_value_name": "40nV/√Hz@1kHz"
+            },
+            {
+              "attribute_name_en": "Quiescent Current",
+              "attribute_value_name": "600uA"
+            },
+            {
+              "attribute_name_en": "Features",
+              "attribute_value_name": "EMI filtering/RF suppression"
+            },
+            {
+              "attribute_name_en": "Ib - Input Bias Current",
+              "attribute_value_name": "250nA"
+            },
+            {
+              "attribute_name_en": "Dual Supply",
+              "attribute_value_name": "-16V~-1.5V、1.5V~16V"
+            }
+          ],
+          "buyComponentPrices": [
+            {
+              "endNumber": 149,
+              "productPrice": 0.1271,
+              "startNumber": 50
+            },
+            {
+              "endNumber": 499,
+              "productPrice": 0.1092,
+              "startNumber": 150
+            },
+            {
+              "endNumber": 49,
+              "productPrice": 0.1628,
+              "startNumber": 1
+            },
+            {
+              "endNumber": 3999,
+              "productPrice": 0.0722,
+              "startNumber": 2000
+            },
+            {
+              "endNumber": -1,
+              "productPrice": 0.0669,
+              "startNumber": 4000
+            },
+            {
+              "endNumber": 1999,
+              "productPrice": 0.0958,
+              "startNumber": 500
+            }
+          ],
+          "canPresaleNumber": 20926,
+          "componentAlternativesCode": null,
+          "componentBrandEn": "Texas Instruments",
+          "componentBrandHigh": null,
+          "componentCode": "C7951",
+          "componentCodeHigh": null,
+          "componentId": 8428,
+          "componentImageUrl": "",
+          "componentLibraryType": "expand",
+          "componentModelEn": "LM358PWR",
+          "componentModelHigh": "<span class='lucene_highlight_class'>LM358</span>PWR",
+          "componentName": "TI LM358PWR",
+          "componentNameEn": null,
+          "componentPrices": [
+            {
+              "endNumber": 49,
+              "productPrice": 0.169,
+              "startNumber": 1
+            },
+            {
+              "endNumber": 149,
+              "productPrice": 0.1319,
+              "startNumber": 50
+            },
+            {
+              "endNumber": 499,
+              "productPrice": 0.1134,
+              "startNumber": 150
+            },
+            {
+              "endNumber": 1999,
+              "productPrice": 0.0994,
+              "startNumber": 500
+            },
+            {
+              "endNumber": 3999,
+              "productPrice": 0.075,
+              "startNumber": 2000
+            },
+            {
+              "endNumber": -1,
+              "productPrice": 0.0694,
+              "startNumber": 4000
+            }
+          ],
+          "componentProductType": 0,
+          "componentSource": "shop",
+          "componentSpecificationEn": "TSSOP-8",
+          "componentSpecificationHigh": null,
+          "componentTypeEn": "Operational Amplifier",
+          "dataManualFileAccessId": null,
+          "dataManualFileAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtDataManualFile/8586172058468290560-C7951.pdf?REDACTED",
+          "dataManualOfficialLink": "http://www.ti.com/cn/lit/gpn/lm358",
+          "dataManualUrl": "https://www.lcsc.com/datasheet/lcsc_datasheet_1809192040_Texas-Instruments-LM358PWR_C7951.pdf",
+          "describe": "-16V~-1.5V、1.5V~16V 0℃~+70℃ 2 250nA 300V/ms 30mA 3V~30V 3mV 40nV/√Hz@1kHz 50nA 600uA 700kHz 7uV/℃ 80dB EMI filtering/RF suppression TSSOP-8 Operational Amplifier ROHS",
+          "encapsulationNumber": 2000,
+          "erpComponentName": "行业标准双路运算放大器",
+          "estimateDate": null,
+          "firstSortAccessId": "e3e42cbeca794b379734d72eb85f2f43",
+          "firstSortName": "Operational Amplifier",
+          "fullReelPrice": null,
+          "idleFlag": null,
+          "imageList": [
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            }
+          ],
+          "initialPrice": 0.169,
+          "isBuyComponent": "1",
+          "lcscGoodsUrl": "https://www.lcsc.com/product-detail/operational-amplifier_texas-instruments-lm358pwr_C7951.html",
+          "leastPatchNumber": 5,
+          "lossNumber": 2,
+          "manufacturerBlackFlag": null,
+          "mergedComponentCode": null,
+          "minImage": "",
+          "minImageAccessId": null,
+          "minImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8553284805673570304-C7951-%25E6%25AD%25A3%25E9%259D%25A2.jpg?REDACTED",
+          "minPurchaseNum": 1,
+          "noBuyReason": null,
+          "preMinPurchaseNum": 69,
+          "preferredComponentFlag": false,
+          "productBigImageAccessId": null,
+          "productBigImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8553284805044695040-C7951-front.jpg?REDACTED",
+          "rankScore": null,
+          "remarkHigh": null,
+          "replaceUrlSuffix": null,
+          "rohsFileId": null,
+          "rohsFlag": 1,
+          "rohsUrl": null,
+          "score": null,
+          "secondSortAccessId": "9001250c3c8d428bbf92232d2998ed62",
+          "secondSortName": "Amplifiers/Comparators",
+          "shopCostPrice": 0.38485,
+          "shopRealPriceFlag": true,
+          "shopShowForeignPriceFlag": true,
+          "shopShowPriceFlag": true,
+          "stockCount": 21040,
+          "urlSuffix": "TexasInstruments-LM358PWR/C7951"
+        },
+        {
+          "allowPostFlag": true,
+          "assemblyComponentFlag": false,
+          "attributes": [
+            {
+              "attribute_name_en": "Operating Temperature",
+              "attribute_value_name": "0℃~+70℃"
+            },
+            {
+              "attribute_name_en": "Vos - Input Offset Voltage",
+              "attribute_value_name": "7mV"
+            },
+            {
+              "attribute_name_en": "Input Offset Current(Ios)",
+              "attribute_value_name": "30nA"
+            },
+            {
+              "attribute_name_en": "Output Current",
+              "attribute_value_name": "40mA"
+            },
+            {
+              "attribute_name_en": "Input Offset Voltage Drift(Vos TC)",
+              "attribute_value_name": "30uV/℃"
+            },
+            {
+              "attribute_name_en": "Slew Rate",
+              "attribute_value_name": "600V/ms"
+            },
+            {
+              "attribute_name_en": "Gain Bandwidth Product",
+              "attribute_value_name": "1.1MHz"
+            },
+            {
+              "attribute_name_en": "Single supply",
+              "attribute_value_name": "3V~30V"
+            },
+            {
+              "attribute_name_en": "Common Mode Rejection Ratio(CMRR)",
+              "attribute_value_name": "85dB"
+            },
+            {
+              "attribute_name_en": "Rail to Rail",
+              "attribute_value_name": "-"
+            },
+            {
+              "attribute_name_en": "Number of Channels",
+              "attribute_value_name": "2"
+            },
+            {
+              "attribute_name_en": "Input Voltage Noise Density",
+              "attribute_value_name": "55nV/√Hz@1kHz"
+            },
+            {
+              "attribute_name_en": "Quiescent Current",
+              "attribute_value_name": "1.2mA"
+            },
+            {
+              "attribute_name_en": "Features",
+              "attribute_value_name": "Built-in compensation"
+            },
+            {
+              "attribute_name_en": "Ib - Input Bias Current",
+              "attribute_value_name": "200nA"
+            },
+            {
+              "attribute_name_en": "Dual Supply",
+              "attribute_value_name": "-"
+            }
+          ],
+          "buyComponentPrices": [
+            {
+              "endNumber": -1,
+              "productPrice": 0.0451,
+              "startNumber": 5000
+            },
+            {
+              "endNumber": 149,
+              "productPrice": 0.0719,
+              "startNumber": 50
+            },
+            {
+              "endNumber": 2499,
+              "productPrice": 0.0542,
+              "startNumber": 500
+            },
+            {
+              "endNumber": 499,
+              "productPrice": 0.0618,
+              "startNumber": 150
+            },
+            {
+              "endNumber": 49,
+              "productPrice": 0.0922,
+              "startNumber": 1
+            },
+            {
+              "endNumber": 4999,
+              "productPrice": 0.0481,
+              "startNumber": 2500
+            }
+          ],
+          "canPresaleNumber": 169826,
+          "componentAlternativesCode": null,
+          "componentBrandEn": "STMicroelectronics",
+          "componentBrandHigh": null,
+          "componentCode": "C9418",
+          "componentCodeHigh": null,
+          "componentId": 9947,
+          "componentImageUrl": "",
+          "componentLibraryType": "expand",
+          "componentModelEn": "LM358DT",
+          "componentModelHigh": "<span class='lucene_highlight_class'>LM358</span>DT",
+          "componentName": "ST LM358DT",
+          "componentNameEn": null,
+          "componentPrices": [
+            {
+              "endNumber": 49,
+              "productPrice": 0.0957,
+              "startNumber": 1
+            },
+            {
+              "endNumber": 149,
+              "productPrice": 0.0747,
+              "startNumber": 50
+            },
+            {
+              "endNumber": 499,
+              "productPrice": 0.0642,
+              "startNumber": 150
+            },
+            {
+              "endNumber": 2499,
+              "productPrice": 0.0563,
+              "startNumber": 500
+            },
+            {
+              "endNumber": 4999,
+              "productPrice": 0.0499,
+              "startNumber": 2500
+            },
+            {
+              "endNumber": -1,
+              "productPrice": 0.0468,
+              "startNumber": 5000
+            }
+          ],
+          "componentProductType": 0,
+          "componentSource": "shop",
+          "componentSpecificationEn": "SO-8",
+          "componentSpecificationHigh": null,
+          "componentTypeEn": "Operational Amplifier",
+          "dataManualFileAccessId": null,
+          "dataManualFileAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtDataManualFile/8552936464758693888-C9418.pdf?REDACTED",
+          "dataManualOfficialLink": "",
+          "dataManualUrl": "https://www.lcsc.com/datasheet/lcsc_datasheet_1810181110_STMicroelectronics-LM358DT_C9418.pdf",
+          "describe": "0℃~+70℃ 1.1MHz 1.2mA 2 200nA 30nA 30uV/℃ 3V~30V 40mA 55nV/√Hz@1kHz 600V/ms 7mV 85dB Built-in compensation SO-8 Operational Amplifier ROHS",
+          "encapsulationNumber": 2500,
+          "erpComponentName": "低功耗双运算放大器，低输入偏置电流",
+          "estimateDate": null,
+          "firstSortAccessId": "e3e42cbeca794b379734d72eb85f2f43",
+          "firstSortName": "Operational Amplifier",
+          "fullReelPrice": null,
+          "idleFlag": null,
+          "imageList": [
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            },
+            {
+              "fileType": null,
+              "productBigImage": null,
+              "productBigImageAccessId": null,
+              "productImage": null,
+              "productImageAccessId": null
+            }
+          ],
+          "initialPrice": 0.0957,
+          "isBuyComponent": "1",
+          "lcscGoodsUrl": "https://www.lcsc.com/product-detail/operational-amplifier_stmicroelectronics-lm358dt_C9418.html",
+          "leastPatchNumber": 0,
+          "lossNumber": 0,
+          "manufacturerBlackFlag": null,
+          "mergedComponentCode": null,
+          "minImage": "",
+          "minImageAccessId": null,
+          "minImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8582981998062784512-C9418/C9418-%E6%AD%A3%E9%9D%A2.jpg?REDACTED",
+          "minPurchaseNum": 1,
+          "noBuyReason": null,
+          "preMinPurchaseNum": 121,
+          "preferredComponentFlag": false,
+          "productBigImageAccessId": null,
+          "productBigImageAccessIdUrl": "https://jlc-prod-smt.oss-eu-central-1.aliyuncs.com/smtComponentImageFile/8582981997228658688-C9418/C9418-%E6%AD%A3%E9%9D%A2.jpg?REDACTED",
+          "rankScore": null,
+          "remarkHigh": null,
+          "replaceUrlSuffix": null,
+          "rohsFileId": null,
+          "rohsFlag": 1,
+          "rohsUrl": null,
+          "score": null,
+          "secondSortAccessId": "9001250c3c8d428bbf92232d2998ed62",
+          "secondSortName": "Amplifiers/Comparators",
+          "shopCostPrice": 0.26524,
+          "shopRealPriceFlag": true,
+          "shopShowForeignPriceFlag": true,
+          "shopShowPriceFlag": true,
+          "stockCount": 171081,
+          "urlSuffix": "STMicroelectronics-LM358DT/C9418"
+        }
+      ],
+      "navigateFirstPage": 0,
+      "navigateLastPage": 0,
+      "navigatePages": 0,
+      "navigatepageNums": null,
+      "nextPage": 0,
+      "pageNum": 1,
+      "pageSize": 5,
+      "pages": 47,
+      "prePage": 0,
+      "size": 0,
+      "startRow": 0,
+      "total": 231
+    },
+    "dataSheetPart": null,
+    "economicPart": null,
+    "photo": null,
+    "preferredPart": null,
+    "presaleTypeList": [],
+    "queryString": "LM358",
+    "sortAndCountVoList": null,
+    "standardPart": null
+  },
+  "message": null
+}

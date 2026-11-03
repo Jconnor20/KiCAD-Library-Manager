@@ -1,0 +1,211 @@
+{
+  "data": {
+    "a": {
+      "fields": [
+        {
+          "name": "_cacheId"
+        },
+        {
+          "name": "id"
+        },
+        {
+          "name": "sku"
+        },
+        {
+          "name": "eligibleRegion"
+        },
+        {
+          "name": "inventoryLevel"
+        },
+        {
+          "name": "packaging"
+        },
+        {
+          "name": "moq"
+        },
+        {
+          "name": "prices"
+        },
+        {
+          "name": "clickUrl"
+        },
+        {
+          "name": "internalUrl"
+        },
+        {
+          "name": "updated"
+        },
+        {
+          "name": "factoryLeadDays"
+        },
+        {
+          "name": "onOrderQuantity"
+        },
+        {
+          "name": "factoryPackQuantity"
+        },
+        {
+          "name": "orderMultiple"
+        },
+        {
+          "name": "multipackQuantity"
+        },
+        {
+          "name": "isCustomPricing"
+        }
+      ]
+    },
+    "b": {
+      "fields": [
+        {
+          "name": "_cacheId"
+        },
+        {
+          "name": "id"
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "mpn"
+        },
+        {
+          "name": "genericMpn"
+        },
+        {
+          "name": "manufacturer"
+        },
+        {
+          "name": "manufacturerUrl"
+        },
+        {
+          "name": "freeSampleUrl"
+        },
+        {
+          "name": "documentCollections"
+        },
+        {
+          "name": "shortDescription"
+        },
+        {
+          "name": "descriptions"
+        },
+        {
+          "name": "images"
+        },
+        {
+          "name": "specs"
+        },
+        {
+          "name": "slug"
+        },
+        {
+          "name": "octopartUrl"
+        },
+        {
+          "name": "similarParts"
+        },
+        {
+          "name": "companionProducts"
+        },
+        {
+          "name": "category"
+        },
+        {
+          "name": "series"
+        },
+        {
+          "name": "bestImage"
+        },
+        {
+          "name": "bestDatasheet"
+        },
+        {
+          "name": "referenceDesigns"
+        },
+        {
+          "name": "cad"
+        },
+        {
+          "name": "cadRequestUrl"
+        },
+        {
+          "name": "cadModels"
+        },
+        {
+          "name": "simModels"
+        },
+        {
+          "name": "contentVaultMetadata"
+        },
+        {
+          "name": "v3uid"
+        },
+        {
+          "name": "counts"
+        },
+        {
+          "name": "medianPrice1000"
+        },
+        {
+          "name": "totalAvail"
+        },
+        {
+          "name": "avgAvail"
+        },
+        {
+          "name": "sellers"
+        },
+        {
+          "name": "estimatedFactoryLeadDays"
+        },
+        {
+          "name": "akaMpns"
+        },
+        {
+          "name": "altiumInternalId"
+        },
+        {
+          "name": "circuitMakerInternal"
+        },
+        {
+          "name": "extras"
+        }
+      ]
+    },
+    "c": {
+      "fields": [
+        {
+          "name": "id"
+        },
+        {
+          "name": "parentId"
+        },
+        {
+          "name": "name"
+        },
+        {
+          "name": "ancestors"
+        },
+        {
+          "name": "children"
+        },
+        {
+          "name": "path"
+        },
+        {
+          "name": "relevantAttributes"
+        },
+        {
+          "name": "blurb"
+        },
+        {
+          "name": "numParts"
+        }
+      ]
+    }
+  },
+  "extensions": {
+    "requestId": "81d78783-1576-48b6-a8c7-07b1738353bb"
+  }
+}

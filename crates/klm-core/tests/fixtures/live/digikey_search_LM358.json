@@ -1,0 +1,2083 @@
+{
+  "AppliedParametricFiltersDto": [],
+  "ExactMatches": [
+    {
+      "BackOrderNotAllowed": true,
+      "BaseProductNumber": {},
+      "Category": {
+        "CategoryId": 32,
+        "ChildCategories": [
+          {
+            "CategoryId": 2018,
+            "ChildCategories": [
+              {
+                "CategoryId": 2034,
+                "ChildCategories": [
+                  {
+                    "CategoryId": 687,
+                    "ChildCategories": [],
+                    "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/200/280/629/296%3B-4040047-5%3B-D%3B-14_tmb.jpg",
+                    "Name": "Instrumentation, Op Amps, Buffer Amps",
+                    "NewProductCount": 0,
+                    "ParentId": 2034,
+                    "ProductCount": 0,
+                    "SeoDescription": "Products in this family are used for the reproduction of analog signals with an attendant increase in amplitude, reduction of source impedance, and/or isolation of a signal source from a driven load, as well as performing mathematical operations on analog signals such as summation, negation, integration, etc. Instrumentation amplifiers, chopper stabilized/auto-zero/zero-drift amplifiers, and current feedback types are included."
+                  }
+                ],
+                "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/003/125/945/488~846A-02~DM%2C-CUA%2C-DMR2%2C-RM~8_tmb%2864x64%29.jpg",
+                "Name": "Amplifiers",
+                "NewProductCount": 0,
+                "ParentId": 2018,
+                "ProductCount": 0,
+                "SeoDescription": ""
+              }
+            ],
+            "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/030/156/264~11-10C4~~8_tmb.jpg",
+            "Name": "Linear",
+            "NewProductCount": 0,
+            "ParentId": 32,
+            "ProductCount": 0,
+            "SeoDescription": "Linear circuits and component parameters remain unchanged in regard to voltage and current levels. Included in this category are amplifiers, OP Amps, video amps and modules, analog multipliers, dividers, comparators, video processing, and more."
+          }
+        ],
+        "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/010/153/598/8-SOIC%2CM8_tmb.jpg",
+        "Name": "Integrated Circuits (ICs)",
+        "NewProductCount": 0,
+        "ParentId": 0,
+        "ProductCount": 0,
+        "SeoDescription": "Integrated circuits combine a large number of transistors and other elementary electronic components in miniaturized form into a single physical device, that is designed for a specific purpose or function and characterized by its performance of that function rather than by the behavior of its component pieces. Examples include microcontrollers, battery monitors and charge controllers, analog to digital converters, operational amplifiers, logic gates, voltage regulators, gate drivers, motro controllers, and others."
+      },
+      "Classifications": {
+        "ExportControlClassNumber": "",
+        "HtsusCode": "",
+        "MoistureSensitivityLevel": "",
+        "ReachStatus": "REACH Unknown",
+        "RohsStatus": "Unknown"
+      },
+      "DatasheetUrl": "https://www.goodworksemi.com/wp-content/uploads/2026/07/GK-SOP-8_LM358-2025.pdf",
+      "Description": {
+        "DetailedDescription": "Standard (General Purpose) Amplifier 2 Circuit 8-SOP",
+        "ProductDescription": "IC OP AMP 2CH 8-SOP"
+      },
+      "Discontinued": false,
+      "EndOfLife": false,
+      "Manufacturer": {
+        "Id": 6557,
+        "Name": "GOODWORK"
+      },
+      "ManufacturerLeadWeeks": "0",
+      "ManufacturerProductNumber": "LM358",
+      "ManufacturerPublicQuantity": 0,
+      "Ncnr": false,
+      "NormallyStocking": true,
+      "OtherNames": [
+        "6557-LM358TR"
+      ],
+      "Parameters": [
+        {
+          "ParameterId": 161,
+          "ParameterText": "Amplifier Type",
+          "ParameterType": "String",
+          "ValueId": "863824",
+          "ValueText": "Standard (General Purpose)"
+        },
+        {
+          "ParameterId": 2094,
+          "ParameterText": "Number of Circuits",
+          "ParameterType": "Double",
+          "ValueId": "2",
+          "ValueText": "2"
+        },
+        {
+          "ParameterId": 41,
+          "ParameterText": "Output Type",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 511,
+          "ParameterText": "Slew Rate",
+          "ParameterType": "String",
+          "ValueId": "21929",
+          "ValueText": "0.3V/µs"
+        },
+        {
+          "ParameterId": 658,
+          "ParameterText": "Gain Bandwidth Product",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "1 MHz",
+          "ValueText": "1 MHz"
+        },
+        {
+          "ParameterId": 974,
+          "ParameterText": "Current - Input Bias",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "250 nA",
+          "ValueText": "250 nA"
+        },
+        {
+          "ParameterId": 975,
+          "ParameterText": "Voltage - Input Offset",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "7 V",
+          "ValueText": "7 V"
+        },
+        {
+          "ParameterId": 449,
+          "ParameterText": "Current - Supply",
+          "ParameterType": "String",
+          "ValueId": "120434",
+          "ValueText": "1mA"
+        },
+        {
+          "ParameterId": 2115,
+          "ParameterText": "Current - Output / Channel",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "40 mA",
+          "ValueText": "40 mA"
+        },
+        {
+          "ParameterId": 2609,
+          "ParameterText": "Voltage - Supply Span (Min)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "3 V",
+          "ValueText": "3 V"
+        },
+        {
+          "ParameterId": 2610,
+          "ParameterText": "Voltage - Supply Span (Max)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "32 V",
+          "ValueText": "32 V"
+        },
+        {
+          "ParameterId": 252,
+          "ParameterText": "Operating Temperature",
+          "ParameterType": "String",
+          "ValueId": "38976",
+          "ValueText": "0°C ~ 70°C"
+        },
+        {
+          "ParameterId": 1977,
+          "ParameterText": "Grade",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 2700,
+          "ParameterText": "Qualification",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 69,
+          "ParameterText": "Mounting Type",
+          "ParameterType": "String",
+          "ValueId": "409393",
+          "ValueText": "Surface Mount"
+        },
+        {
+          "ParameterId": 16,
+          "ParameterText": "Package / Case",
+          "ParameterType": "String",
+          "ValueId": "294928",
+          "ValueText": "8-SOIC (0.154\", 3.90mm Width)"
+        },
+        {
+          "ParameterId": 1291,
+          "ParameterText": "Supplier Device Package",
+          "ParameterType": "String",
+          "ValueId": "294976",
+          "ValueText": "8-SOP"
+        }
+      ],
+      "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/8927/MFG_9435-GK.jpg",
+      "PrimaryVideoUrl": "",
+      "ProductStatus": {
+        "Id": 0,
+        "Status": "Active"
+      },
+      "ProductUrl": "https://www.digikey.com/en/products/detail/goodwork/LM358/29516328",
+      "ProductVariations": [
+        {
+          "DigiKeyProductNumber": "6557-LM358TR-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": true,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 4000,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 1,
+            "Name": "Tape & Reel (TR)"
+          },
+          "QuantityAvailableforPackageType": 26000,
+          "StandardPackage": 4000,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 4000,
+              "TotalPrice": 154.4,
+              "UnitPrice": 0.0386
+            }
+          ],
+          "Supplier": {
+            "Id": 6557,
+            "Name": "GOODWORK"
+          },
+          "TariffActive": false
+        }
+      ],
+      "QuantityAvailable": 26000,
+      "Series": {
+        "Id": 818,
+        "Name": "-"
+      },
+      "UnitPrice": 0.0386
+    }
+  ],
+  "FilterOptions": {
+    "Manufacturers": [
+      {
+        "Id": 5503,
+        "ProductCount": 4,
+        "Value": "3PEAK"
+      },
+      {
+        "Id": 492,
+        "ProductCount": 2,
+        "Value": "Bivar Inc."
+      },
+      {
+        "Id": 7,
+        "ProductCount": 1,
+        "Value": "DigiKey Kit (VA)"
+      },
+      {
+        "Id": 31,
+        "ProductCount": 1,
+        "Value": "Diodes Incorporated"
+      },
+      {
+        "Id": 5272,
+        "ProductCount": 1,
+        "Value": "EVVO"
+      },
+      {
+        "Id": 600039,
+        "ProductCount": 1,
+        "Value": "Fairchild Semiconductor"
+      },
+      {
+        "Id": 6557,
+        "ProductCount": 1,
+        "Value": "GOODWORK"
+      },
+      {
+        "Id": 600026,
+        "ProductCount": 1,
+        "Value": "Harris Corporation"
+      },
+      {
+        "Id": 14,
+        "ProductCount": 1,
+        "Value": "National Semiconductor"
+      },
+      {
+        "Id": 488,
+        "ProductCount": 17,
+        "Value": "onsemi"
+      },
+      {
+        "Id": 846,
+        "ProductCount": 15,
+        "Value": "Rohm Semiconductor"
+      },
+      {
+        "Id": 1597,
+        "ProductCount": 2,
+        "Value": "Seeed Technology Co., Ltd"
+      },
+      {
+        "Id": 5399,
+        "ProductCount": 1,
+        "Value": "Shenzhen Slkormicro Semicon Co., Ltd."
+      },
+      {
+        "Id": 1882,
+        "ProductCount": 1,
+        "Value": "SICK, Inc."
+      },
+      {
+        "Id": 497,
+        "ProductCount": 20,
+        "Value": "STMicroelectronics"
+      },
+      {
+        "Id": 5536,
+        "ProductCount": 5,
+        "Value": "TAEJIN"
+      },
+      {
+        "Id": 296,
+        "ProductCount": 68,
+        "Value": "Texas Instruments"
+      },
+      {
+        "Id": 4518,
+        "ProductCount": 1,
+        "Value": "UMW"
+      },
+      {
+        "Id": 6199,
+        "ProductCount": 1,
+        "Value": "Unisonic Technologies Co., Ltd."
+      }
+    ]
+  },
+  "Products": [
+    {
+      "BackOrderNotAllowed": false,
+      "BaseProductNumber": {
+        "Id": 376,
+        "Name": "LM358"
+      },
+      "Category": {
+        "CategoryId": 32,
+        "ChildCategories": [
+          {
+            "CategoryId": 2018,
+            "ChildCategories": [
+              {
+                "CategoryId": 2034,
+                "ChildCategories": [
+                  {
+                    "CategoryId": 687,
+                    "ChildCategories": [],
+                    "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/200/280/629/296%3B-4040047-5%3B-D%3B-14_tmb.jpg",
+                    "Name": "Instrumentation, Op Amps, Buffer Amps",
+                    "NewProductCount": 0,
+                    "ParentId": 2034,
+                    "ProductCount": 0,
+                    "SeoDescription": "Products in this family are used for the reproduction of analog signals with an attendant increase in amplitude, reduction of source impedance, and/or isolation of a signal source from a driven load, as well as performing mathematical operations on analog signals such as summation, negation, integration, etc. Instrumentation amplifiers, chopper stabilized/auto-zero/zero-drift amplifiers, and current feedback types are included."
+                  }
+                ],
+                "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/003/125/945/488~846A-02~DM%2C-CUA%2C-DMR2%2C-RM~8_tmb%2864x64%29.jpg",
+                "Name": "Amplifiers",
+                "NewProductCount": 0,
+                "ParentId": 2018,
+                "ProductCount": 0,
+                "SeoDescription": ""
+              }
+            ],
+            "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/030/156/264~11-10C4~~8_tmb.jpg",
+            "Name": "Linear",
+            "NewProductCount": 0,
+            "ParentId": 32,
+            "ProductCount": 0,
+            "SeoDescription": "Linear circuits and component parameters remain unchanged in regard to voltage and current levels. Included in this category are amplifiers, OP Amps, video amps and modules, analog multipliers, dividers, comparators, video processing, and more."
+          }
+        ],
+        "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/010/153/598/8-SOIC%2CM8_tmb.jpg",
+        "Name": "Integrated Circuits (ICs)",
+        "NewProductCount": 0,
+        "ParentId": 0,
+        "ProductCount": 0,
+        "SeoDescription": "Integrated circuits combine a large number of transistors and other elementary electronic components in miniaturized form into a single physical device, that is designed for a specific purpose or function and characterized by its performance of that function rather than by the behavior of its component pieces. Examples include microcontrollers, battery monitors and charge controllers, analog to digital converters, operational amplifiers, logic gates, voltage regulators, gate drivers, motro controllers, and others."
+      },
+      "Classifications": {
+        "ExportControlClassNumber": "EAR99",
+        "HtsusCode": "8542.33.0001",
+        "MoistureSensitivityLevel": "1  (Unlimited)",
+        "ReachStatus": "REACH Unaffected",
+        "RohsStatus": "ROHS3 Compliant"
+      },
+      "DatasheetUrl": "https://www.st.com/content/ccc/resource/technical/document/datasheet/61/46/87/01/98/ed/44/c5/CD00000464.pdf/files/CD00000464.pdf/jcr:content/translations/en.CD00000464.pdf",
+      "Description": {
+        "DetailedDescription": "Standard (General Purpose) Amplifier 2 Circuit 8-SOIC",
+        "ProductDescription": "IC OP AMP 2CH 8-SOIC"
+      },
+      "Discontinued": false,
+      "EndOfLife": false,
+      "Manufacturer": {
+        "Id": 497,
+        "Name": "STMicroelectronics"
+      },
+      "ManufacturerLeadWeeks": "30",
+      "ManufacturerProductNumber": "LM358DT",
+      "ManufacturerPublicQuantity": 0,
+      "Ncnr": false,
+      "NormallyStocking": true,
+      "OtherNames": [
+        "497-1591-6",
+        "497-1591-1",
+        "497-LM358DTTR-NDL",
+        "497-1591-1-NDR",
+        "497-1591-2-NDR",
+        "497-1591-2"
+      ],
+      "Parameters": [
+        {
+          "ParameterId": 161,
+          "ParameterText": "Amplifier Type",
+          "ParameterType": "String",
+          "ValueId": "863824",
+          "ValueText": "Standard (General Purpose)"
+        },
+        {
+          "ParameterId": 2094,
+          "ParameterText": "Number of Circuits",
+          "ParameterType": "Double",
+          "ValueId": "2",
+          "ValueText": "2"
+        },
+        {
+          "ParameterId": 41,
+          "ParameterText": "Output Type",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 511,
+          "ParameterText": "Slew Rate",
+          "ParameterType": "String",
+          "ValueId": "31459",
+          "ValueText": "0.6V/µs"
+        },
+        {
+          "ParameterId": 658,
+          "ParameterText": "Gain Bandwidth Product",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "1.1 MHz",
+          "ValueText": "1.1 MHz"
+        },
+        {
+          "ParameterId": 974,
+          "ParameterText": "Current - Input Bias",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "20 nA",
+          "ValueText": "20 nA"
+        },
+        {
+          "ParameterId": 975,
+          "ParameterText": "Voltage - Input Offset",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "2 mV",
+          "ValueText": "2 mV"
+        },
+        {
+          "ParameterId": 449,
+          "ParameterText": "Current - Supply",
+          "ParameterType": "String",
+          "ValueId": "483819",
+          "ValueText": "700µA (x2 Channels)"
+        },
+        {
+          "ParameterId": 2115,
+          "ParameterText": "Current - Output / Channel",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "30 mA",
+          "ValueText": "30 mA"
+        },
+        {
+          "ParameterId": 2609,
+          "ParameterText": "Voltage - Supply Span (Min)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "3 V",
+          "ValueText": "3 V"
+        },
+        {
+          "ParameterId": 2610,
+          "ParameterText": "Voltage - Supply Span (Max)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "30 V",
+          "ValueText": "30 V"
+        },
+        {
+          "ParameterId": 252,
+          "ParameterText": "Operating Temperature",
+          "ParameterType": "String",
+          "ValueId": "38976",
+          "ValueText": "0°C ~ 70°C"
+        },
+        {
+          "ParameterId": 1977,
+          "ParameterText": "Grade",
+          "ParameterType": "String",
+          "ValueId": "316912",
+          "ValueText": "Automotive"
+        },
+        {
+          "ParameterId": 2700,
+          "ParameterText": "Qualification",
+          "ParameterType": "String",
+          "ValueId": "312102",
+          "ValueText": "AEC-Q100"
+        },
+        {
+          "ParameterId": 69,
+          "ParameterText": "Mounting Type",
+          "ParameterType": "String",
+          "ValueId": "409393",
+          "ValueText": "Surface Mount"
+        },
+        {
+          "ParameterId": 16,
+          "ParameterText": "Package / Case",
+          "ParameterType": "String",
+          "ValueId": "294928",
+          "ValueText": "8-SOIC (0.154\", 3.90mm Width)"
+        },
+        {
+          "ParameterId": 1291,
+          "ParameterText": "Supplier Device Package",
+          "ParameterType": "String",
+          "ValueId": "294926",
+          "ValueText": "8-SOIC"
+        }
+      ],
+      "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/7562/MFG_497%7E8SOIC-3.9%7E%7E8.jpg",
+      "PrimaryVideoUrl": "",
+      "ProductStatus": {
+        "Id": 0,
+        "Status": "Active"
+      },
+      "ProductUrl": "https://www.digikey.com/en/products/detail/stmicroelectronics/LM358DT/591693",
+      "ProductVariations": [
+        {
+          "DigiKeyProductNumber": "497-1591-2-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 2500,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 1,
+            "Name": "Tape & Reel (TR)"
+          },
+          "QuantityAvailableforPackageType": 75000,
+          "StandardPackage": 2500,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 2500,
+              "TotalPrice": 212.7,
+              "UnitPrice": 0.08508
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 411.25,
+              "UnitPrice": 0.08225
+            },
+            {
+              "BreakQuantity": 7500,
+              "TotalPrice": 606.225,
+              "UnitPrice": 0.08083
+            },
+            {
+              "BreakQuantity": 12500,
+              "TotalPrice": 990.875,
+              "UnitPrice": 0.07927
+            },
+            {
+              "BreakQuantity": 17500,
+              "TotalPrice": 1371.125,
+              "UnitPrice": 0.07835
+            },
+            {
+              "BreakQuantity": 25000,
+              "TotalPrice": 1936.75,
+              "UnitPrice": 0.07747
+            }
+          ],
+          "Supplier": {
+            "Id": 497,
+            "Name": "STMicroelectronics"
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "497-1591-1-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 2,
+            "Name": "Cut Tape (CT)"
+          },
+          "QuantityAvailableforPackageType": 76865,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.21,
+              "UnitPrice": 0.21
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 1.44,
+              "UnitPrice": 0.144
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 3.18,
+              "UnitPrice": 0.1272
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 10.85,
+              "UnitPrice": 0.1085
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 24.9,
+              "UnitPrice": 0.0996
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 47.1,
+              "UnitPrice": 0.0942
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 89.76,
+              "UnitPrice": 0.08976
+            }
+          ],
+          "Supplier": {
+            "Id": 497,
+            "Name": "STMicroelectronics"
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "497-1591-6-ND",
+          "DigiReelFee": 7.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 243,
+            "Name": "Digi-Reel®"
+          },
+          "QuantityAvailableforPackageType": 76865,
+          "StandardPackage": 1,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.21,
+              "UnitPrice": 0.21
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 1.44,
+              "UnitPrice": 0.144
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 3.18,
+              "UnitPrice": 0.1272
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 10.85,
+              "UnitPrice": 0.1085
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 24.9,
+              "UnitPrice": 0.0996
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 47.1,
+              "UnitPrice": 0.0942
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 89.76,
+              "UnitPrice": 0.08976
+            }
+          ],
+          "Supplier": {
+            "Id": 497,
+            "Name": "STMicroelectronics"
+          },
+          "TariffActive": true
+        }
+      ],
+      "QuantityAvailable": 76865,
+      "Series": {
+        "Id": 818,
+        "Name": "-"
+      },
+      "UnitPrice": 0.21
+    },
+    {
+      "BackOrderNotAllowed": false,
+      "BaseProductNumber": {
+        "Id": 376,
+        "Name": "LM358"
+      },
+      "Category": {
+        "CategoryId": 32,
+        "ChildCategories": [
+          {
+            "CategoryId": 2018,
+            "ChildCategories": [
+              {
+                "CategoryId": 2034,
+                "ChildCategories": [
+                  {
+                    "CategoryId": 687,
+                    "ChildCategories": [],
+                    "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/200/280/629/296%3B-4040047-5%3B-D%3B-14_tmb.jpg",
+                    "Name": "Instrumentation, Op Amps, Buffer Amps",
+                    "NewProductCount": 0,
+                    "ParentId": 2034,
+                    "ProductCount": 0,
+                    "SeoDescription": "Products in this family are used for the reproduction of analog signals with an attendant increase in amplitude, reduction of source impedance, and/or isolation of a signal source from a driven load, as well as performing mathematical operations on analog signals such as summation, negation, integration, etc. Instrumentation amplifiers, chopper stabilized/auto-zero/zero-drift amplifiers, and current feedback types are included."
+                  }
+                ],
+                "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/003/125/945/488~846A-02~DM%2C-CUA%2C-DMR2%2C-RM~8_tmb%2864x64%29.jpg",
+                "Name": "Amplifiers",
+                "NewProductCount": 0,
+                "ParentId": 2018,
+                "ProductCount": 0,
+                "SeoDescription": ""
+              }
+            ],
+            "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/030/156/264~11-10C4~~8_tmb.jpg",
+            "Name": "Linear",
+            "NewProductCount": 0,
+            "ParentId": 32,
+            "ProductCount": 0,
+            "SeoDescription": "Linear circuits and component parameters remain unchanged in regard to voltage and current levels. Included in this category are amplifiers, OP Amps, video amps and modules, analog multipliers, dividers, comparators, video processing, and more."
+          }
+        ],
+        "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/010/153/598/8-SOIC%2CM8_tmb.jpg",
+        "Name": "Integrated Circuits (ICs)",
+        "NewProductCount": 0,
+        "ParentId": 0,
+        "ProductCount": 0,
+        "SeoDescription": "Integrated circuits combine a large number of transistors and other elementary electronic components in miniaturized form into a single physical device, that is designed for a specific purpose or function and characterized by its performance of that function rather than by the behavior of its component pieces. Examples include microcontrollers, battery monitors and charge controllers, analog to digital converters, operational amplifiers, logic gates, voltage regulators, gate drivers, motro controllers, and others."
+      },
+      "Classifications": {
+        "ExportControlClassNumber": "EAR99",
+        "HtsusCode": "8542.33.0001",
+        "MoistureSensitivityLevel": "1  (Unlimited)",
+        "ReachStatus": "REACH Unaffected",
+        "RohsStatus": "ROHS3 Compliant"
+      },
+      "DatasheetUrl": "https://www.ti.com/general/docs/suppproductinfo.tsp?distId=10&gotoUrl=https%3A%2F%2Fwww.ti.com%2Flit%2Fgpn%2Flm358",
+      "Description": {
+        "DetailedDescription": "Standard (General Purpose) Amplifier 2 Circuit 8-SOIC",
+        "ProductDescription": "IC OP AMP 2CH 8-SOIC"
+      },
+      "Discontinued": false,
+      "EndOfLife": false,
+      "Manufacturer": {
+        "Id": 296,
+        "Name": "Texas Instruments"
+      },
+      "ManufacturerLeadWeeks": "26",
+      "ManufacturerProductNumber": "LM358DR",
+      "ManufacturerPublicQuantity": 0,
+      "Ncnr": false,
+      "NormallyStocking": true,
+      "OtherNames": [
+        "296-1014-2",
+        "296-1014-1",
+        "2156-LM358DR",
+        "296-LM358DRDKR",
+        "296-1014-2-ND",
+        "-LM358DRG4-NDR",
+        "296-1014-6-ND",
+        "296-1014-1-ND",
+        "-296-1014-1",
+        "-296-1014-1-ND",
+        "296-1014-6",
+        "TEXTISLM358DR",
+        "296-LM358DRCT",
+        "-LM358DR-NDR",
+        "296-LM358DRTR",
+        "-LM358DRE4-NDR",
+        "-LM358DRG4",
+        "296-1014-6-NDR",
+        "-LM358DRE4"
+      ],
+      "Parameters": [
+        {
+          "ParameterId": 161,
+          "ParameterText": "Amplifier Type",
+          "ParameterType": "String",
+          "ValueId": "863824",
+          "ValueText": "Standard (General Purpose)"
+        },
+        {
+          "ParameterId": 2094,
+          "ParameterText": "Number of Circuits",
+          "ParameterType": "Double",
+          "ValueId": "2",
+          "ValueText": "2"
+        },
+        {
+          "ParameterId": 41,
+          "ParameterText": "Output Type",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 511,
+          "ParameterText": "Slew Rate",
+          "ParameterType": "String",
+          "ValueId": "21929",
+          "ValueText": "0.3V/µs"
+        },
+        {
+          "ParameterId": 658,
+          "ParameterText": "Gain Bandwidth Product",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "700 kHz",
+          "ValueText": "700 kHz"
+        },
+        {
+          "ParameterId": 974,
+          "ParameterText": "Current - Input Bias",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "20 nA",
+          "ValueText": "20 nA"
+        },
+        {
+          "ParameterId": 975,
+          "ParameterText": "Voltage - Input Offset",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "3 mV",
+          "ValueText": "3 mV"
+        },
+        {
+          "ParameterId": 449,
+          "ParameterText": "Current - Supply",
+          "ParameterType": "String",
+          "ValueId": "483791",
+          "ValueText": "500µA (x2 Channels)"
+        },
+        {
+          "ParameterId": 2115,
+          "ParameterText": "Current - Output / Channel",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "40 mA",
+          "ValueText": "40 mA"
+        },
+        {
+          "ParameterId": 2609,
+          "ParameterText": "Voltage - Supply Span (Min)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "3 V",
+          "ValueText": "3 V"
+        },
+        {
+          "ParameterId": 2610,
+          "ParameterText": "Voltage - Supply Span (Max)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "30 V",
+          "ValueText": "30 V"
+        },
+        {
+          "ParameterId": 252,
+          "ParameterText": "Operating Temperature",
+          "ParameterType": "String",
+          "ValueId": "38985",
+          "ValueText": "0°C ~ 70°C (TA)"
+        },
+        {
+          "ParameterId": 69,
+          "ParameterText": "Mounting Type",
+          "ParameterType": "String",
+          "ValueId": "409393",
+          "ValueText": "Surface Mount"
+        },
+        {
+          "ParameterId": 16,
+          "ParameterText": "Package / Case",
+          "ParameterType": "String",
+          "ValueId": "294928",
+          "ValueText": "8-SOIC (0.154\", 3.90mm Width)"
+        },
+        {
+          "ParameterId": 1291,
+          "ParameterText": "Supplier Device Package",
+          "ParameterType": "String",
+          "ValueId": "294926",
+          "ValueText": "8-SOIC"
+        }
+      ],
+      "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/8900/MFG_296%7E4040047-3%7ED%7E8.jpg",
+      "PrimaryVideoUrl": "",
+      "ProductStatus": {
+        "Id": 0,
+        "Status": "Active"
+      },
+      "ProductUrl": "https://www.digikey.com/en/products/detail/texas-instruments/LM358DR/276658",
+      "ProductVariations": [
+        {
+          "DigiKeyProductNumber": "296-LM358DRTR-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 2500,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 1,
+            "Name": "Tape & Reel (TR)"
+          },
+          "QuantityAvailableforPackageType": 72500,
+          "StandardPackage": 2500,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 2500,
+              "TotalPrice": 260.9,
+              "UnitPrice": 0.10436
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 505.05,
+              "UnitPrice": 0.10101
+            },
+            {
+              "BreakQuantity": 7500,
+              "TotalPrice": 744.975,
+              "UnitPrice": 0.09933
+            },
+            {
+              "BreakQuantity": 12500,
+              "TotalPrice": 1218.5,
+              "UnitPrice": 0.09748
+            },
+            {
+              "BreakQuantity": 17500,
+              "TotalPrice": 1686.825,
+              "UnitPrice": 0.09639
+            },
+            {
+              "BreakQuantity": 25000,
+              "TotalPrice": 2383.75,
+              "UnitPrice": 0.09535
+            }
+          ],
+          "Supplier": {
+            "Id": 296,
+            "Name": "Texas Instruments"
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "296-LM358DRCT-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 2,
+            "Name": "Cut Tape (CT)"
+          },
+          "QuantityAvailableforPackageType": 73412,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.26,
+              "UnitPrice": 0.26
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 1.75,
+              "UnitPrice": 0.175
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 3.86,
+              "UnitPrice": 0.1544
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 13.22,
+              "UnitPrice": 0.1322
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 30.39,
+              "UnitPrice": 0.12156
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 57.59,
+              "UnitPrice": 0.11518
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 109.91,
+              "UnitPrice": 0.10991
+            }
+          ],
+          "Supplier": {
+            "Id": 296,
+            "Name": "Texas Instruments"
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "296-LM358DRDKR-ND",
+          "DigiReelFee": 7.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 243,
+            "Name": "Digi-Reel®"
+          },
+          "QuantityAvailableforPackageType": 73412,
+          "StandardPackage": 1,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.26,
+              "UnitPrice": 0.26
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 1.75,
+              "UnitPrice": 0.175
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 3.86,
+              "UnitPrice": 0.1544
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 13.22,
+              "UnitPrice": 0.1322
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 30.39,
+              "UnitPrice": 0.12156
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 57.59,
+              "UnitPrice": 0.11518
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 109.91,
+              "UnitPrice": 0.10991
+            }
+          ],
+          "Supplier": {
+            "Id": 296,
+            "Name": "Texas Instruments"
+          },
+          "TariffActive": true
+        }
+      ],
+      "QuantityAvailable": 73412,
+      "Series": {
+        "Id": 818,
+        "Name": "-"
+      },
+      "UnitPrice": 0.26
+    },
+    {
+      "BackOrderNotAllowed": false,
+      "BaseProductNumber": {
+        "Id": 376,
+        "Name": "LM358"
+      },
+      "Category": {
+        "CategoryId": 32,
+        "ChildCategories": [
+          {
+            "CategoryId": 2018,
+            "ChildCategories": [
+              {
+                "CategoryId": 2034,
+                "ChildCategories": [
+                  {
+                    "CategoryId": 687,
+                    "ChildCategories": [],
+                    "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/200/280/629/296%3B-4040047-5%3B-D%3B-14_tmb.jpg",
+                    "Name": "Instrumentation, Op Amps, Buffer Amps",
+                    "NewProductCount": 0,
+                    "ParentId": 2034,
+                    "ProductCount": 0,
+                    "SeoDescription": "Products in this family are used for the reproduction of analog signals with an attendant increase in amplitude, reduction of source impedance, and/or isolation of a signal source from a driven load, as well as performing mathematical operations on analog signals such as summation, negation, integration, etc. Instrumentation amplifiers, chopper stabilized/auto-zero/zero-drift amplifiers, and current feedback types are included."
+                  }
+                ],
+                "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/003/125/945/488~846A-02~DM%2C-CUA%2C-DMR2%2C-RM~8_tmb%2864x64%29.jpg",
+                "Name": "Amplifiers",
+                "NewProductCount": 0,
+                "ParentId": 2018,
+                "ProductCount": 0,
+                "SeoDescription": ""
+              }
+            ],
+            "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/030/156/264~11-10C4~~8_tmb.jpg",
+            "Name": "Linear",
+            "NewProductCount": 0,
+            "ParentId": 32,
+            "ProductCount": 0,
+            "SeoDescription": "Linear circuits and component parameters remain unchanged in regard to voltage and current levels. Included in this category are amplifiers, OP Amps, video amps and modules, analog multipliers, dividers, comparators, video processing, and more."
+          }
+        ],
+        "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/010/153/598/8-SOIC%2CM8_tmb.jpg",
+        "Name": "Integrated Circuits (ICs)",
+        "NewProductCount": 0,
+        "ParentId": 0,
+        "ProductCount": 0,
+        "SeoDescription": "Integrated circuits combine a large number of transistors and other elementary electronic components in miniaturized form into a single physical device, that is designed for a specific purpose or function and characterized by its performance of that function rather than by the behavior of its component pieces. Examples include microcontrollers, battery monitors and charge controllers, analog to digital converters, operational amplifiers, logic gates, voltage regulators, gate drivers, motro controllers, and others."
+      },
+      "Classifications": {
+        "ExportControlClassNumber": "EAR99",
+        "HtsusCode": "8542.33.0001",
+        "MoistureSensitivityLevel": "1  (Unlimited)",
+        "ReachStatus": "REACH Unaffected",
+        "RohsStatus": "ROHS3 Compliant"
+      },
+      "DatasheetUrl": "https://www.onsemi.com/pdf/datasheet/lm358-d.pdf",
+      "Description": {
+        "DetailedDescription": "Standard (General Purpose) Amplifier 2 Circuit 8-SOIC",
+        "ProductDescription": "IC OP AMP 2CH 8-SOIC"
+      },
+      "Discontinued": false,
+      "EndOfLife": false,
+      "Manufacturer": {
+        "Id": 488,
+        "Name": "onsemi"
+      },
+      "ManufacturerLeadWeeks": "10",
+      "ManufacturerProductNumber": "LM358DR2G",
+      "ManufacturerPublicQuantity": 3140000,
+      "Ncnr": false,
+      "NormallyStocking": true,
+      "OtherNames": [
+        "LM358DR2GOS",
+        "LM358DR2GOSCT",
+        "LM358DR2GOSDKR",
+        "2156-LM358DR2G-OS",
+        "LM358DR2GOSTR",
+        "ONSONSLM358DR2G",
+        "LM358DR2GOS-ND"
+      ],
+      "Parameters": [
+        {
+          "ParameterId": 161,
+          "ParameterText": "Amplifier Type",
+          "ParameterType": "String",
+          "ValueId": "863824",
+          "ValueText": "Standard (General Purpose)"
+        },
+        {
+          "ParameterId": 2094,
+          "ParameterText": "Number of Circuits",
+          "ParameterType": "Double",
+          "ValueId": "2",
+          "ValueText": "2"
+        },
+        {
+          "ParameterId": 41,
+          "ParameterText": "Output Type",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 511,
+          "ParameterText": "Slew Rate",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 658,
+          "ParameterText": "Gain Bandwidth Product",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "1 MHz",
+          "ValueText": "1 MHz"
+        },
+        {
+          "ParameterId": 974,
+          "ParameterText": "Current - Input Bias",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "45 nA",
+          "ValueText": "45 nA"
+        },
+        {
+          "ParameterId": 975,
+          "ParameterText": "Voltage - Input Offset",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "2 mV",
+          "ValueText": "2 mV"
+        },
+        {
+          "ParameterId": 449,
+          "ParameterText": "Current - Supply",
+          "ParameterType": "String",
+          "ValueId": "483917",
+          "ValueText": "800µA (x2 Channels)"
+        },
+        {
+          "ParameterId": 2115,
+          "ParameterText": "Current - Output / Channel",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "40 mA",
+          "ValueText": "40 mA"
+        },
+        {
+          "ParameterId": 2609,
+          "ParameterText": "Voltage - Supply Span (Min)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "3 V",
+          "ValueText": "3 V"
+        },
+        {
+          "ParameterId": 2610,
+          "ParameterText": "Voltage - Supply Span (Max)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "32 V",
+          "ValueText": "32 V"
+        },
+        {
+          "ParameterId": 252,
+          "ParameterText": "Operating Temperature",
+          "ParameterType": "String",
+          "ValueId": "38976",
+          "ValueText": "0°C ~ 70°C"
+        },
+        {
+          "ParameterId": 69,
+          "ParameterText": "Mounting Type",
+          "ParameterType": "String",
+          "ValueId": "409393",
+          "ValueText": "Surface Mount"
+        },
+        {
+          "ParameterId": 16,
+          "ParameterText": "Package / Case",
+          "ParameterType": "String",
+          "ValueId": "294928",
+          "ValueText": "8-SOIC (0.154\", 3.90mm Width)"
+        },
+        {
+          "ParameterId": 1291,
+          "ParameterText": "Supplier Device Package",
+          "ParameterType": "String",
+          "ValueId": "294926",
+          "ValueText": "8-SOIC"
+        }
+      ],
+      "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/7179/MFG_488%7E751-07%7ED%2CDF%2CDR%2CD1%2CESA%2CR%2CS%7E8.jpg",
+      "PrimaryVideoUrl": "",
+      "ProductStatus": {
+        "Id": 0,
+        "Status": "Active"
+      },
+      "ProductUrl": "https://www.digikey.com/en/products/detail/onsemi/LM358DR2G/661123",
+      "ProductVariations": [
+        {
+          "DigiKeyProductNumber": "LM358DR2GOSTR-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 2500,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 1,
+            "Name": "Tape & Reel (TR)"
+          },
+          "QuantityAvailableforPackageType": 47500,
+          "StandardPackage": 2500,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 2500,
+              "TotalPrice": 267.55,
+              "UnitPrice": 0.10702
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 518.0,
+              "UnitPrice": 0.1036
+            }
+          ],
+          "Supplier": {
+            "Id": 488,
+            "Name": "onsemi"
+          },
+          "TariffActive": false
+        },
+        {
+          "DigiKeyProductNumber": "LM358DR2GOSCT-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 2,
+            "Name": "Cut Tape (CT)"
+          },
+          "QuantityAvailableforPackageType": 48677,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.26,
+              "UnitPrice": 0.26
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 1.79,
+              "UnitPrice": 0.179
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 3.95,
+              "UnitPrice": 0.158
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 13.54,
+              "UnitPrice": 0.1354
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 31.15,
+              "UnitPrice": 0.1246
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 59.03,
+              "UnitPrice": 0.11806
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 112.69,
+              "UnitPrice": 0.11269
+            }
+          ],
+          "Supplier": {
+            "Id": 488,
+            "Name": "onsemi"
+          },
+          "TariffActive": false
+        },
+        {
+          "DigiKeyProductNumber": "LM358DR2GOSDKR-ND",
+          "DigiReelFee": 7.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 243,
+            "Name": "Digi-Reel®"
+          },
+          "QuantityAvailableforPackageType": 48677,
+          "StandardPackage": 1,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.26,
+              "UnitPrice": 0.26
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 1.79,
+              "UnitPrice": 0.179
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 3.95,
+              "UnitPrice": 0.158
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 13.54,
+              "UnitPrice": 0.1354
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 31.15,
+              "UnitPrice": 0.1246
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 59.03,
+              "UnitPrice": 0.11806
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 112.69,
+              "UnitPrice": 0.11269
+            }
+          ],
+          "Supplier": {
+            "Id": 488,
+            "Name": "onsemi"
+          },
+          "TariffActive": false
+        }
+      ],
+      "QuantityAvailable": 48677,
+      "Series": {
+        "Id": 818,
+        "Name": "-"
+      },
+      "UnitPrice": 0.26
+    },
+    {
+      "BackOrderNotAllowed": false,
+      "BaseProductNumber": {
+        "Id": 376,
+        "Name": "LM358"
+      },
+      "Category": {
+        "CategoryId": 32,
+        "ChildCategories": [
+          {
+            "CategoryId": 2018,
+            "ChildCategories": [
+              {
+                "CategoryId": 2034,
+                "ChildCategories": [
+                  {
+                    "CategoryId": 687,
+                    "ChildCategories": [],
+                    "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/200/280/629/296%3B-4040047-5%3B-D%3B-14_tmb.jpg",
+                    "Name": "Instrumentation, Op Amps, Buffer Amps",
+                    "NewProductCount": 0,
+                    "ParentId": 2034,
+                    "ProductCount": 0,
+                    "SeoDescription": "Products in this family are used for the reproduction of analog signals with an attendant increase in amplitude, reduction of source impedance, and/or isolation of a signal source from a driven load, as well as performing mathematical operations on analog signals such as summation, negation, integration, etc. Instrumentation amplifiers, chopper stabilized/auto-zero/zero-drift amplifiers, and current feedback types are included."
+                  }
+                ],
+                "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/003/125/945/488~846A-02~DM%2C-CUA%2C-DMR2%2C-RM~8_tmb%2864x64%29.jpg",
+                "Name": "Amplifiers",
+                "NewProductCount": 0,
+                "ParentId": 2018,
+                "ProductCount": 0,
+                "SeoDescription": ""
+              }
+            ],
+            "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/030/156/264~11-10C4~~8_tmb.jpg",
+            "Name": "Linear",
+            "NewProductCount": 0,
+            "ParentId": 32,
+            "ProductCount": 0,
+            "SeoDescription": "Linear circuits and component parameters remain unchanged in regard to voltage and current levels. Included in this category are amplifiers, OP Amps, video amps and modules, analog multipliers, dividers, comparators, video processing, and more."
+          }
+        ],
+        "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/010/153/598/8-SOIC%2CM8_tmb.jpg",
+        "Name": "Integrated Circuits (ICs)",
+        "NewProductCount": 0,
+        "ParentId": 0,
+        "ProductCount": 0,
+        "SeoDescription": "Integrated circuits combine a large number of transistors and other elementary electronic components in miniaturized form into a single physical device, that is designed for a specific purpose or function and characterized by its performance of that function rather than by the behavior of its component pieces. Examples include microcontrollers, battery monitors and charge controllers, analog to digital converters, operational amplifiers, logic gates, voltage regulators, gate drivers, motro controllers, and others."
+      },
+      "Classifications": {
+        "ExportControlClassNumber": "EAR99",
+        "HtsusCode": "8542.33.0001",
+        "MoistureSensitivityLevel": "1  (Unlimited)",
+        "ReachStatus": "REACH Unaffected",
+        "RohsStatus": "ROHS3 Compliant"
+      },
+      "DatasheetUrl": "https://www.ti.com/general/docs/suppproductinfo.tsp?distId=10&gotoUrl=https%3A%2F%2Fwww.ti.com%2Flit%2Fgpn%2Flm358",
+      "Description": {
+        "DetailedDescription": "Standard (General Purpose) Amplifier 2 Circuit 8-SOIC",
+        "ProductDescription": "IC OP AMP 2CH 8-SOIC"
+      },
+      "Discontinued": false,
+      "EndOfLife": false,
+      "Manufacturer": {
+        "Id": 296,
+        "Name": "Texas Instruments"
+      },
+      "ManufacturerLeadWeeks": "26",
+      "ManufacturerProductNumber": "LM358ADR",
+      "ManufacturerPublicQuantity": 0,
+      "Ncnr": false,
+      "NormallyStocking": true,
+      "OtherNames": [
+        "-LM358ADR-NDR",
+        "-LM358ADRE4-NDR",
+        "TEXTISLM358ADR",
+        "-LM358ADRG4-NDR",
+        "-296-14601-1",
+        "296-14601-6-NDR",
+        "-LM358ADRG4",
+        "-LM358ADRE4",
+        "296-14601-6",
+        "296-14601-1",
+        "-296-14601-1-ND",
+        "2156-LM358ADR",
+        "296-14601-2"
+      ],
+      "Parameters": [
+        {
+          "ParameterId": 161,
+          "ParameterText": "Amplifier Type",
+          "ParameterType": "String",
+          "ValueId": "863824",
+          "ValueText": "Standard (General Purpose)"
+        },
+        {
+          "ParameterId": 2094,
+          "ParameterText": "Number of Circuits",
+          "ParameterType": "Double",
+          "ValueId": "2",
+          "ValueText": "2"
+        },
+        {
+          "ParameterId": 41,
+          "ParameterText": "Output Type",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 511,
+          "ParameterText": "Slew Rate",
+          "ParameterType": "String",
+          "ValueId": "21929",
+          "ValueText": "0.3V/µs"
+        },
+        {
+          "ParameterId": 658,
+          "ParameterText": "Gain Bandwidth Product",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "700 kHz",
+          "ValueText": "700 kHz"
+        },
+        {
+          "ParameterId": 974,
+          "ParameterText": "Current - Input Bias",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "15 nA",
+          "ValueText": "15 nA"
+        },
+        {
+          "ParameterId": 975,
+          "ParameterText": "Voltage - Input Offset",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "2 mV",
+          "ValueText": "2 mV"
+        },
+        {
+          "ParameterId": 449,
+          "ParameterText": "Current - Supply",
+          "ParameterType": "String",
+          "ValueId": "483791",
+          "ValueText": "500µA (x2 Channels)"
+        },
+        {
+          "ParameterId": 2115,
+          "ParameterText": "Current - Output / Channel",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "40 mA",
+          "ValueText": "40 mA"
+        },
+        {
+          "ParameterId": 2609,
+          "ParameterText": "Voltage - Supply Span (Min)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "3 V",
+          "ValueText": "3 V"
+        },
+        {
+          "ParameterId": 2610,
+          "ParameterText": "Voltage - Supply Span (Max)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "30 V",
+          "ValueText": "30 V"
+        },
+        {
+          "ParameterId": 252,
+          "ParameterText": "Operating Temperature",
+          "ParameterType": "String",
+          "ValueId": "38985",
+          "ValueText": "0°C ~ 70°C (TA)"
+        },
+        {
+          "ParameterId": 69,
+          "ParameterText": "Mounting Type",
+          "ParameterType": "String",
+          "ValueId": "409393",
+          "ValueText": "Surface Mount"
+        },
+        {
+          "ParameterId": 16,
+          "ParameterText": "Package / Case",
+          "ParameterType": "String",
+          "ValueId": "294928",
+          "ValueText": "8-SOIC (0.154\", 3.90mm Width)"
+        },
+        {
+          "ParameterId": 1291,
+          "ParameterText": "Supplier Device Package",
+          "ParameterType": "String",
+          "ValueId": "294926",
+          "ValueText": "8-SOIC"
+        }
+      ],
+      "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/8900/MFG_296%7E4040047-3%7ED%7E8.jpg",
+      "PrimaryVideoUrl": "",
+      "ProductStatus": {
+        "Id": 0,
+        "Status": "Active"
+      },
+      "ProductUrl": "https://www.digikey.com/en/products/detail/texas-instruments/LM358ADR/555721",
+      "ProductVariations": [
+        {
+          "DigiKeyProductNumber": "296-14601-2-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 2500,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 1,
+            "Name": "Tape & Reel (TR)"
+          },
+          "QuantityAvailableforPackageType": 65000,
+          "StandardPackage": 2500,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 2500,
+              "TotalPrice": 284.375,
+              "UnitPrice": 0.11375
+            },
+            {
+              "BreakQuantity": 5000,
+              "TotalPrice": 550.6,
+              "UnitPrice": 0.11012
+            },
+            {
+              "BreakQuantity": 7500,
+              "TotalPrice": 812.25,
+              "UnitPrice": 0.1083
+            },
+            {
+              "BreakQuantity": 12500,
+              "TotalPrice": 1328.625,
+              "UnitPrice": 0.10629
+            },
+            {
+              "BreakQuantity": 17500,
+              "TotalPrice": 1839.425,
+              "UnitPrice": 0.10511
+            },
+            {
+              "BreakQuantity": 25000,
+              "TotalPrice": 2599.5,
+              "UnitPrice": 0.10398
+            }
+          ],
+          "Supplier": {
+            "Id": 296,
+            "Name": "Texas Instruments"
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "296-14601-1-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 2,
+            "Name": "Cut Tape (CT)"
+          },
+          "QuantityAvailableforPackageType": 65135,
+          "StandardPackage": 1,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.28,
+              "UnitPrice": 0.28
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 1.9,
+              "UnitPrice": 0.19
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 4.2,
+              "UnitPrice": 0.168
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 14.39,
+              "UnitPrice": 0.1439
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 33.1,
+              "UnitPrice": 0.1324
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 62.74,
+              "UnitPrice": 0.12548
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 119.78,
+              "UnitPrice": 0.11978
+            }
+          ],
+          "Supplier": {
+            "Id": 296,
+            "Name": "Texas Instruments"
+          },
+          "TariffActive": true
+        },
+        {
+          "DigiKeyProductNumber": "296-14601-6-ND",
+          "DigiReelFee": 7.0,
+          "MarketPlace": false,
+          "MaxQuantityForDistribution": 999999999,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 243,
+            "Name": "Digi-Reel®"
+          },
+          "QuantityAvailableforPackageType": 65135,
+          "StandardPackage": 1,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.28,
+              "UnitPrice": 0.28
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 1.9,
+              "UnitPrice": 0.19
+            },
+            {
+              "BreakQuantity": 25,
+              "TotalPrice": 4.2,
+              "UnitPrice": 0.168
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 14.39,
+              "UnitPrice": 0.1439
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 33.1,
+              "UnitPrice": 0.1324
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 62.74,
+              "UnitPrice": 0.12548
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 119.78,
+              "UnitPrice": 0.11978
+            }
+          ],
+          "Supplier": {
+            "Id": 296,
+            "Name": "Texas Instruments"
+          },
+          "TariffActive": true
+        }
+      ],
+      "QuantityAvailable": 65135,
+      "Series": {
+        "Id": 818,
+        "Name": "-"
+      },
+      "UnitPrice": 0.28
+    },
+    {
+      "BackOrderNotAllowed": false,
+      "BaseProductNumber": {
+        "Id": 376,
+        "Name": "LM358"
+      },
+      "Category": {
+        "CategoryId": 32,
+        "ChildCategories": [
+          {
+            "CategoryId": 2018,
+            "ChildCategories": [
+              {
+                "CategoryId": 2034,
+                "ChildCategories": [
+                  {
+                    "CategoryId": 687,
+                    "ChildCategories": [],
+                    "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/200/280/629/296%3B-4040047-5%3B-D%3B-14_tmb.jpg",
+                    "Name": "Instrumentation, Op Amps, Buffer Amps",
+                    "NewProductCount": 0,
+                    "ParentId": 2034,
+                    "ProductCount": 0,
+                    "SeoDescription": "Products in this family are used for the reproduction of analog signals with an attendant increase in amplitude, reduction of source impedance, and/or isolation of a signal source from a driven load, as well as performing mathematical operations on analog signals such as summation, negation, integration, etc. Instrumentation amplifiers, chopper stabilized/auto-zero/zero-drift amplifiers, and current feedback types are included."
+                  }
+                ],
+                "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/003/125/945/488~846A-02~DM%2C-CUA%2C-DMR2%2C-RM~8_tmb%2864x64%29.jpg",
+                "Name": "Amplifiers",
+                "NewProductCount": 0,
+                "ParentId": 2018,
+                "ProductCount": 0,
+                "SeoDescription": ""
+              }
+            ],
+            "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/030/156/264~11-10C4~~8_tmb.jpg",
+            "Name": "Linear",
+            "NewProductCount": 0,
+            "ParentId": 32,
+            "ProductCount": 0,
+            "SeoDescription": "Linear circuits and component parameters remain unchanged in regard to voltage and current levels. Included in this category are amplifiers, OP Amps, video amps and modules, analog multipliers, dividers, comparators, video processing, and more."
+          }
+        ],
+        "ImageUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/derivates/3/010/153/598/8-SOIC%2CM8_tmb.jpg",
+        "Name": "Integrated Circuits (ICs)",
+        "NewProductCount": 0,
+        "ParentId": 0,
+        "ProductCount": 0,
+        "SeoDescription": "Integrated circuits combine a large number of transistors and other elementary electronic components in miniaturized form into a single physical device, that is designed for a specific purpose or function and characterized by its performance of that function rather than by the behavior of its component pieces. Examples include microcontrollers, battery monitors and charge controllers, analog to digital converters, operational amplifiers, logic gates, voltage regulators, gate drivers, motro controllers, and others."
+      },
+      "Classifications": {
+        "ExportControlClassNumber": "EAR99",
+        "HtsusCode": "8542.33.0001",
+        "MoistureSensitivityLevel": "Not Applicable",
+        "ReachStatus": "REACH Unaffected",
+        "RohsStatus": "ROHS3 Compliant"
+      },
+      "DatasheetUrl": "https://www.ti.com/general/docs/suppproductinfo.tsp?distId=10&gotoUrl=https%3A%2F%2Fwww.ti.com%2Flit%2Fgpn%2Flm358",
+      "Description": {
+        "DetailedDescription": "Standard (General Purpose) Amplifier 2 Circuit 8-PDIP",
+        "ProductDescription": "IC OP AMP 2CH 8-PDIP"
+      },
+      "Discontinued": false,
+      "EndOfLife": false,
+      "Manufacturer": {
+        "Id": 296,
+        "Name": "Texas Instruments"
+      },
+      "ManufacturerLeadWeeks": "26",
+      "ManufacturerProductNumber": "LM358P",
+      "ManufacturerPublicQuantity": 0,
+      "Ncnr": false,
+      "NormallyStocking": true,
+      "OtherNames": [
+        "-296-1395-5-ND",
+        "-LM358PE4-NDR",
+        "296-1395-5",
+        "-296-1395-5",
+        "296-1395",
+        "-LM358PE4",
+        "-LM358P-NDR"
+      ],
+      "Parameters": [
+        {
+          "ParameterId": 161,
+          "ParameterText": "Amplifier Type",
+          "ParameterType": "String",
+          "ValueId": "863824",
+          "ValueText": "Standard (General Purpose)"
+        },
+        {
+          "ParameterId": 2094,
+          "ParameterText": "Number of Circuits",
+          "ParameterType": "Double",
+          "ValueId": "2",
+          "ValueText": "2"
+        },
+        {
+          "ParameterId": 41,
+          "ParameterText": "Output Type",
+          "ParameterType": "String",
+          "ValueId": "1",
+          "ValueText": "-"
+        },
+        {
+          "ParameterId": 511,
+          "ParameterText": "Slew Rate",
+          "ParameterType": "String",
+          "ValueId": "21929",
+          "ValueText": "0.3V/µs"
+        },
+        {
+          "ParameterId": 658,
+          "ParameterText": "Gain Bandwidth Product",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "700 kHz",
+          "ValueText": "700 kHz"
+        },
+        {
+          "ParameterId": 974,
+          "ParameterText": "Current - Input Bias",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "20 nA",
+          "ValueText": "20 nA"
+        },
+        {
+          "ParameterId": 975,
+          "ParameterText": "Voltage - Input Offset",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "3 mV",
+          "ValueText": "3 mV"
+        },
+        {
+          "ParameterId": 449,
+          "ParameterText": "Current - Supply",
+          "ParameterType": "String",
+          "ValueId": "483791",
+          "ValueText": "500µA (x2 Channels)"
+        },
+        {
+          "ParameterId": 2115,
+          "ParameterText": "Current - Output / Channel",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "40 mA",
+          "ValueText": "40 mA"
+        },
+        {
+          "ParameterId": 2609,
+          "ParameterText": "Voltage - Supply Span (Min)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "3 V",
+          "ValueText": "3 V"
+        },
+        {
+          "ParameterId": 2610,
+          "ParameterText": "Voltage - Supply Span (Max)",
+          "ParameterType": "UnitOfMeasure",
+          "ValueId": "30 V",
+          "ValueText": "30 V"
+        },
+        {
+          "ParameterId": 252,
+          "ParameterText": "Operating Temperature",
+          "ParameterType": "String",
+          "ValueId": "38985",
+          "ValueText": "0°C ~ 70°C (TA)"
+        },
+        {
+          "ParameterId": 69,
+          "ParameterText": "Mounting Type",
+          "ParameterType": "String",
+          "ValueId": "411897",
+          "ValueText": "Through Hole"
+        },
+        {
+          "ParameterId": 16,
+          "ParameterText": "Package / Case",
+          "ParameterType": "String",
+          "ValueId": "294032",
+          "ValueText": "8-DIP (0.300\", 7.62mm)"
+        },
+        {
+          "ParameterId": 1291,
+          "ParameterText": "Supplier Device Package",
+          "ParameterType": "String",
+          "ValueId": "294755",
+          "ValueText": "8-PDIP"
+        }
+      ],
+      "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/6222/296%7E4040082%7EP%7E8.jpg",
+      "PrimaryVideoUrl": "",
+      "ProductStatus": {
+        "Id": 0,
+        "Status": "Active"
+      },
+      "ProductUrl": "https://www.digikey.com/en/products/detail/texas-instruments/LM358P/277042",
+      "ProductVariations": [
+        {
+          "DigiKeyProductNumber": "296-1395-5-ND",
+          "DigiReelFee": 0.0,
+          "MarketPlace": false,
+          "MinimumOrderQuantity": 1,
+          "MyPricing": [],
+          "PackageType": {
+            "Id": 6,
+            "Name": "Tube"
+          },
+          "QuantityAvailableforPackageType": 2271,
+          "StandardPricing": [
+            {
+              "BreakQuantity": 1,
+              "TotalPrice": 0.33,
+              "UnitPrice": 0.33
+            },
+            {
+              "BreakQuantity": 10,
+              "TotalPrice": 2.31,
+              "UnitPrice": 0.231
+            },
+            {
+              "BreakQuantity": 50,
+              "TotalPrice": 9.49,
+              "UnitPrice": 0.1898
+            },
+            {
+              "BreakQuantity": 100,
+              "TotalPrice": 17.68,
+              "UnitPrice": 0.1768
+            },
+            {
+              "BreakQuantity": 250,
+              "TotalPrice": 40.81,
+              "UnitPrice": 0.16324
+            },
+            {
+              "BreakQuantity": 500,
+              "TotalPrice": 77.51,
+              "UnitPrice": 0.15502
+            },
+            {
+              "BreakQuantity": 1000,
+              "TotalPrice": 148.27,
+              "UnitPrice": 0.14827
+            },
+            {
+              "BreakQuantity": 2500,
+              "TotalPrice": 358.05,
+              "UnitPrice": 0.14322
+            }
+          ],
+          "Supplier": {
+            "Id": 296,
+            "Name": "Texas Instruments"
+          },
+          "TariffActive": true
+        }
+      ],
+      "QuantityAvailable": 2271,
+      "Series": {
+        "Id": 818,
+        "Name": "-"
+      },
+      "UnitPrice": 0.33
+    }
+  ],
+  "ProductsCount": 144,
+  "SearchLocaleUsed": {
+    "Currency": "USD",
+    "Language": "en",
+    "Site": "US"
+  }
+}
