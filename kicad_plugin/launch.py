@@ -43,7 +43,12 @@ def project_path():
     try:
         from kipy import KiCad
 
-        return KiCad().get_board().document.project.path or ""
+        kicad = KiCad()
+        try:
+            doc = kicad.get_board().document
+        except Exception:  # not the PCB editor: KiCad 10 also offers the schematic
+            doc = kicad.get_schematic().document
+        return doc.project.path or ""
     except ImportError:
         raise
     except Exception as e:  # no board open, or KiCad's API refused
