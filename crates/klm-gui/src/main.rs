@@ -31,7 +31,7 @@ use klm_core::sources::Source;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use tabs::ui_kit::{Level, Section};
+use tabs::ui_kit::{self, Level, Section};
 use tabs::{bom, cleanup, history, import, library, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
@@ -42,8 +42,6 @@ enum Msg {
     #[allow(dead_code)]
     LogAt(Level, String),
     OpenSettings(Section),
-    /// Re-add KLM libraries missing from KiCad's tables.
-    Relink,
     /// Add queued libraries to KiCad's tables, after the close-KiCad prompt if it is open.
     ApplyPending,
     MoveGlobal(PathBuf),
@@ -196,6 +194,8 @@ struct App {
     cleanup_tab: cleanup::CleanupTab,
     bom_tab: bom::BomTab,
     settings_tab: settings::SettingsTab,
+    log_open: bool,
+    checklist_hidden: bool,
 }
 
 fn main() -> eframe::Result {
@@ -206,11 +206,16 @@ fn main() -> eframe::Result {
         klm_core::settings::set_sandbox(Path::new(dir));
     }
     let project_arg = args.iter().position(|a| a == "--project").and_then(|i| args.get(i + 1)).map(PathBuf::from);
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([820.0, 560.0]).with_title("KiCad Library Manager"),
+    eframe::run_native("KiCad Library Manager", native_options(), Box::new(|cc| Ok(Box::new(App::new(&cc.egui_ctx, project_arg)))))
+}
+
+/// Window size and position are remembered between runs, in the config folder (so a sandbox keeps them too).
+fn native_options() -> eframe::NativeOptions {
+    eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 800.0]).with_title("KiCad Library Manager"),
+        persistence_path: klm_core::settings::app_dir().map(|d| d.join("window.ron")),
         ..Default::default()
-    };
-    eframe::run_native("KiCad Library Manager", options, Box::new(|cc| Ok(Box::new(App::new(&cc.egui_ctx, project_arg)))))
+    }
 }
 
 fn project_dir(p: &Path) -> PathBuf {
@@ -235,6 +240,7 @@ impl App {
         if let Some(p) = &project_arg {
             settings.last_project = Some(project_dir(p));
         }
+        let settings_ready = settings.global_root.is_some();
         let (tx, rx) = channel();
         let sources = Arc::new(klm_core::sources::all(&settings));
         let mut cx = AppCtx {
@@ -244,7 +250,7 @@ impl App {
             settings,
             sources,
             busy: false,
-            tab: Tab::Import,
+            tab: if settings_ready { Tab::Library } else { Tab::Import },
             log: Log::default(),
             tx,
             blocked: None,
@@ -267,6 +273,8 @@ impl App {
             cleanup_tab: cleanup::CleanupTab::default(),
             bom_tab: bom::BomTab::default(),
             settings_tab: settings::SettingsTab::new(),
+            log_open: true,
+            checklist_hidden: false,
             cx,
             rx,
         };
@@ -304,7 +312,7 @@ impl App {
                 (true, false) => "Some KLM libraries are missing from KiCad's library list",
                 _ => "Some KLM libraries use old ${KLM_LIB} paths",
             };
-            self.cx.log.push(format!("{what}. Close KiCad, then click \"Relink libraries\"."));
+            self.cx.log.push(format!("{what}. Close KiCad, then click \"Relink libraries\" on the Library tab."));
         } else {
             self.relink();
         }
@@ -361,7 +369,6 @@ impl App {
                 Msg::Log(s) => self.cx.log.push(s),
                 Msg::LogAt(level, s) => self.cx.log(level, s),
                 Msg::OpenSettings(_) => self.settings_tab.open(),
-                Msg::Relink => self.relink(),
                 Msg::ApplyPending => self.apply_pending(),
                 Msg::MoveGlobal(dir) => self.move_global(&dir),
                 Msg::Search(m) => self.search_tab.handle(m, &mut self.cx),
@@ -406,6 +413,38 @@ impl App {
         }
     }
 
+    /// The first-run steps still open, each with a button to the Settings page for it. Hidden once all are done.
+    fn checklist(&mut self, ui: &mut egui::Ui) {
+        let cx = &self.cx;
+        // W7.1 adds Libraries / KiCad / Sources / Watch folders pages; point each step at its own then.
+        let steps = [
+            ("Global library", cx.settings.global_root.is_some(), Section::General),
+            ("KiCad found", cx.kicad_config.is_ok(), Section::General),
+            ("A source enabled", !cx.sources.is_empty(), Section::General),
+            ("A watch folder", !cx.settings.watch_dirs.is_empty(), Section::General),
+        ];
+        if self.checklist_hidden || steps.iter().all(|s| s.1) {
+            return;
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Set up:");
+            for (name, done, section) in steps {
+                if done {
+                    ui.colored_label(Level::Ok.color(ui.visuals()), format!("✔ {name}"));
+                } else {
+                    ui.colored_label(Level::Warn.color(ui.visuals()), format!("☐ {name}"));
+                    if ui.small_button("Open").on_hover_text(format!("Settings: {name}")).clicked() {
+                        cx.open_settings(section);
+                    }
+                }
+            }
+            if ui.small_button("Hide").clicked() {
+                self.checklist_hidden = true;
+            }
+        });
+        ui.separator();
+    }
+
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let cx = &mut self.cx;
         egui::Grid::new("roots").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
@@ -428,9 +467,6 @@ impl App {
                         cx.when_kicad_closed(Msg::ApplyPending);
                     }
                 }
-                if ui.button("Relink libraries").on_hover_text("Add any KLM libraries missing from KiCad's library list").clicked() {
-                    cx.send(Msg::Relink);
-                }
             });
             ui.end_row();
 
@@ -448,7 +484,7 @@ impl App {
                         cx.send(Msg::Library(library::Msg::Refresh));
                     }
                 }
-                if cx.project.is_some() && ui.button("Clear").clicked() {
+                if cx.project.is_some() && ui.button("Close project").clicked() {
                     cx.project = None;
                     cx.send(Msg::Library(library::Msg::Refresh));
                 }
@@ -474,24 +510,29 @@ impl eframe::App for App {
             self.top_bar(ui);
             ui.add_space(6.0);
         });
-        egui::Panel::bottom("log").resizable(true).default_size(120.0).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Clear").clicked() {
-                    self.cx.log.clear();
-                }
-                if ui.button("Copy").on_hover_text("Copy all log lines to the clipboard").clicked() {
-                    ui.ctx().copy_text(self.cx.log.text());
-                }
+        if self.log_open {
+            egui::Panel::bottom("log").resizable(true).default_size(90.0).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Clear").clicked() {
+                        self.cx.log.clear();
+                    }
+                    if ui.button("Copy").on_hover_text("Copy all log lines to the clipboard").clicked() {
+                        ui.ctx().copy_text(self.cx.log.text());
+                    }
+                    if ui.button("Hide").clicked() {
+                        self.log_open = false;
+                    }
+                });
+                egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink(false).show(ui, |ui| {
+                    for (level, line) in &self.cx.log.lines {
+                        match level {
+                            Level::Info => ui.label(line),
+                            _ => ui.colored_label(level.color(ui.visuals()), line),
+                        };
+                    }
+                });
             });
-            egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink(false).show(ui, |ui| {
-                for (level, line) in &self.cx.log.lines {
-                    match level {
-                        Level::Info => ui.label(line),
-                        _ => ui.colored_label(level.color(ui.visuals()), line),
-                    };
-                }
-            });
-        });
+        }
         egui::CentralPanel::default_margins().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.cx.tab, Tab::Search, RichText::new("Search").heading());
@@ -504,9 +545,21 @@ impl eframe::App for App {
                     if ui.button("Settings…").clicked() {
                         self.cx.open_settings(Section::General);
                     }
+                    if !self.log_open && ui.button("Show log").clicked() {
+                        self.log_open = true;
+                    }
+                    let errors = self.cx.log.errors();
+                    if errors > 0 {
+                        let text = format!("{errors} error{}", if errors == 1 { "" } else { "s" });
+                        let r = ui_kit::badge(ui, &text, Level::Error);
+                        if ui.interact(r.rect, ui.scope_id().with("error_badge"), egui::Sense::click()).on_hover_text("Show the log").clicked() {
+                            self.log_open = true;
+                        }
+                    }
                 });
             });
             ui.separator();
+            self.checklist(ui);
             match self.cx.tab {
                 Tab::Search => self.search_tab.ui(ui, &mut self.cx),
                 Tab::Import => self.import_tab.ui(ui, &mut self.cx),
@@ -518,9 +571,13 @@ impl eframe::App for App {
         });
 
         self.import_tab.dialogs(&mut self.cx);
-        self.library_tab.dialogs(&mut self.cx);
-        self.history_tab.dialogs(&mut self.cx);
-        self.cleanup_tab.dialogs(&mut self.cx);
+        // Floating windows are only drawn on their own tab; their state survives the switch.
+        match self.cx.tab {
+            Tab::Library => self.library_tab.dialogs(&mut self.cx),
+            Tab::History => self.history_tab.dialogs(&mut self.cx),
+            Tab::Cleanup => self.cleanup_tab.dialogs(&mut self.cx),
+            _ => {}
+        }
         self.settings_tab.dialogs(&mut self.cx);
         self.kicad_open_prompt();
     }
