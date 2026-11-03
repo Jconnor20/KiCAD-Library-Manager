@@ -18,6 +18,11 @@
 
 mod tabs;
 
+// Headless UI tests live in tests/gui/ (outside src/ so the folder reads as tests); they are a child module to reach private state.
+#[cfg(test)]
+#[path = "../tests/gui/mod.rs"]
+mod gui_tests;
+
 use eframe::egui::{self, RichText};
 use klm_core::kicad_env;
 use klm_core::library::LibraryRoot;

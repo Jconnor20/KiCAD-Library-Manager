@@ -58,7 +58,7 @@ pub struct LibraryTab {
     /// run on a thread and arrive after the listing.
     checks: Option<HashMap<(String, String), Vec<Issue>>>,
     checks_rx: Option<mpsc::Receiver<HashMap<(String, String), Vec<Issue>>>>,
-    attach_dialog: Option<AttachDialog>,
+    pub(crate) attach_dialog: Option<AttachDialog>,
     /// A worker is downloading datasheets.
     downloading: bool,
     /// Ticked rows, as (category, name).
@@ -660,7 +660,7 @@ enum AttachAction {
 }
 
 /// Asks which libraries a picked datasheet, sim or 3D model file goes into.
-struct AttachDialog {
+pub struct AttachDialog {
     /// The library the part was listed in, which holds the part.
     from: Scope,
     category: String,
@@ -671,7 +671,7 @@ struct AttachDialog {
 }
 
 impl AttachDialog {
-    fn new(from: Scope, category: String, name: String, path: PathBuf) -> Self {
+    pub fn new(from: Scope, category: String, name: String, path: PathBuf) -> Self {
         Self { from, category, name, path, to_global: from == Scope::Global, to_project: from == Scope::Project }
     }
 
