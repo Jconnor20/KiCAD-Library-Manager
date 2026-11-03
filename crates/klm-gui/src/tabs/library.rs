@@ -347,7 +347,7 @@ impl LibraryTab {
                 attach_to_selected = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
             }
             alternatives = ui.button("Alternatives…").on_hover_text("Find duplicates and equivalent parts, and mark preferred ones").clicked();
-            relink_all = ui.button("Relink all").on_hover_text("Add every KLM library missing from KiCad's library list").clicked();
+            relink_all = ui.button("Relink libraries").on_hover_text("Add every KLM library missing from KiCad's library list").clicked();
             download = ui
                 .add_enabled(!self.downloading, egui::Button::new("Download missing datasheets"))
                 .on_hover_text("Save a local PDF for every part whose datasheet is only a web link")

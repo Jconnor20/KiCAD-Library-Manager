@@ -297,7 +297,7 @@ impl App {
                         cx.when_kicad_closed(Msg::MoveGlobal(d));
                     }
                 }
-                if ui.button("Re-link libraries").on_hover_text("Add any KLM libraries missing from KiCad's library list").clicked() {
+                if ui.button("Relink libraries").on_hover_text("Add any KLM libraries missing from KiCad's library list").clicked() {
                     cx.when_kicad_closed(Msg::Relink);
                 }
             });
