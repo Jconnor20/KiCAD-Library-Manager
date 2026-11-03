@@ -34,7 +34,7 @@ pub struct Scan {
 
 /// Files of another tool that `kicad-cli` may be able to convert.
 fn is_foreign(p: &Path) -> bool {
-    p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["lbr", "schlib", "pcblib", "intlib", "epro", "elib"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["lbr", "schlib", "pcblib", "intlib", "epro", "elib", "elibz", "elibz2"].iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 const SKIP_DIRS: &[&str] = &[crate::snapshot::DIR, ".git", "node_modules"];
@@ -95,6 +95,7 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
     walk(root, &mut files);
     let mut out = Scan::default();
     out.unsupported.extend(files.libpkgs.iter().map(|p| format!("{}: an Altium project, not a library; pick the .SchLib and .PcbLib files next to it instead", p.display())));
+    let mut footprints_only = false;
     // Other tools' libraries: convert into `work`, then treat the result like any KiCad library.
     for (i, p) in std::mem::take(&mut files.foreign).iter().enumerate() {
         let (dir, stem) = (work.join(format!("conv{i}")), lib_stem(p));
@@ -103,6 +104,7 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
         let p = &if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lbr")) && std::fs::read_to_string(p).is_ok_and(|t| std::fs::write(&fixed, fix_eagle_numbers(&t)).is_ok()) { fixed } else { p.clone() };
         let sym = kicad_env::upgrade_symbols(p, &dir.join(format!("{stem}.kicad_sym")));
         let fp = kicad_env::upgrade_footprints(p, &dir.join(format!("{stem}.pretty")));
+        footprints_only |= sym.is_err() && fp.is_ok();
         if sym.is_err() && fp.is_err() {
             out.unsupported.push(format!("{}: kicad-cli could not convert it. kicad-cli said: {}; {}", p.display(), first_line(&sym.unwrap_err()), first_line(&fp.unwrap_err())));
         } else if sym.is_err() && !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pcblib")) {
@@ -120,6 +122,9 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
         }
     }
     if libs.is_empty() && out.unsupported.is_empty() {
+        if footprints_only {
+            bail!("{} has footprints but no symbol, so there is no part to import; add the footprints to a part with a symbol first", root.display());
+        }
         bail!("no KiCad symbol libraries (.kicad_sym) found in {}", root.display());
     }
 
@@ -299,5 +304,14 @@ mod tests {
         assert_eq!(property(&b, "Reference"), Some("U"));
         assert_eq!(b.children("symbol").next().unwrap().arg(0), Some("B_1_1"));
         assert!(b.child("extends").is_none());
+    }
+
+    #[test]
+    fn easyeda_pro_library_files_are_tried_not_ignored() {
+        // Found by the W6.2 corpus: an .elibz2 used to be skipped without a word.
+        for f in ["a.elibz2", "a.ELIBZ", "a.epro", "a.IntLib"] {
+            assert!(is_foreign(Path::new(f)), "{f}");
+        }
+        assert!(!is_foreign(Path::new("a.json")));
     }
 }
