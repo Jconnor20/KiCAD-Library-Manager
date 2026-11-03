@@ -19,26 +19,24 @@ fn select(h: &mut Gui, mpn: &str) {
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b2_alternatives_window_stays_on_its_tab() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     click(&mut h, "Alternatives…");
     assert!(h.query_by_label("Alternatives and duplicates").is_some(), "Alternatives did not open");
-    click(&mut h, "History");
-    bug!(h.query_by_label("Alternatives and duplicates").is_none(), "Alternatives window is still shown on the History tab");
+    super::shell::goto(&mut h, Tab::History);
+    assert!(h.query_by_label("Alternatives and duplicates").is_none(), "Alternatives window is still shown on the History tab");
 }
 
 #[test]
-#[should_panic(expected = "KNOWN BUG")]
 fn b2_preview_window_stays_on_its_tab() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     select(&mut h, "RP2040");
     click(&mut h, "Preview");
     assert!(h.query_by_label("Preview: RP2040").is_some(), "Preview did not open");
-    click(&mut h, "History");
-    bug!(h.query_by_label("Preview: RP2040").is_none(), "Preview window is still shown on the History tab");
+    super::shell::goto(&mut h, Tab::History);
+    assert!(h.query_by_label("Preview: RP2040").is_none(), "Preview window is still shown on the History tab");
 }
 
 /// Everything the Search tab draws that matters must sit inside the window, and the log may take 25% at most.
@@ -66,7 +64,7 @@ fn b3_search_header_is_not_clipped_at_both_sizes() {
         let mut h = app(size, Tab::Search);
         with_probe(&mut h);
         let search = h.get_all_by_label("Search").last().unwrap().rect();
-        let top = h.get_by_label("Relink libraries").rect().max.y;
+        let top = h.get_by_label("Choose project…").rect().max.y;
         assert!(search.min.y > top && search.max.y <= size.1, "Search box misplaced at {size:?}: {search:?}");
         assert_nothing_clipped(&h, size, "Search");
     }

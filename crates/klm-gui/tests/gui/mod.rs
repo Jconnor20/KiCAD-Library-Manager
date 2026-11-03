@@ -8,3 +8,4 @@ mod screens;
 mod bugs;
 mod kit;
 mod settings;
+mod shell;
