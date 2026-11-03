@@ -218,7 +218,7 @@ impl App {
                 (true, false) => "Some KLM libraries are missing from KiCad's library list",
                 _ => "Some KLM libraries use old ${KLM_LIB} paths",
             };
-            self.cx.log.push(format!("{what}. Close KiCad, then click \"Re-link libraries\"."));
+            self.cx.log.push(format!("{what}. Close KiCad, then click \"Relink libraries\"."));
         } else {
             self.relink();
         }
