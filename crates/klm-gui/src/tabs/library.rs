@@ -324,7 +324,7 @@ impl LibraryTab {
                 self.finder_results = None;
             }
         }
-        if self.alternatives.as_mut().is_some_and(|a| !a.window(&cx.ctx, &mut cx.log)) {
+        if self.alternatives.as_mut().is_some_and(|a| !a.window(cx)) {
             self.alternatives = None;
         }
         if let Some((title, panel)) = &mut self.preview {
