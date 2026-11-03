@@ -20,8 +20,8 @@ These have passed automated tests but haven't been checked by hand in the app or
 ## Sources
 
 - [ ] **LCSC, several part types.** Search and import a connector, a multi-unit op-amp (e.g. LM358 in a dual package) and a part with odd-shaped pads. Expect the preview and the KiCad footprint to match the datasheet drawing: pin positions, pad sizes, pin-1 location.
-- [ ] **Ultra Librarian ZIP.** Download one part's KiCad ZIP. Expect it to appear under **Import** and import cleanly. (Only SamacSys and SnapMagic downloads have been tried so far.)
-- [ ] **Legacy `.lib` symbol.** Import a ZIP whose symbol is an old-style `.lib` (older SamacSys/UL downloads). Expect the pin/pad check to run on it rather than say it can't be read. This fix is unconfirmed on a real file.
+- [ ] **Ultra Librarian ZIP.** Download one part's KiCad ZIP. Expect it to appear under **Import** and import cleanly. `corpus_e2e.rs` proves it on four real Ultra Librarian ZIPs (KiCad, Altium, Fusion, combined); the GUI click-through is still yours.
+- [ ] **Legacy `.lib` symbol.** Import a ZIP whose symbol is an old-style `.lib` (older SamacSys/UL downloads). Expect the pin/pad check to run on it rather than say it can't be read. `corpus_e2e.rs` proves import and rendering on KiCad's real legacy `Regulator_Linear.lib`; the pin/pad check inside the GUI is still yours.
 - [ ] **DigiKey.** Enter your client ID and secret in **Settings → DigiKey**, then click **Test**. Expect results for LM358. Then search a real part from the Search tab.
 - [ ] **Mouser.** Same as DigiKey, with your API key.
 - [ ] **Nexar (Octopart).** Same as DigiKey, with your client ID and secret.
