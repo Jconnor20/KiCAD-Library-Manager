@@ -211,6 +211,7 @@ fn c08_ultra_librarian_zips() {
 fn c09_stl_only_zip_attaches_to_an_existing_part() {
     let Some(cli) = cli() else { return };
     let Some(ul) = corpus("ul_4515DO-DS3BK004DP (1).zip") else { return };
+    let Some(lcsc) = corpus("corpus/lcsc_C14663.json") else { return };
     // The vendor's own STL, alone in a ZIP.
     let mut src = zip::ZipArchive::new(std::fs::File::open(ul).unwrap()).unwrap();
     let mut stl = vec![];
@@ -232,7 +233,7 @@ fn c09_stl_only_zip_attaches_to_an_existing_part() {
     assert!(part.warnings.iter().any(|w| w.contains("STL")), "{:?}", part.warnings);
 
     // Attach it to a part that has a footprint (an LCSC one, as in C06).
-    let data: serde_json::Value = serde_json::from_slice(&std::fs::read(corpus("corpus/lcsc_C14663.json").unwrap()).unwrap()).unwrap();
+    let data: serde_json::Value = serde_json::from_slice(&std::fs::read(lcsc).unwrap()).unwrap();
     let c = easyeda::convert(&data, "corpus part", "").unwrap();
     let work = fresh("C09-work");
     let (sym, fp) = (work.join("p.kicad_sym"), work.join(format!("{}.kicad_mod", c.footprint_name)));

@@ -46,7 +46,7 @@ klm-cli import <zip> [--category <c>] [--to global|project] [--project <dir>] [-
 `import` guesses the category when `--category` is not given, and refuses to add a new library to KiCad while KiCad is open. `--to project` uses `--project`, else the last project from the app. KLM also keeps a small SQLite database (`parts.db` next to `settings.json`) for alternatives, tags and cached searches. It can be rebuilt from the libraries, and deleting it never affects KiCad.
 
 ## Releases
-Every wave bumps the minor version in the workspace `Cargo.toml` (the single source of truth; `scriptspackage.ps1` stamps it into the plugin metadata): Wave 4.5 is 0.2.0, W5 is 0.3.0.
+Every wave bumps the minor version in the workspace `Cargo.toml` (the single source of truth; `scriptspackage.ps1` stamps it into the plugin metadata): Wave 4.5 is 0.2.0, W5 is 0.3.0, W6 is 0.4.0.
 
 ## Build and package
 ```

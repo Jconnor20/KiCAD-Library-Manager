@@ -11,7 +11,7 @@ These have passed automated tests but haven't been checked by hand in the app or
 
 ## KiCad integration
 
-- [ ] **Install the toolbar plugin.** In KiCad: *Plugin and Content Manager → Install from File…*, then pick `dist\klm-pcm-0.3.0.zip`. Expect it to install with no "metadata" error.
+- [ ] **Install the toolbar plugin.** In KiCad: *Plugin and Content Manager → Install from File…*, then pick `dist\klm-pcm-0.4.0.zip`. Expect it to install with no "metadata" error.
 - [ ] **Toolbar button.** Open a board in the PCB editor (KiCad's API must be on: *Preferences → Plugins*) and click **Library Manager**. Expect KLM to open with that board's project already chosen.
 - [ ] **New category library.** Import a part into a new category while KiCad is open. Expect no close-KiCad prompt, and "N pending" in the top bar. After you reopen KiCad, the new `KLM_<Category>` library is in the symbol chooser.
 - [ ] **Placed part is complete.** Place an imported part from KiCad's symbol chooser. Expect its footprint to be assigned, the 3D viewer to show its model, and *Show datasheet* to open the local PDF.

@@ -227,12 +227,13 @@ No new features. Prove what's built works, fix what doesn't, and leave tests beh
   - A `KLM_CONFIG_DIR` env var / `--config <dir>` that moves `settings.json`, `parts.db`, caches, the pending-table queue and KiCad's config dir lookup into a temp folder, so tests and agents never touch the real library.
   - **Done when:** the GUI and `klm-cli` run end to end against a temp folder, and the real `%APPDATA%` folder is unchanged afterwards.
 - [ ] **W6.1 Live API contract check** (M) ⚑
+  - Status: DigiKey and LCSC confirmed against recorded replies; Nexar `multipack`, DigiKey category tree and LCSC image fixed. **Mouser blocked** (no key stored) and **Nexar blocked** (free plan quota); rerun `cargo test -p klm-core --test live_api -- --ignored live` once both are available.
   - **Owns:** `core/sources/*`, `core/bom.rs` field mapping, `core/tests/fixtures/live/`
   - Call DigiKey, Mouser, Nexar and LCSC once each with your keys. Record the replies (keys redacted) as fixtures, and fix every field that was guessed: DigiKey `ManufacturerLeadWeeks`, `StandardPackage`, `CategoryFilter`; Mouser `LeadTime` and category list; Nexar `supCategories`; LCSC image field; country of origin wherever an API has it.
   - Live calls go in `#[ignore]` tests (`cargo test -- --ignored live`); everyday tests replay the fixtures.
   - **Needs:** your API keys in Credential Manager.
   - **Done when:** every field listed in LIMITS.md as "untested" or "from memory" is either confirmed by a recorded reply or removed.
-- [ ] **W6.2 Real-file import corpus** (M)
+- [x] **W6.2 Real-file import corpus** (M)
   - **Owns:** `core/tests/corpus_e2e.rs`, `docs/testdata-manifest.md`, fixes in `core/sources/foreign.rs` and `zip_import.rs`
   - Real Altium `.SchLib`/`.PcbLib`/`.IntLib`, EasyEDA exports, an Ultra Librarian ZIP, a legacy `.lib` symbol and an STL-only model, each imported end to end and rendered by `kicad-cli`.
   - **Done when:** each format either imports and renders, or fails with the clear message, and the test says which.
