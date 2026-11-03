@@ -6,7 +6,13 @@ use klm_core::store::Store;
 use klm_core::currency::{Rates, display_price, price_in};
 use klm_core::part::Part;
 use klm_core::search_filter::{Filter, SortKey, view};
-use klm_core::sources::combine;
+use klm_core::sources::{categories::{self, Category}, combine, thumbs};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+
+/// Thumbnail downloads running at once.
+const THUMB_JOBS: usize = 6;
+const THUMB: f32 = 40.0;
 
 pub enum Msg {
     Done(Vec<(usize, Part)>),
@@ -14,6 +20,10 @@ pub enum Msg {
     ClearResults,
     /// Exchange rates for the display currency (`None` if they could not be loaded).
     Rates(Option<Rates>),
+    /// A source's category list (or why it has none).
+    Categories(usize, Result<Vec<Category>, String>),
+    /// A thumbnail finished downloading (`None` if it failed).
+    Thumb(String, Option<PathBuf>),
 }
 
 enum Action {
@@ -25,6 +35,20 @@ enum Action {
     Save(String, bool),
     /// Star (true) or unstar a part by MPN.
     Star(String, bool),
+    /// Load source `i`'s category list.
+    LoadCategories(usize),
+}
+
+/// The "Browse by category" section.
+#[derive(Default)]
+struct Cats {
+    /// Source shown in the picker (an index into the app's source list).
+    source: usize,
+    lists: HashMap<usize, Result<Vec<Category>, String>>,
+    loading: HashSet<usize>,
+    filter: String,
+    /// Searches run inside this category until it is cleared.
+    picked: Option<(usize, Category)>,
 }
 
 /// The side panel's lists, read from the part store.
@@ -61,10 +85,15 @@ pub struct SearchTab {
     /// A rates load was started since the currency was last changed; don't retry every frame.
     rates_tried: bool,
     side: Side,
+    cats: Cats,
+    /// Downloaded thumbnails by image URL; `None` once a download has failed.
+    thumbs: HashMap<String, Option<PathBuf>>,
+    thumbs_loading: HashSet<String>,
 }
 
 impl SearchTab {
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
+        egui_extras::install_image_loaders(ui.ctx()); // idempotent
         let names: Vec<&str> = cx.sources.iter().map(|s| s.name()).collect();
         let mut currency = cx.settings.display_currency.clone();
         let action = self.show(ui, &names, cx.busy, &mut currency);
@@ -80,9 +109,11 @@ impl SearchTab {
             self.rates_tried = true;
             self.load_rates(cx);
         }
+        self.load_thumbs(cx);
         match action {
             Action::None => {}
             Action::Search(q) => self.run_search(q, cx),
+            Action::LoadCategories(i) => self.load_categories(i, cx),
             Action::Get(i) => self.get_result(i, cx),
             Action::Save(q, on) => {
                 self.with_store(cx, |s| s.set_saved_search(&q, on));
@@ -113,7 +144,18 @@ impl SearchTab {
                     self.filter.manufacturer.clear();
                 }
             }
-            Msg::ClearResults => self.results.clear(),
+            Msg::ClearResults => {
+                self.results.clear();
+                self.cats = Cats::default();
+            }
+            Msg::Categories(i, list) => {
+                self.cats.loading.remove(&i);
+                self.cats.lists.insert(i, list);
+            }
+            Msg::Thumb(url, path) => {
+                self.thumbs_loading.remove(&url);
+                self.thumbs.insert(url, path);
+            }
             Msg::Rates(rates) => self.rates = rates.or(self.rates.take()),
         }
     }
@@ -133,7 +175,7 @@ impl SearchTab {
         ui.horizontal(|ui| {
             let edit = ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("MPN, LCSC/DigiKey number or keywords").desired_width(320.0));
             let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let can = !self.searching && !self.query.trim().is_empty();
+            let can = !self.searching && (!self.query.trim().is_empty() || self.cats.picked.is_some());
             if (ui.add_enabled(can, egui::Button::new("Search")).clicked() || (enter && can)) && can {
                 action = Action::Search(self.query.trim().to_string());
             }
@@ -145,6 +187,7 @@ impl SearchTab {
             }
         });
         ui.add_space(4.0);
+        egui::CollapsingHeader::new("Browse by category").default_open(self.cats.picked.is_some()).show(ui, |ui| self.categories_ui(ui, source_names, &mut action));
         let shown = {
             let target = (!currency.is_empty()).then_some(currency.as_str());
             view(&self.results, &self.filter, None, &|p| price_in(&p.unit_price, target, self.rates.as_ref())).len()
@@ -155,7 +198,8 @@ impl SearchTab {
         let price = |p: &Part| price_in(&p.unit_price, target, rates);
         let rows = view(&self.results, &self.filter, self.sort, &price);
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-            egui::Grid::new("results").striped(true).num_columns(8).spacing([14.0, 4.0]).show(ui, |ui| {
+            egui::Grid::new("results").striped(true).num_columns(9).spacing([14.0, 4.0]).show(ui, |ui| {
+                ui.label("");
                 for (h, key) in [("Source", SortKey::Source), ("MPN", SortKey::Mpn), ("Manufacturer", SortKey::Manufacturer), ("Description", SortKey::Description), ("Package", SortKey::Package), ("Stock", SortKey::Stock), ("Unit price (qty 1)", SortKey::Price)] {
                     let h = if key == SortKey::Price { &format!("{h} ({})", target.unwrap_or("native")) } else { h };
                     let arrow = match self.sort {
@@ -174,6 +218,10 @@ impl SearchTab {
                 // `i` indexes `self.results`, not the sorted rows, so "Get…" survives any sort or filter.
                 for i in rows {
                     let (src, p) = &self.results[i];
+                    match self.thumbs.get(&p.image_url) {
+                        Some(Some(path)) => drop(ui.add(egui::Image::new(format!("file://{}", path.to_string_lossy().replace('\\', "/"))).fit_to_exact_size(egui::vec2(THUMB, THUMB)))),
+                        _ => drop(ui.allocate_space(egui::vec2(THUMB, THUMB))),
+                    }
                     ui.label(source_names.get(*src).copied().unwrap_or("?"));
                     let starred = self.side.favourites.contains(&p.mpn);
                     ui.label(RichText::new(&p.mpn).strong()).context_menu(|ui| {
@@ -207,8 +255,8 @@ impl SearchTab {
                     }
                     ui.horizontal(|ui| {
                         let known = p.supplier_ids.iter().any(|(k, _)| k == "LCSC") || p.source.contains("LCSC");
-                        let icons = format!("{}{}", if p.datasheet_url.is_empty() { "" } else { "📄" }, if known { "🔣⏚" } else { "" });
-                        ui.label(if icons.is_empty() { "?".to_string() } else { icons }).on_hover_text("📄 datasheet available\n🔣 symbol and ⏚ footprint provided (LCSC/EasyEDA)\n? not known until imported");
+                        let icons = format!("{}{}", if p.datasheet_url.is_empty() { "" } else { "📄" }, if known { "🔣⏚🧊" } else { "" });
+                        ui.label(if icons.is_empty() { "?".to_string() } else { icons }).on_hover_text(cad_summary(p, known));
                         if ui.add_enabled(!busy, egui::Button::new("Import")).on_hover_text("Fetch symbol, footprint, 3D model and datasheet into your library").clicked() {
                             action = Action::Get(i);
                         }
@@ -218,6 +266,48 @@ impl SearchTab {
             });
         });
         action
+    }
+
+    fn categories_ui(&mut self, ui: &mut egui::Ui, source_names: &[&str], action: &mut Action) {
+        let c = &mut self.cats;
+        c.source = c.source.min(source_names.len() - 1);
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("category_source").selected_text(source_names[c.source]).show_ui(ui, |ui| {
+                for (i, n) in source_names.iter().enumerate() {
+                    ui.selectable_value(&mut c.source, i, *n);
+                }
+            });
+            ui.add(egui::TextEdit::singleline(&mut c.filter).hint_text("Filter categories").desired_width(200.0));
+            if let Some((_, cat)) = &c.picked {
+                ui.label(RichText::new(format!("Searching in: {}", cat.path)).strong());
+                if ui.small_button("✕ Clear").clicked() {
+                    c.picked = None;
+                }
+            }
+        });
+        match c.lists.get(&c.source) {
+            None if c.loading.contains(&c.source) => drop(ui.horizontal(|ui| {
+                ui.spinner();
+                ui.weak("Loading categories…");
+            })),
+            None => *action = Action::LoadCategories(c.source),
+            Some(Err(e)) => drop(ui.weak(e)),
+            Some(Ok(list)) => {
+                let f = c.filter.trim().to_lowercase();
+                let mut picked = None;
+                egui::ScrollArea::vertical().max_height(180.0).id_salt("category_list").show(ui, |ui| {
+                    for cat in list.iter().filter(|k| f.is_empty() || k.path.to_lowercase().contains(&f)).take(200) {
+                        if ui.selectable_label(c.picked.as_ref().is_some_and(|(s, p)| *s == c.source && p.id == cat.id), &cat.path).clicked() {
+                            picked = Some(cat.clone());
+                        }
+                    }
+                });
+                if let Some(cat) = picked {
+                    c.picked = Some((c.source, cat));
+                    *action = Action::Search(self.query.trim().to_string());
+                }
+            }
+        }
     }
 
     fn side_ui(&mut self, ui: &mut egui::Ui, busy: bool, action: &mut Action) {
@@ -342,14 +432,63 @@ impl SearchTab {
         });
     }
 
+    fn load_categories(&mut self, i: usize, cx: &mut AppCtx) {
+        if i >= cx.sources.len() {
+            return;
+        }
+        let sources = cx.sources.clone();
+        self.cats.loading.insert(i);
+        let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
+        std::thread::spawn(move || {
+            let list = categories::cached(sources[i].as_ref()).map_err(|e| format!("{e:#}"));
+            let _ = tx.send(AppMsg::Search(Msg::Categories(i, list)));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Starts downloads for result thumbnails not fetched yet, a few at a time.
+    fn load_thumbs(&mut self, cx: &AppCtx) {
+        let wanted = self.results.iter().map(|(_, p)| &p.image_url).filter(|u| !u.is_empty() && !self.thumbs.contains_key(*u) && !self.thumbs_loading.contains(*u));
+        let room = THUMB_JOBS.saturating_sub(self.thumbs_loading.len());
+        let urls: Vec<String> = wanted.take(room).cloned().collect::<HashSet<_>>().into_iter().collect();
+        for url in urls {
+            self.thumbs_loading.insert(url.clone());
+            let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
+            std::thread::spawn(move || {
+                let path = thumbs::get(&url).ok();
+                let _ = tx.send(AppMsg::Search(Msg::Thumb(url, path)));
+                ctx.request_repaint();
+            });
+        }
+    }
+
     fn run_search(&mut self, query: String, cx: &mut AppCtx) {
         self.searching = true;
         self.results.clear();
-        self.with_store(cx, |s| s.log("search", &query));
+        if !query.is_empty() {
+            self.with_store(cx, |s| s.log("search", &query));
+        }
         self.side.load();
+        let category = self.cats.picked.clone().filter(|(i, _)| *i < cx.sources.len()).map(|(i, c)| (i, c.id));
         let ttl = cx.settings.cache_ttl_minutes.unwrap_or(cache::DEFAULT_TTL_MINUTES) as i64 * 60;
         let (tx, sources, ctx) = (cx.tx.clone(), cx.sources.clone(), cx.ctx.clone());
         std::thread::spawn(move || {
+            if let Some((i, id)) = category {
+                let src = &sources[i];
+                let key = format!("cat:{id}:{}", query.to_lowercase());
+                let store = Store::default_path().and_then(|p| Store::open(&p).ok());
+                match cache::search(store.as_ref(), src.name(), &key, ttl, || src.search_in_category(&id, &query)) {
+                    Ok(parts) => {
+                        let _ = tx.send(AppMsg::Search(Msg::Done(parts.into_iter().map(|p| (i, p)).collect())));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppMsg::Log(format!("{} category search failed: {e:#}", src.name())));
+                        let _ = tx.send(AppMsg::Search(Msg::Done(vec![])));
+                    }
+                }
+                ctx.request_repaint();
+                return;
+            }
             let mut results = vec![];
             let query = &query;
             std::thread::scope(|s| {
@@ -380,6 +519,17 @@ impl SearchTab {
                 ctx.request_repaint();
             });
         });
+    }
+}
+
+/// What importing `p` is known to bring, for the CAD icon tooltip. Only LCSC/EasyEDA parts are known
+/// ahead of the import; a distributor-only part may still match an LCSC part when imported.
+fn cad_summary(p: &Part, known: bool) -> String {
+    let datasheet = if p.datasheet_url.is_empty() { "no datasheet link" } else { "📄 datasheet available" };
+    if known {
+        format!("{datasheet}\n🔣 symbol and ⏚ footprint: provided by LCSC/EasyEDA\n🧊 3D model: usually provided (confirmed at import)\nSPICE model: not provided")
+    } else {
+        format!("{datasheet}\nSymbol, footprint, 3D and SPICE model: not known until imported (other sources are asked then)")
     }
 }
 

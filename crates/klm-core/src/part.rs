@@ -14,6 +14,8 @@ pub struct Part {
     /// Supplier part numbers written as symbol fields, e.g. ("LCSC", "C2040").
     pub supplier_ids: Vec<(String, String)>,
     pub datasheet_url: String,
+    /// Product photo, for the Search tab thumbnails.
+    pub image_url: String,
     /// Search-result details for display; not written to the library.
     pub package: String,
     pub stock: Option<u64>,

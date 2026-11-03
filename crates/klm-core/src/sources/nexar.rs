@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use std::path::Path;
 
 const QUERY: &str = "query Search($q: String!) { supSearch(q: $q, limit: 10) { results { part { \
-    mpn shortDescription totalAvail manufacturer { name } category { name } bestDatasheet { url } \
+    mpn shortDescription totalAvail manufacturer { name } category { name } bestDatasheet { url } bestImage { url } \
     specs { attribute { name shortname } displayValue } \
     sellers { company { name } offers { sku prices { quantity price currency } } } } } } }";
 
