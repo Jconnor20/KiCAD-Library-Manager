@@ -182,6 +182,7 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
 - [ ] **Native Altium and Eagle/Fusion export (R6)** ⚑: write `.SchLib`/`.PcbLib` and `.lbr` directly.
 - [ ] **Shipping cost and delivery time estimates (R8 extension),** once W4.1 is in use.
 - [ ] **SnapMagic search inside the app,** if they grant API access.
+- [ ] **Open Settings at a given section (nice to have):** a hint elsewhere (e.g. Search's "no sources enabled") opens the Settings popup scrolled to the relevant part, such as the API keys or watch folders, via a shared field on the app state.
 - [ ] **More CLI commands** as needed, added WP by WP.
 
 ---
