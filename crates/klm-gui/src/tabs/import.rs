@@ -167,6 +167,7 @@ fn run_import(cx: &mut AppCtx, id: u64, part: Part, category: String, targets: V
             match root.add_part(&part, &category, true) {
                 Ok(new_lib) => {
                     notes.push(format!("Imported {} into {nick}", part.mpn));
+                    notes.extend(klm_core::symbols::take_note());
                     if let Some(store) = klm_core::store::Store::default_path().and_then(|p| klm_core::store::Store::open(&p).ok()) {
                         let _ = store.log("import", &part.mpn);
                     }

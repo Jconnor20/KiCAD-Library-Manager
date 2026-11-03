@@ -147,6 +147,7 @@ impl App {
         kicad_env::set_pending_queue(dirs::config_dir().map(|d| d.join("KiCAD-Library-Manager").join("pending-libs.json")));
         klm_core::snapshot::set_store_path(klm_core::store::Store::default_path());
         klm_core::snapshot::set_policy(&settings.history);
+        klm_core::symbols::configure(&settings);
         if let Some(p) = &project_arg {
             settings.last_project = Some(project_dir(p));
         }

@@ -268,10 +268,15 @@ impl SettingsTab {
                 action = Action::Save;
             }
             ui.add_space(16.0);
+            if ui.checkbox(&mut settings.house_symbols_on_import, "Redraw imported symbols in the house style (resistor, capacitor, IC box…)").on_hover_text("Parts that can't be mapped with certainty keep the vendor's symbol. \"Restyle symbol\" in the Library tab does the same for existing parts.").changed() {
+                action = Action::Save;
+            }
             match self.standards.show(ui, &mut settings.standards) {
                 standards::Action::None => {}
                 a => action = Action::Standards(a),
             }
+            // Cheap, and keeps the import step in step with the rules above.
+            klm_core::symbols::configure(settings);
         });
         action
     }

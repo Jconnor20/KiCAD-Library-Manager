@@ -33,6 +33,8 @@ enum Action {
     Edit(Vec<(String, String)>),
     Attach { scope: Scope, category: String, name: String, path: PathBuf },
     Preview { category: String, name: String },
+    /// Redraw the symbol in the house style of its class.
+    Restyle { category: String, name: String },
     CopyToProject { category: String, name: String, overwrite: bool },
     FindDatasheets(LibraryRoot),
     /// Show the dry run of these operations.
@@ -185,6 +187,9 @@ fn part_actions(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, has_project: bo
     if btn(ui, "Preview", true, "Show the symbol, footprint and 3D model", "") {
         *action = Action::Preview { category: key.0.clone(), name: key.1.clone() };
     }
+    if btn(ui, "Restyle symbol", true, "Redraw the symbol in the house style for its kind of part (resistor, capacitor, IC box…). Keeps every field; undo it in History. Wires on schematics that already use it may need fixing.", "") {
+        *action = Action::Restyle { category: key.0.clone(), name: key.1.clone() };
+    }
     if btn(ui, "Attach…", true, "Add a datasheet (PDF), SPICE model or 3D model (STEP/WRL)", "") {
         let picked = rfd::FileDialog::new().add_filter("Datasheet, sim or 3D model", ATTACH_EXTENSIONS).pick_file();
         if let Some(path) = picked {
@@ -265,6 +270,16 @@ impl LibraryTab {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
                     self.preview = Some((format!("Preview: {name}"), PreviewPanel::for_library(&cx.ctx, root, &category, &name)));
+                }
+            }
+            Action::Restyle { category, name } => {
+                let root = if self.scope == Scope::Global { &global } else { &project };
+                if let Some(root) = root {
+                    cx.log.push(match klm_core::symbols::restyle_part(root, &category, &name, &cx.settings.rules, &cx.settings.standards, true) {
+                        Ok(done) => format!("{name}: {}", done.changes.join(", ")),
+                        Err(e) => format!("{e:#}"),
+                    });
+                    self.parts = None;
                 }
             }
             Action::Attach { scope, category, name, path } => self.attach_dialog = Some(AttachDialog::new(scope, category, name, path)),

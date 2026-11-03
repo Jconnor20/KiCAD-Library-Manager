@@ -19,6 +19,7 @@ const USAGE: &str = "usage:
   klm-cli history [--project <dir>]
   klm-cli rollback <id> [--project <dir>]
   klm-cli standardise [--project <dir>] [--dry-run]
+  klm-cli restyle <category> <part> [--project <dir>] [--dry-run]
   klm-cli health [--json | --csv] [--project <dir>]
   klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
   klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]";
@@ -30,6 +31,7 @@ enum Command {
     History { project: Option<PathBuf> },
     Rollback { id: String, project: Option<PathBuf> },
     Standardise { project: Option<PathBuf>, dry_run: bool },
+    Restyle { category: String, part: String, project: Option<PathBuf>, dry_run: bool },
     Health { json: bool, csv: bool, project: Option<PathBuf> },
     Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
     Export { zip: PathBuf, parts: Vec<String>, category: Option<String>, project: Option<PathBuf> },
@@ -90,6 +92,12 @@ fn parse(args: &[String]) -> Result<Command> {
             only_for(zips.is_empty() && category.is_none() && to.is_none() && !overwrite && !json && !deep, "that argument")?;
             Ok(Command::Standardise { project, dry_run })
         }
+        "restyle" => {
+            only_for(category.is_none() && to.is_none() && !overwrite && !json && !deep, "that option")?;
+            // Positional arguments: the category library, then the part.
+            let [cat, part]: [PathBuf; 2] = zips.try_into().map_err(|_| anyhow::anyhow!("restyle needs a category and a part name"))?;
+            Ok(Command::Restyle { category: cat.to_string_lossy().into(), part: part.to_string_lossy().into(), project, dry_run })
+        }
         "import" => {
             only_for(!json && !deep, "--json or --deep")?;
             let to = match to.as_deref() {
@@ -123,6 +131,7 @@ fn settings() -> Result<Settings> {
     };
     kicad_env::set_kicad_cli_override(s.kicad_cli.clone());
     klm_core::snapshot::set_policy(&s.history);
+    klm_core::symbols::configure(&s);
     Ok(s)
 }
 
@@ -290,6 +299,18 @@ fn standardise(project: Option<&Path>, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
+/// Redraws one part's symbol in the house style (after a snapshot), or with `dry_run` only says what would happen.
+fn restyle(category: &str, part: &str, project: Option<&Path>, dry_run: bool) -> Result<()> {
+    let s = settings()?;
+    let root = roots(&s, project)?.into_iter().find(|r| r.has_part(category, part)).with_context(|| format!("{part} is not in category {category}"))?;
+    if !dry_run {
+        ensure_kicad_closed()?;
+    }
+    let done = klm_core::symbols::restyle_part(&root, category, part, &s.rules, &s.standards, !dry_run)?;
+    println!("{part} in {}: {}{}", root.nickname(category), done.changes.join(", "), if dry_run && done.changed { " (dry run, nothing written)" } else { "" });
+    Ok(())
+}
+
 /// Imports each ZIP, or with `dry_run` only prints what that would change. Exits non-zero if any ZIP fails.
 fn import(zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool) -> Result<ExitCode> {
     let s = settings()?;
@@ -339,6 +360,7 @@ fn main() -> ExitCode {
         Command::History { project } => history(project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Rollback { id, project } => rollback(&id, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Standardise { project, dry_run } => standardise(project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
+        Command::Restyle { category, part, project, dry_run } => restyle(&category, &part, project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
         Command::Health { json, csv, project } => health(json, csv, project),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
         Command::Export { zip, parts, category, project } => export(&zip, parts, category, project.as_deref()).map(|_| ExitCode::SUCCESS),
@@ -391,7 +413,8 @@ mod tests {
 
     #[test]
     fn rejects_bad_arguments() {
-        for bad in ["", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "check --dry-run", "relink --dry-run", "standardise a.zip", "standardise --json"] {
+        assert_eq!(parse(&args("restyle Resistors RC0603 --dry-run")).unwrap(), Command::Restyle { category: "Resistors".into(), part: "RC0603".into(), project: None, dry_run: true });
+        for bad in ["", "restyle Resistors", "restyle a b c", "restyle a b --json", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "check --dry-run", "relink --dry-run", "standardise a.zip", "standardise --json"] {
             assert!(parse(&args(bad)).is_err(), "{bad:?} should fail");
         }
     }

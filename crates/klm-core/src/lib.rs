@@ -25,6 +25,7 @@ pub mod standardise;
 pub mod sexpr;
 pub mod sources;
 pub mod store;
+pub mod symbols;
 
 /// Fresh, empty temp folder for a test.
 #[cfg(test)]
