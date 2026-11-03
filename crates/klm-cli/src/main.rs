@@ -24,7 +24,8 @@ const USAGE: &str = "usage:
   klm-cli health [--json | --csv] [--project <dir>]
   klm-cli cleanup [--project <dir>]... [--remove sym:<lib>|fp:<lib>]... [--fix sym:<lib>=<path>]... [--move sym:<lib>]... [--apply]
   klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
-  klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]";
+  klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]
+  --config <dir> (or KLM_CONFIG_DIR) keeps all of KLM's files, KiCad's library tables and API keys in <dir>";
 
 #[derive(Debug, PartialEq)]
 enum Command {
@@ -143,6 +144,14 @@ fn parse(args: &[String]) -> Result<Command> {
         }
         _ => bail!("unknown command {name}"),
     }
+}
+
+/// `--config <dir>` (anywhere in the arguments) is the same as setting `KLM_CONFIG_DIR`; returns the other arguments.
+fn take_config_arg(args: Vec<String>) -> Result<Vec<String>> {
+    let Some(i) = args.iter().position(|a| a == "--config") else { return Ok(args) };
+    let dir = args.get(i + 1).context("--config needs a folder")?;
+    klm_core::settings::set_sandbox(Path::new(dir));
+    Ok(args.iter().enumerate().filter(|(j, _)| *j != i && *j != i + 1).map(|(_, a)| a.clone()).collect())
 }
 
 fn settings() -> Result<Settings> {
@@ -481,7 +490,7 @@ fn export(zip: &Path, names: Vec<String>, category: Option<String>, project: Opt
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let result = parse(&args).and_then(|cmd| match cmd {
+    let result = take_config_arg(args).and_then(|args| parse(&args)).and_then(|cmd| match cmd {
         Command::Check { json, deep, project } => check(json, deep, project.as_deref()),
         Command::Relink { project } => relink(project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::History { json, project } => history(json, project.as_deref()).map(|_| ExitCode::SUCCESS),

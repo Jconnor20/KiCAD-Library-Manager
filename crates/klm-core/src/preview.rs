@@ -69,7 +69,7 @@ fn ext(p: &Path) -> String {
 
 /// Where pictures are kept between runs; `render` removes the old ones, see `prune_cache`.
 pub fn cache_dir() -> PathBuf {
-    std::env::temp_dir().join("klm-previews")
+    crate::settings::sandbox_dir().unwrap_or_else(std::env::temp_dir).join("klm-previews")
 }
 
 /// Draws `kind` (or finds it in the cache) and returns the image path: an SVG, or a PNG for `Kind::Model`.

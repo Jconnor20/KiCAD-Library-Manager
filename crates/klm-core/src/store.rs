@@ -73,7 +73,7 @@ pub struct Alternative {
 impl Store {
     /// Next to `settings.json`.
     pub fn default_path() -> Option<PathBuf> {
-        Some(dirs::config_dir()?.join("KiCAD-Library-Manager").join("parts.db"))
+        Some(crate::settings::app_dir()?.join("parts.db"))
     }
 
     /// Opens (creating and migrating if needed) the database at `path`.

@@ -126,6 +126,10 @@ struct App {
 fn main() -> eframe::Result {
     // `--project <file.kicad_pro or folder>`, passed by the KiCad plugin launcher.
     let args: Vec<String> = std::env::args().collect();
+    // `--config <dir>` (or KLM_CONFIG_DIR): keep settings, library tables and keys in <dir>, for tests.
+    if let Some(dir) = args.iter().position(|a| a == "--config").and_then(|i| args.get(i + 1)) {
+        klm_core::settings::set_sandbox(Path::new(dir));
+    }
     let project_arg = args.iter().position(|a| a == "--project").and_then(|i| args.get(i + 1)).map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([820.0, 560.0]).with_title("KiCad Library Manager"),

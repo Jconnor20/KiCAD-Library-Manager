@@ -150,6 +150,10 @@ Do this one last, and on a copy if you're nervous. History can roll it back.
 - [ ] **History kinds.** Run `klm-cli history` and `klm-cli history --json`. Expect each snapshot shown as minor, named or interval.
 - [ ] **MOQ.** In LCSC and Nexar search results, check the MOQ and pack size columns are filled.
 
+## Running against a sandbox
+
+Never test against your real library. `klm.exe --config <dir>` / `klm-cli --config <dir>` (or `KLM_CONFIG_DIR=<dir>`) keep settings, the part database, caches, the pending queue, KiCad's global library tables (`<dir>/kicad/<version>/`, made empty if missing) and API keys (`<dir>/credentials.json`, plain text) in `<dir>`. Put a `settings.json` with `global_root` in it first. Set `KLM_USE_REAL_KEYS=1` to read keys missing from the sandbox from the real Credential Manager. Details and proof: `docs/verification/W6.0-sandbox.md`.
+
 ## Already verified
 
 - [x] The TE switch (2-1977223-4) datasheet attach: `klm-cli check` shows its datasheet present.

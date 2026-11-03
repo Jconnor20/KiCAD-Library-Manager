@@ -8,7 +8,7 @@ use std::path::PathBuf;
 const MAX_BYTES: usize = 2_000_000;
 
 fn dir() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("KiCAD-Library-Manager").join("thumbs"))
+    Some(crate::settings::app_dir()?.join("thumbs"))
 }
 
 /// FNV-1a, because `DefaultHasher` may change between Rust versions and orphan the cache.
