@@ -57,10 +57,13 @@ pub struct ImportTab {
     batch_works: Vec<PathBuf>,
     /// Single-symbol files made by "Import library…"; removed once its batch has run.
     foreign_work: Option<PathBuf>,
+    /// "Import library…" picks files instead of a folder.
+    pick_files: bool,
 }
 
 /// Reads one ZIP on the calling thread and reports what it found.
-fn scan_zip(zip: &Path, tx: &Sender<AppMsg>) {
+/// With `rules`, a ZIP holding only Altium/Eagle files goes to the foreign converter.
+fn scan_zip(zip: &Path, tx: &Sender<AppMsg>, rules: Option<&klm_core::rules::Rules>) {
     let work = new_work_dir();
     let name = zip.file_name().unwrap_or_default().to_string_lossy().into_owned();
     match zip_import::read_zip(zip, &work) {
@@ -68,14 +71,39 @@ fn scan_zip(zip: &Path, tx: &Sender<AppMsg>) {
             let _ = tx.send(AppMsg::Import(Msg::Found(part, work)));
         }
         Ok(None) => {
+            let msg = match (rules, zip_import::extract_foreign(zip, &work.join("foreign"))) {
+                (Some(rules), Ok((n, _))) if n > 0 => {
+                    let scan = foreign::scan(&work.join("foreign"), rules, &work.join("conv"));
+                    let _ = tx.send(AppMsg::Import(Msg::Foreign(scan, work)));
+                    return;
+                }
+                (_, Ok((_, true))) => "an Altium project (.LibPkg) with no library files; pick the .SchLib and .PcbLib files with Import library…",
+                (None, Ok((n, _))) if n > 0 => "only Altium/Eagle files inside; use Import ZIP… to convert them",
+                _ => "no KiCad, Altium or Eagle library files inside, ignored",
+            };
             let _ = std::fs::remove_dir_all(&work);
-            let _ = tx.send(AppMsg::Log(format!("{name}: no KiCad symbol inside, ignored")));
+            let _ = tx.send(AppMsg::Log(format!("{name}: {msg}")));
         }
         Err(e) => {
             let _ = std::fs::remove_dir_all(&work);
             let _ = tx.send(AppMsg::Log(format!("{name}: {e:#}")));
         }
     }
+}
+
+/// The folder to scan for `picked`: a single folder as it is, otherwise the picked files copied into one under `work`.
+fn stage(picked: &[PathBuf], work: &Path) -> anyhow::Result<PathBuf> {
+    if let [dir] = picked && dir.is_dir() {
+        return Ok(dir.clone());
+    }
+    let dir = work.join("picked");
+    std::fs::create_dir_all(&dir)?;
+    for (i, f) in picked.iter().enumerate() {
+        let sub = dir.join(i.to_string());
+        std::fs::create_dir_all(&sub)?;
+        std::fs::copy(f, sub.join(f.file_name().unwrap_or_default()))?;
+    }
+    Ok(dir)
 }
 
 /// The built-in categories plus those already in a library.
@@ -147,6 +175,7 @@ impl ImportTab {
             batch: None,
             batch_works: vec![],
             foreign_work: None,
+            pick_files: false,
         };
         tab.start_watcher(cx);
         tab
@@ -232,6 +261,11 @@ impl ImportTab {
                     Ok(scan) => {
                         cx.log.extend(scan.skipped.iter().map(|s| format!("Import library: skipped {s}")));
                         cx.log.extend(scan.unsupported.iter().map(|s| format!("Import library: not converted: {s}")));
+                        if scan.parts.is_empty() {
+                            cx.log.push("Import library: nothing could be imported (reasons above)".into());
+                            let _ = std::fs::remove_dir_all(work);
+                            return;
+                        }
                         let target = if cx.global_root().is_some() { Target::Global } else { Target::Project };
                         let ops = scan.parts.into_iter().map(|f| Op::ImportPart { part: f.part, category: Some(f.category), target, overwrite: false }).collect();
                         self.foreign_work = Some(work);
@@ -326,7 +360,7 @@ impl ImportTab {
             while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 for zip in w.poll() {
-                    scan_zip(&zip, &tx);
+                    scan_zip(&zip, &tx, None);
                     ctx.request_repaint();
                 }
             }
@@ -379,18 +413,22 @@ impl ImportTab {
                 if let Some(f) = rfd::FileDialog::new().add_filter("Vendor ZIP", &["zip"]).pick_file() {
                     let tx = cx.tx.clone();
                     let ctx = cx.ctx.clone();
+                    let rules = cx.settings.rules.clone();
                     std::thread::spawn(move || {
-                        scan_zip(&f, &tx);
+                        scan_zip(&f, &tx, Some(&rules));
                         ctx.request_repaint();
                     });
                 }
             }
+            ui.checkbox(&mut self.pick_files, "files").on_hover_text("Pick library files (.lbr, .SchLib, .PcbLib, .kicad_sym…) instead of a folder");
             if ui.add_enabled(!cx.busy, egui::Button::new("Import library…")).on_hover_text("Import a folder of KiCad libraries (.kicad_sym, .pretty, 3D models), or Eagle/Altium/EasyEDA libraries kicad-cli can convert. Shows a preview first.").clicked() {
-                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                // A folder, or one or more library files (.lbr, .SchLib, .PcbLib, .kicad_sym, ...).
+                let picked = if self.pick_files { rfd::FileDialog::new().pick_files() } else { rfd::FileDialog::new().pick_folder().map(|d| vec![d]) };
+                if let Some(picked) = picked {
                     cx.busy = true;
                     let (tx, ctx, rules, work) = (cx.tx.clone(), cx.ctx.clone(), cx.settings.rules.clone(), new_work_dir());
                     std::thread::spawn(move || {
-                        let scan = std::fs::create_dir_all(&work).map_err(anyhow::Error::from).and_then(|_| foreign::scan(&dir, &rules, &work));
+                        let scan = std::fs::create_dir_all(&work).map_err(anyhow::Error::from).and_then(|_| stage(&picked, &work)).and_then(|dir| foreign::scan(&dir, &rules, &work));
                         let _ = tx.send(AppMsg::Import(Msg::Foreign(scan, work)));
                         ctx.request_repaint();
                     });

@@ -16,14 +16,14 @@ pub enum AttachKind {
 }
 
 /// Extensions [`AttachKind::of`] recognises (for file pickers).
-pub const ATTACH_EXTENSIONS: &[&str] = &["pdf", "lib", "cir", "sub", "sp", "spi", "ibs", "step", "stp", "wrl"];
+pub const ATTACH_EXTENSIONS: &[&str] = &["pdf", "lib", "cir", "sub", "sp", "spi", "ibs", "step", "stp", "wrl", "stl"];
 
 impl AttachKind {
     pub fn of(path: &Path) -> Option<Self> {
         match path.extension()?.to_str()?.to_lowercase().as_str() {
             "pdf" => Some(Self::Datasheet),
             "lib" | "cir" | "sub" | "sp" | "spi" | "ibs" => Some(Self::Sim),
-            "step" | "stp" | "wrl" => Some(Self::Model),
+            "step" | "stp" | "wrl" | "stl" => Some(Self::Model),
             _ => None,
         }
     }

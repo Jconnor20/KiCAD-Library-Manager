@@ -48,6 +48,8 @@ struct Files {
     /// File name (lowercase) → paths.
     models: HashMap<String, Vec<PathBuf>>,
     foreign: Vec<PathBuf>,
+    /// Altium projects, which hold no library data themselves.
+    libpkgs: Vec<PathBuf>,
 }
 
 fn walk(dir: &Path, f: &mut Files) {
@@ -76,6 +78,7 @@ fn walk(dir: &Path, f: &mut Files) {
                 f.fps.entry(stem).or_default().push((lib, p));
             }
             "step" | "stp" | "wrl" => f.models.entry(name.to_lowercase()).or_default().push(p),
+            "libpkg" => f.libpkgs.push(p),
             _ if is_foreign(&p) => f.foreign.push(p),
             _ => {}
         }
@@ -91,6 +94,7 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
     let mut files = Files::default();
     walk(root, &mut files);
     let mut out = Scan::default();
+    out.unsupported.extend(files.libpkgs.iter().map(|p| format!("{}: an Altium project, not a library; pick the .SchLib and .PcbLib files next to it instead", p.display())));
     // Other tools' libraries: convert into `work`, then treat the result like any KiCad library.
     for (i, p) in std::mem::take(&mut files.foreign).iter().enumerate() {
         let (dir, stem) = (work.join(format!("conv{i}")), lib_stem(p));
@@ -98,8 +102,8 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
         let sym = kicad_env::upgrade_symbols(p, &dir.join(format!("{stem}.kicad_sym")));
         let fp = kicad_env::upgrade_footprints(p, &dir.join(format!("{stem}.pretty")));
         if sym.is_err() && fp.is_err() {
-            out.unsupported.push(format!("{}: kicad-cli could not convert it ({})", p.display(), first_line(&sym.unwrap_err())));
-        } else if sym.is_err() {
+            out.unsupported.push(format!("{}: kicad-cli could not convert it. kicad-cli said: {}; {}", p.display(), first_line(&sym.unwrap_err()), first_line(&fp.unwrap_err())));
+        } else if sym.is_err() && !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pcblib")) {
             out.unsupported.push(format!("{}: footprints converted but it has no symbols kicad-cli can read", p.display()));
         }
         walk(&dir, &mut files);

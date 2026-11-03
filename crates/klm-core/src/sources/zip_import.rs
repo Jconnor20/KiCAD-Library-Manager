@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 const MAX_ENTRY: u64 = 200 * 1024 * 1024;
 const SIM_EXTS: &[&str] = &["cir", "sub", "sp", "spi", "ckt", "ibs"];
 
-/// Reads a ZIP and extracts the part's files into `work`. `Ok(None)` means it holds no KiCad symbol.
+/// Reads a ZIP and extracts the part's files into `work`. `Ok(None)` means it holds no KiCad files at all;
+/// a ZIP with only footprints or 3D models gives a part without `symbol_file`, to be attached to an existing part.
 pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
     let file = std::fs::File::open(zip_path).with_context(|| format!("opening {}", zip_path.display()))?;
     let mut zip = zip::ZipArchive::new(file).with_context(|| format!("reading {}", zip_path.display()))?;
@@ -30,7 +31,7 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         // Only the file name is used for the destination, so a hostile "../" path can't escape `work`.
         let Some(file_name) = Path::new(&name).file_name().map(|n| n.to_owned()) else { continue };
         let ext = Path::new(&path_in_zip).extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
-        let wanted = matches!(ext.as_str(), "kicad_sym" | "lib" | "kicad_mod" | "step" | "stp" | "wrl" | "pdf")
+        let wanted = matches!(ext.as_str(), "kicad_sym" | "lib" | "kicad_mod" | "step" | "stp" | "wrl" | "stl" | "pdf")
             || SIM_EXTS.contains(&ext.as_str())
             || path_in_zip.ends_with("part_info.txt");
         if !wanted {
@@ -51,7 +52,7 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
             "lib" => continue,
             "kicad_mod" => &mut fps,
             "step" | "stp" => &mut steps,
-            "wrl" => &mut wrls,
+            "wrl" | "stl" => &mut wrls,
             "pdf" => &mut pdfs,
             _ => &mut sims,
         };
@@ -67,9 +68,10 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         v.sort_by_key(|(p, _)| !p.contains("kicad"));
         v.first().map(|(_, f)| f.clone())
     };
-    let Some(symbol_file) = pick(&mut sym_new).or_else(|| pick(&mut sym_legacy)) else {
+    let symbol_file = pick(&mut sym_new).or_else(|| pick(&mut sym_legacy));
+    if symbol_file.is_none() && fps.is_empty() && steps.is_empty() && wrls.is_empty() {
         return Ok(None);
-    };
+    }
 
     let info = |key: &str| {
         part_info
@@ -89,7 +91,7 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
     };
 
     // Fill gaps from the symbol's own fields (vendors use different field names).
-    if let Some(sym) = std::fs::read_to_string(&symbol_file).ok().and_then(|t| sexpr::parse(&t).ok()) {
+    if let Some(sym) = symbol_file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| sexpr::parse(&t).ok()) {
         if let Some(s) = sym.child("symbol") {
             let field = |keys: &[&str]| keys.iter().find_map(|k| property(s, k)).filter(|v| !v.trim().is_empty()).map(String::from);
             if part.mpn.is_empty() {
@@ -105,7 +107,14 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         }
     }
     if part.mpn.is_empty() {
-        part.mpn = symbol_file.file_stem().unwrap_or_default().to_string_lossy().into();
+        let any = symbol_file.as_ref().or(part.footprint_files.first()).or(part.model_files.first());
+        part.mpn = any.and_then(|f| f.file_stem()).unwrap_or_default().to_string_lossy().into();
+    }
+    if part.model_files.iter().any(|m| m.extension().is_some_and(|e| e.eq_ignore_ascii_case("stl"))) {
+        part.warnings.push("STL 3D models are not shown by KiCad's 3D viewer (it reads STEP and WRL); the file is kept with the part".into());
+    }
+    if symbol_file.is_none() {
+        part.warnings.push("no symbol in this ZIP: attach its footprint/3D model to an existing part".into());
     }
     if part.category_hint.is_empty() {
         part.category_hint = part.description.clone();
@@ -119,8 +128,29 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
             let name = f.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
             name.contains("datasheet") || (!mpn_lower.is_empty() && name.contains(&mpn_lower))
         });
-    part.symbol_file = Some(symbol_file);
+    part.symbol_file = symbol_file;
     Ok(Some(part))
+}
+
+/// Other tools' library files in a ZIP (Eagle `.lbr`, Altium `.SchLib`/`.PcbLib`/`.IntLib`), extracted into
+/// `dir` for `foreign::scan`. Also says whether an Altium `.LibPkg` project was seen (it holds no library data itself).
+pub fn extract_foreign(zip_path: &Path, dir: &Path) -> Result<(usize, bool)> {
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(zip_path).with_context(|| format!("opening {}", zip_path.display()))?)?;
+    let (mut n, mut libpkg) = (0, false);
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i)?;
+        let name = entry.name()?.into_owned();
+        let ext = Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        libpkg |= ext == "libpkg";
+        let Some(file_name) = Path::new(&name).file_name().filter(|_| !entry.is_dir() && entry.size() <= MAX_ENTRY && ["lbr", "schlib", "pcblib", "intlib"].contains(&ext.as_str())) else { continue };
+        let dest = dir.join(i.to_string());
+        std::fs::create_dir_all(&dest)?;
+        let mut bytes = vec![];
+        entry.read_to_end(&mut bytes)?;
+        std::fs::write(dest.join(file_name), bytes)?;
+        n += 1;
+    }
+    Ok((n, libpkg))
 }
 
 fn is_spice(bytes: &[u8]) -> bool {
@@ -186,6 +216,19 @@ mod tests {
         assert_eq!((p.mpn.as_str(), p.manufacturer.as_str()), ("MMC5983MA", "Memsic"));
         assert!(p.datasheet_file.is_some());
         assert_eq!(p.sim_files.len(), 1);
+    }
+
+    #[test]
+    fn footprint_only_and_stl_zips_are_accepted() {
+        let dir = crate::test_dir("zip_fp_only");
+        let zp = dir.join("fp.zip");
+        make_zip(&zp, &[("A/R1.kicad_mod", "(footprint R1)"), ("A/R1.stl", "solid x"), ("A/x.LibPkg", "p")]);
+        let p = read_zip(&zp, &dir.join("work")).unwrap().unwrap();
+        assert!(p.symbol_file.is_none());
+        assert_eq!((p.footprint_files.len(), p.model_files.len(), p.mpn.as_str()), (1, 1, "R1"));
+        assert!(p.warnings.iter().any(|w| w.contains("STL")));
+        let (n, libpkg) = extract_foreign(&zp, &dir.join("f")).unwrap();
+        assert_eq!((n, libpkg), (0, true));
     }
 
     #[test]
