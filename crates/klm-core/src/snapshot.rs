@@ -9,6 +9,9 @@
 //!   If linking fails (FAT, network share) the file is copied instead.
 //! - `tables/`: copies of KiCad's `sym-lib-table` and `fp-lib-table` for this library.
 //!
+//! Every snapshot is a **minor** (automatic, pruned to the last N and an optional size cap) or a **major**
+//! (a named version: made by hand or, at a set interval, automatically; never pruned).
+//!
 //! Rollback restores that exact state and first takes a snapshot of the current one, so a rollback
 //! can be undone like any other change. Newer snapshots are kept; each is a complete state.
 //!
@@ -23,20 +26,30 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use crate::settings::{AutoVersion, History};
 use std::time::SystemTime;
 
 /// Folder inside each library root that holds its snapshots.
 pub const DIR: &str = ".klm-history";
-/// Keep at most this many snapshots per library ...
-pub const MAX_SNAPSHOTS: usize = 30;
-/// ... and at most this many bytes (text copies plus binaries only the snapshot still holds).
-pub const MAX_BYTES: u64 = 500 * 1024 * 1024;
 
 const TABLES: [&str; 2] = ["sym-lib-table", "fp-lib-table"];
 const TEXT_EXTS: [&str; 2] = ["kicad_sym", "kicad_mod"];
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Kind {
+    #[default]
+    Minor,
+    Major,
+}
+
 #[derive(Serialize, Deserialize)]
 struct Manifest {
+    /// Absent in old snapshots, which are all minors.
+    #[serde(default)]
+    kind: Kind,
+    /// The name of a major ("Release 1"); the change that made a snapshot is in `label`.
+    #[serde(default)]
+    version: Option<String>,
     label: String,
     /// Unix seconds.
     ts: i64,
@@ -53,6 +66,9 @@ pub struct Info {
     pub id: String,
     pub ts: i64,
     pub label: String,
+    pub kind: Kind,
+    /// Name of the version, for a major.
+    pub version: Option<String>,
     /// Disk space this snapshot uses: copied text plus binaries the library no longer has as they were.
     pub bytes: u64,
 }
@@ -65,6 +81,17 @@ thread_local! {
 /// Where snapshots are also logged (the `history` table); unset in tests and tools that don't want it.
 static STORE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
+/// Retention and auto-version settings used by [`ensure`] and [`prune`]; set from `Settings::history`.
+static POLICY: Mutex<Option<History>> = Mutex::new(None);
+
+pub fn set_policy(h: &History) {
+    *POLICY.lock().unwrap_or_else(|e| e.into_inner()) = Some(h.clone());
+}
+
+fn policy() -> History {
+    POLICY.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default()
+}
+
 pub fn set_store_path(path: Option<PathBuf>) {
     *STORE.lock().unwrap_or_else(|e| e.into_inner()) = path;
 }
@@ -75,8 +102,64 @@ pub fn ensure(root: &LibraryRoot, label: &str) -> Result<()> {
     if HELD.with(|h| h.borrow().contains(&root.dir)) {
         return Ok(());
     }
-    take(root, label)?;
+    let id = take(root, label)?;
+    let secs = match policy().auto_version {
+        AutoVersion::Off => None,
+        AutoVersion::Daily => Some(86_400),
+        AutoVersion::Weekly => Some(7 * 86_400),
+        AutoVersion::Monthly => Some(30 * 86_400),
+    };
+    if let Some(secs) = secs {
+        let newest = manifests(root).into_iter().filter(|(i, m)| m.kind == Kind::Major && *i != id).map(|(_, m)| m.ts).max();
+        if newest.is_none_or(|t| now().as_secs() as i64 - t >= secs) {
+            set_kind(root, &id, Kind::Major, Some(format!("Auto {}", date(now().as_secs() as i64))))?;
+        }
+    }
     prune(root)
+}
+
+/// `YYYY-MM-DD` (UTC) for unix seconds.
+pub fn date(ts: i64) -> String {
+    let z = ts.div_euclid(86_400) + 719_468;
+    let (era, doe) = (z.div_euclid(146_097), z.rem_euclid(146_097));
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    format!("{:04}-{m:02}-{d:02}", yoe + era * 400 + i64::from(m <= 2))
+}
+
+fn check_id(id: &str) -> Result<()> {
+    if id.contains(['/', '\\']) || id.ends_with(".tmp") {
+        bail!("{id} is not a snapshot");
+    }
+    Ok(())
+}
+
+/// Makes snapshot `id` a major named `version`, or a minor again (`version` is then ignored).
+pub fn set_kind(root: &LibraryRoot, id: &str, kind: Kind, version: Option<String>) -> Result<()> {
+    check_id(id)?;
+    let snap = root.dir.join(DIR).join(id);
+    let mut m = read_manifest(&snap)?;
+    (m.kind, m.version) = (kind, if kind == Kind::Major { version } else { None });
+    std::fs::write(snap.join("manifest.json"), serde_json::to_string(&m)?)?;
+    if kind == Kind::Minor {
+        prune(root)?;
+    }
+    Ok(())
+}
+
+/// Takes a snapshot of the library as it is now and makes it a major named `version`.
+pub fn snapshot_as_version(root: &LibraryRoot, version: &str) -> Result<()> {
+    let id = take(root, "version")?;
+    set_kind(root, &id, Kind::Major, Some(version.into()))
+}
+
+/// Deletes snapshot `id` (a major too).
+pub fn delete(root: &LibraryRoot, id: &str) -> Result<()> {
+    check_id(id)?;
+    std::fs::remove_dir_all(root.dir.join(DIR).join(id)).with_context(|| format!("deleting snapshot {id}"))
 }
 
 /// Holds one snapshot open for a run of changes: takes it now and makes [`ensure`] on this thread do
@@ -150,8 +233,8 @@ fn now() -> std::time::Duration {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default()
 }
 
-/// Writes a snapshot without applying the retention limits. Returns the bytes it copied.
-fn take(root: &LibraryRoot, label: &str) -> Result<u64> {
+/// Writes a minor snapshot without applying the retention limits. Returns its id.
+fn take(root: &LibraryRoot, label: &str) -> Result<String> {
     std::fs::create_dir_all(&root.dir)?;
     let hist = root.dir.join(DIR);
     let mut millis = now().as_millis();
@@ -181,7 +264,7 @@ fn take(root: &LibraryRoot, label: &str) -> Result<u64> {
                 tables.push(t.to_string());
             }
         }
-        let manifest = Manifest { label: label.into(), ts: now().as_secs() as i64, files: files.clone(), dirs, tables };
+        let manifest = Manifest { kind: Kind::Minor, version: None, label: label.into(), ts: now().as_secs() as i64, files: files.clone(), dirs, tables };
         std::fs::write(tmp.join("manifest.json"), serde_json::to_string(&manifest)?)?;
         std::fs::rename(&tmp, hist.join(&id)).context("finishing the snapshot")
     })();
@@ -190,7 +273,7 @@ fn take(root: &LibraryRoot, label: &str) -> Result<u64> {
         return Err(e.context("could not take a snapshot, so nothing was changed"));
     }
     log_to_store(label, &format!("{} files, {copied} bytes copied, in {}", files.len(), root.dir.display()));
-    Ok(copied)
+    Ok(id)
 }
 
 fn log_to_store(label: &str, details: &str) {
@@ -205,18 +288,29 @@ fn read_manifest(snap: &Path) -> Result<Manifest> {
     Ok(serde_json::from_str(&text)?)
 }
 
-/// The snapshots of `root`, newest first.
-pub fn list(root: &LibraryRoot) -> Vec<Info> {
+/// Every readable snapshot's id and manifest, newest first.
+fn manifests(root: &LibraryRoot) -> Vec<(String, Manifest)> {
     let hist = root.dir.join(DIR);
     let mut ids: Vec<String> = std::fs::read_dir(&hist).into_iter().flatten().flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| !n.ends_with(".tmp")).collect();
     ids.sort_by(|a, b| b.cmp(a));
+    ids.into_iter().filter_map(|id| Some((id.clone(), read_manifest(&hist.join(&id)).ok()?))).collect()
+}
+
+/// The snapshots of `root`, newest first.
+pub fn list(root: &LibraryRoot) -> Vec<Info> {
+    entries(root, true)
+}
+
+/// `sized` = false skips walking each snapshot for its size (`bytes` is 0), which is the slow part.
+fn entries(root: &LibraryRoot, sized: bool) -> Vec<Info> {
+    let hist = root.dir.join(DIR);
     // Newest first, so a binary several snapshots hold is charged to the newest: that is the last to let it go.
     let mut seen = HashSet::new();
-    ids.into_iter()
-        .filter_map(|id| {
-            let m = read_manifest(&hist.join(&id)).ok()?;
-            let bytes = snapshot_bytes(root, &hist.join(&id), &mut seen);
-            Some(Info { id, ts: m.ts, label: m.label, bytes })
+    manifests(root)
+        .into_iter()
+        .map(|(id, m)| {
+            let bytes = if sized { snapshot_bytes(root, &hist.join(&id), &mut seen) } else { 0 };
+            Info { id, ts: m.ts, label: m.label, kind: m.kind, version: m.version, bytes }
         })
         .collect()
 }
@@ -240,22 +334,25 @@ fn snapshot_bytes(root: &LibraryRoot, snap: &Path, seen: &mut HashSet<(String, u
     total
 }
 
-/// Deletes snapshots over [`MAX_SNAPSHOTS`] or [`MAX_BYTES`], oldest first, always keeping the newest.
+/// Deletes minor snapshots beyond the kept count or size cap of the current policy, oldest first, always
+/// keeping the newest minor. Majors stay.
 pub fn prune(root: &LibraryRoot) -> Result<()> {
-    prune_to(root, MAX_SNAPSHOTS, MAX_BYTES)
+    let p = policy();
+    prune_to(root, p.keep_minors, p.max_minor_mb.map_or(u64::MAX, |mb| mb.saturating_mul(1024 * 1024)))
 }
 
-fn prune_to(root: &LibraryRoot, max_snapshots: usize, max_bytes: u64) -> Result<()> {
+fn prune_to(root: &LibraryRoot, max_minors: usize, max_bytes: u64) -> Result<()> {
     let hist = root.dir.join(DIR);
     for e in std::fs::read_dir(&hist)?.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")) {
         let _ = std::fs::remove_dir_all(e.path());
     }
-    let mut total = 0;
-    for (i, s) in list(root).iter().enumerate() {
+    let (mut total, mut n) = (0, 0);
+    for s in entries(root, max_bytes != u64::MAX).iter().filter(|s| s.kind == Kind::Minor) {
         total += s.bytes;
-        if i >= max_snapshots || (i > 0 && total > max_bytes) {
-            std::fs::remove_dir_all(hist.join(&s.id)).with_context(|| format!("deleting snapshot {}", s.id))?;
+        if n >= max_minors || (n > 0 && total > max_bytes) {
+            delete(root, &s.id)?;
         }
+        n += 1;
     }
     Ok(())
 }
@@ -264,10 +361,8 @@ fn prune_to(root: &LibraryRoot, max_snapshots: usize, max_bytes: u64) -> Result<
 /// undoes every change made since, newer snapshots' included. KiCad must be closed: the tables are
 /// restored whole. The current state is snapshotted first, so this can be rolled back too.
 pub fn rollback(root: &LibraryRoot, id: &str) -> Result<()> {
+    check_id(id)?;
     let snap = root.dir.join(DIR).join(id);
-    if id.contains(['/', '\\']) || id.ends_with(".tmp") {
-        bail!("{id} is not a snapshot");
-    }
     let m = read_manifest(&snap)?;
     take(root, &format!("before rolling back to \"{}\"", m.label))?;
 
@@ -314,6 +409,9 @@ mod tests {
     use super::*;
     use crate::library::AttachKind;
     use std::collections::BTreeMap;
+
+    /// Tests that change the global policy run one at a time.
+    static POLICY_TEST: Mutex<()> = Mutex::new(());
 
     /// Every file under `dir` (and the folders) with its bytes, except the history itself.
     fn tree(dir: &Path) -> BTreeMap<String, Vec<u8>> {
@@ -472,5 +570,68 @@ mod tests {
         std::fs::write(root.dir.join("m.tmp"), "A MUCH LONGER MODEL").unwrap();
         std::fs::rename(root.dir.join("m.tmp"), &model).unwrap();
         assert_eq!(list(&root)[0].bytes, text_only + "OLD MODEL".len() as u64);
+    }
+
+    #[test]
+    fn old_manifests_load_as_minor() {
+        let m: Manifest = serde_json::from_str(r#"{"label":"x","ts":1,"files":[],"dirs":[],"tables":[]}"#).unwrap();
+        assert_eq!((m.kind, m.version), (Kind::Minor, None));
+    }
+
+    #[test]
+    fn pruning_minors_keeps_majors() {
+        let root = fixture("snap_majors");
+        for i in 0..6 {
+            let id = take(&root, &format!("s{i}")).unwrap();
+            if i == 0 {
+                set_kind(&root, &id, Kind::Major, Some("v1".into())).unwrap();
+            }
+        }
+        prune_to(&root, 2, u64::MAX).unwrap();
+        let labels: Vec<_> = list(&root).into_iter().map(|s| s.label).collect();
+        assert_eq!(labels, ["s5", "s4", "s0"], "oldest major survives the count");
+        // A size cap only drops minors too, and keeps the newest minor.
+        prune_to(&root, 30, 0).unwrap();
+        let l = list(&root);
+        assert_eq!((l.len(), l[0].label.as_str(), l[1].version.as_deref()), (2, "s5", Some("v1")));
+        // Demoting makes it prunable.
+        set_kind(&root, &l[1].id, Kind::Minor, None).unwrap();
+        prune_to(&root, 1, u64::MAX).unwrap();
+        assert_eq!(list(&root).len(), 1);
+    }
+
+    #[test]
+    fn auto_major_when_the_newest_is_old_enough() {
+        let _lock = POLICY_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let root = fixture("snap_auto");
+        set_policy(&History { auto_version: AutoVersion::Weekly, ..History::default() });
+        ensure(&root, "a").unwrap();
+        let l = list(&root);
+        assert_eq!((l[0].kind, l[0].version.as_deref()), (Kind::Major, Some(format!("Auto {}", date(l[0].ts)).as_str())), "no major yet");
+        ensure(&root, "b").unwrap();
+        assert_eq!(list(&root)[0].kind, Kind::Minor, "a fresh major exists");
+        // Age the major past the interval.
+        let hist = root.dir.join(DIR);
+        let old = l[0].id.clone();
+        let mut m = read_manifest(&hist.join(&old)).unwrap();
+        m.ts -= 8 * 86_400;
+        std::fs::write(hist.join(&old).join("manifest.json"), serde_json::to_string(&m).unwrap()).unwrap();
+        ensure(&root, "c").unwrap();
+        assert_eq!(list(&root)[0].kind, Kind::Major);
+        set_policy(&History::default());
+        assert_eq!(date(1_700_000_000), "2023-11-14");
+    }
+
+    #[test]
+    fn rollback_prunes_afterwards() {
+        let _lock = POLICY_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let root = fixture("snap_rb_prune");
+        set_policy(&History { keep_minors: 2, auto_version: AutoVersion::Off, ..History::default() });
+        for i in 0..4 {
+            take(&root, &format!("s{i}")).unwrap();
+        }
+        rollback(&root, &list(&root)[3].id).unwrap();
+        assert_eq!(list(&root).len(), 2);
+        set_policy(&History::default());
     }
 }
