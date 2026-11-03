@@ -331,7 +331,7 @@ impl App {
                     }
                 }
                 if cx.pending_libs > 0 {
-                    ui.label(format!("{} pending", cx.pending_libs)).on_hover_text("Will be added to KiCad's library list when KiCad closes");
+                    ui.label(format!("{} pending", cx.pending_libs)).on_hover_text("Written to KiCad's library list; re-checked when KiCad closes in case it saves over them");
                     if ui.button("Apply now").clicked() {
                         cx.when_kicad_closed(Msg::ApplyPending);
                     }

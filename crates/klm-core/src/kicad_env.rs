@@ -260,7 +260,7 @@ pub fn apply_pending() -> Result<usize> {
     }
 }
 
-/// Like `register_lib`, but while KiCad is open (and queueing is on) the entry is queued instead.
+/// Like `register_lib`, but while KiCad is open (and queueing is on) the entry is also queued, to be re-checked once KiCad closes.
 /// Returns true if the library was added or queued.
 pub fn register_or_queue(table: &Path, nickname: &str, uri: &str) -> Result<bool> {
     match queue_path() {
@@ -268,6 +268,9 @@ pub fn register_or_queue(table: &Path, nickname: &str, uri: &str) -> Result<bool
             if is_registered(table, nickname) {
                 return Ok(false);
             }
+            // Written now so it is usable at once, and queued too: if KiCad saves over the table when it
+            // closes, the queue puts the entry back.
+            register_lib(table, nickname, uri)?;
             enqueue_in(&q, PendingLib { table: table.to_path_buf(), nickname: nickname.into(), uri: uri.into() })
         }
         _ => register_lib(table, nickname, uri),
