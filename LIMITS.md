@@ -6,6 +6,20 @@ A running list of what each merged work package left undone, cut short or made r
 
 ## Wave 6
 
+### W6.3 GUI test harness
+
+Open UI bugs, each pinned by a `#[should_panic(expected = "KNOWN BUG")]` test in `crates/klm-gui/tests/gui/bugs.rs` (fix in W7, then delete the attribute). Details and snapshots: `docs/verification/W6.3-gui.md`.
+
+- Settings API key boxes are 40 px wide (B1).
+- Alternatives and Preview windows stay on screen after switching tab (B2).
+- Missing glyphs (shown as empty boxes): `✔`, `▲`, `⇅`, `★`, `☆`, `👁` in the default egui fonts, so every status cell, sort arrow, star and the show-key button is a box (B4). The review's "purple ✔" was this box.
+- Alternatives opens on the first part, not the selected one (B5).
+- A part without a sim model shows orange "missing" (B6).
+- Library table and Search results columns have unnamed combo/check boxes: screen readers see "ComboBox" and "CheckBox" with no name (B7).
+- Not reproduced: Search header cut off, log over 25% of the height. At 820x560 and 1280x800 (1x scale) the header is inside the window and the log takes 21% / 15%. Not tried with results listed, nor at Windows display scaling above 100%.
+- The harness does not cover: dialogs on the Import, History, Cleanup and BOM tabs, the "Close KiCad first" prompt, anything behind a native file picker (opened directly instead, e.g. the attach dialog), or dark/light themes.
+- Tests share one sandbox and run one at a time (a lock); the full GUI suite takes about 80 s because of the offscreen wgpu rendering and `kicad-cli` previews.
+
 ### W6.0 Test sandbox
 
 - Only `--config` / `KLM_CONFIG_DIR` runs are isolated. The older tests (`cli_e2e`, `cli_cleanup`, `snapshot_e2e`, `credentials::tests`) still use the real Credential Manager and let `kicad-cli` rewrite the real `kicad_common.json`.

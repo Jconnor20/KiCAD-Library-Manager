@@ -236,7 +236,7 @@ No new features. Prove what's built works, fix what doesn't, and leave tests beh
   - **Owns:** `core/tests/corpus_e2e.rs`, `docs/testdata-manifest.md`, fixes in `core/sources/foreign.rs` and `zip_import.rs`
   - Real Altium `.SchLib`/`.PcbLib`/`.IntLib`, EasyEDA exports, an Ultra Librarian ZIP, a legacy `.lib` symbol and an STL-only model, each imported end to end and rendered by `kicad-cli`.
   - **Done when:** each format either imports and renders, or fails with the clear message, and the test says which.
-- [ ] **W6.3 GUI test harness** (M) ⚑
+- [x] **W6.3 GUI test harness** (M) ⚑
   - **Owns:** `crates/klm-gui/tests/` (new), `egui_kittest` as a dev-dependency, plus the smallest change needed to build `App` with a test config (after W6.0).
   - Headless tests that open every tab and every dialog through AccessKit names (as this review did by hand), and assert the bugs above stay fixed: key fields at least 300 px wide, no tab's window shown on another tab, nothing clipped at the default size. Save a PNG of each screen to `target/ui-snapshots/` for review.
   - **Needs:** W6.0
