@@ -145,11 +145,14 @@ impl SearchTab {
             }
         });
         ui.add_space(4.0);
+        let shown = {
+            let target = (!currency.is_empty()).then_some(currency.as_str());
+            view(&self.results, &self.filter, None, &|p| price_in(&p.unit_price, target, self.rates.as_ref())).len()
+        };
+        self.filters_ui(ui, source_names, currency, shown);
         let target = (!currency.is_empty()).then_some(currency.as_str());
         let rates = self.rates.as_ref();
         let price = |p: &Part| price_in(&p.unit_price, target, rates);
-        let shown = view(&self.results, &self.filter, None, &price).len();
-        self.filters_ui(ui, source_names, currency, shown);
         let rows = view(&self.results, &self.filter, self.sort, &price);
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             egui::Grid::new("results").striped(true).num_columns(8).spacing([14.0, 4.0]).show(ui, |ui| {
