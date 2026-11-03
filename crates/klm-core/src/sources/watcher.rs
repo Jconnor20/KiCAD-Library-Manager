@@ -5,25 +5,22 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 pub struct Watcher {
-    dir: PathBuf,
+    dirs: Vec<PathBuf>,
     since: SystemTime,
     seen: HashSet<PathBuf>,
 }
 
 impl Watcher {
     /// Only ZIPs modified after this call count, so old downloads are never touched.
-    pub fn new(dir: PathBuf) -> Self {
-        Self { dir, since: SystemTime::now(), seen: HashSet::new() }
+    pub fn new(dirs: Vec<PathBuf>) -> Self {
+        Self { dirs, since: SystemTime::now(), seen: HashSet::new() }
     }
 
-    pub fn dir(&self) -> &Path {
-        &self.dir
-    }
-
-    /// New, fully-downloaded ZIPs since the last call.
+    /// New, fully-downloaded ZIPs in any watched folder since the last call.
     pub fn poll(&mut self) -> Vec<PathBuf> {
-        let Ok(rd) = std::fs::read_dir(&self.dir) else { return vec![] };
         let mut found = vec![];
+        for dir in &self.dirs {
+        let Ok(rd) = std::fs::read_dir(dir) else { continue };
         for e in rd.flatten() {
             let p = e.path();
             if !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip")) || self.seen.contains(&p) {
@@ -42,6 +39,7 @@ impl Watcher {
             self.seen.insert(p.clone());
             found.push(p);
         }
+        }
         found
     }
 }
@@ -55,13 +53,19 @@ mod tests {
         let dir = crate::test_dir("watcher");
         std::fs::write(dir.join("old.zip"), "x").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        let mut w = Watcher::new(dir.clone());
+        let other = crate::test_dir("watcher2");
+        let mut w = Watcher::new(vec![dir.clone(), other.clone()]);
         std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(other.join("second.zip"), "x").unwrap();
         std::fs::write(dir.join("new.zip"), "x").unwrap();
         std::fs::write(dir.join("busy.zip"), "x").unwrap();
         std::fs::write(dir.join("busy.zip.part"), "x").unwrap();
         std::fs::write(dir.join("notes.txt"), "x").unwrap();
-        assert_eq!(w.poll(), vec![dir.join("new.zip")]);
+        let mut got = w.poll();
+        got.sort();
+        let mut want = vec![dir.join("new.zip"), other.join("second.zip")];
+        want.sort();
+        assert_eq!(got, want);
         assert!(w.poll().is_empty());
         std::fs::remove_file(dir.join("busy.zip.part")).unwrap();
         assert_eq!(w.poll(), vec![dir.join("busy.zip")]);
