@@ -1,6 +1,7 @@
 //! Part sources. Each search source (LCSC, DigiKey, …) implements [`Source`] and is listed in
 //! [`all`]; the Search tab queries every enabled one. Vendor ZIPs go through `zip_import` instead.
 
+pub mod categories;
 pub mod combine;
 pub mod digikey;
 pub mod foreign;
@@ -8,6 +9,7 @@ mod http;
 pub mod lcsc;
 pub mod mouser;
 pub mod nexar;
+pub mod thumbs;
 pub mod watcher;
 pub mod zip_import;
 
@@ -29,6 +31,16 @@ pub trait Source: Send + Sync {
     /// file fields filled in, ready for `LibraryRoot::add_part`. `Ok(None)` means this source
     /// has no downloadable CAD; the UI then opens [`Source::cad_page_url`] in the browser.
     fn fetch(&self, part: &Part, work: &Path) -> Result<Option<Part>>;
+
+    /// This source's category list, flattened, for browsing by part type.
+    fn categories(&self) -> Result<Vec<categories::Category>> {
+        anyhow::bail!("{} has no category list in its API; search by keyword instead", self.name())
+    }
+
+    /// Search within the category `id` from [`Source::categories`]; `query` may be empty.
+    fn search_in_category(&self, _id: &str, _query: &str) -> Result<Vec<Part>> {
+        anyhow::bail!("{} cannot search by category", self.name())
+    }
 
     /// Web page where the user can download CAD for this part themselves (SnapMagic, UL, …).
     fn cad_page_url(&self, _part: &Part) -> Option<String> {

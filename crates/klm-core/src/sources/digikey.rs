@@ -1,6 +1,6 @@
 //! DigiKey Product Information API v4 (keyword search), OAuth2 client credentials.
 
-use super::Source;
+use super::{Source, categories};
 use super::http::{self, TokenCache};
 use crate::credentials;
 use crate::part::Part;
@@ -58,21 +58,16 @@ impl Source for DigiKey {
     }
 
     fn search(&self, query: &str) -> Result<Vec<Part>> {
-        let req = self
-            .http
-            .post("https://api.digikey.com/products/v4/search/keyword")
-            .bearer_auth(self.token.token(&self.http)?)
-            .header("X-DIGIKEY-Client-Id", &self.client_id)
-            .header("X-DIGIKEY-Locale-Site", self.locale.0)
-            .header("X-DIGIKEY-Locale-Language", "en")
-            .header("X-DIGIKEY-Locale-Currency", self.locale.1)
-            .json(&json!({ "Keywords": query, "Limit": 10, "Offset": 0 }));
-        let mut parts = parse(&http::send(req)?);
-        for p in &mut parts {
-            p.price_currency = self.locale.1.into();
-            p.unit_price = coded_price(&p.unit_price, self.locale.1);
-        }
-        Ok(parts)
+        self.search_with(query, None)
+    }
+
+    fn categories(&self) -> Result<Vec<categories::Category>> {
+        let req = self.http.get("https://api.digikey.com/products/v4/search/categories").bearer_auth(self.token.token(&self.http)?).header("X-DIGIKEY-Client-Id", &self.client_id);
+        Ok(categories::parse_digikey(&http::send(req)?))
+    }
+
+    fn search_in_category(&self, id: &str, query: &str) -> Result<Vec<Part>> {
+        self.search_with(query, Some(id))
     }
 
     fn fetch(&self, _part: &Part, _work: &Path) -> Result<Option<Part>> {
@@ -81,6 +76,30 @@ impl Source for DigiKey {
 
     fn cad_page_url(&self, part: &Part) -> Option<String> {
         super::snapmagic_url(part)
+    }
+}
+
+impl DigiKey {
+    fn search_with(&self, query: &str, category: Option<&str>) -> Result<Vec<Part>> {
+        let mut body = json!({ "Keywords": query, "Limit": 10, "Offset": 0 });
+        if let Some(id) = category {
+            body["FilterOptionsRequest"] = json!({ "CategoryFilter": [{ "Id": id }] });
+        }
+        let req = self
+            .http
+            .post("https://api.digikey.com/products/v4/search/keyword")
+            .bearer_auth(self.token.token(&self.http)?)
+            .header("X-DIGIKEY-Client-Id", &self.client_id)
+            .header("X-DIGIKEY-Locale-Site", self.locale.0)
+            .header("X-DIGIKEY-Locale-Language", "en")
+            .header("X-DIGIKEY-Locale-Currency", self.locale.1)
+            .json(&body);
+        let mut parts = parse(&http::send(req)?);
+        for p in &mut parts {
+            p.price_currency = self.locale.1.into();
+            p.unit_price = coded_price(&p.unit_price, self.locale.1);
+        }
+        Ok(parts)
     }
 }
 
@@ -115,6 +134,7 @@ fn parse(v: &Value) -> Vec<Part> {
                 description: http::text(p, "/Description/ProductDescription"),
                 category_hint: category_chain(&p["Category"]),
                 datasheet_url: http::https(http::text(p, "/DatasheetUrl")),
+                image_url: http::https(http::text(p, "/PhotoUrl")),
                 package: param("Package / Case").or_else(|| param("Supplier Device Package")).unwrap_or_default(),
                 stock: p["QuantityAvailable"].as_u64(),
                 ..Part::default()
@@ -151,7 +171,7 @@ mod tests {
         "ManufacturerProductNumber": "RC0603FR-0710KL",
         "UnitPrice": 0.1,
         "ProductUrl": "https://www.digikey.com/en/products/detail/yageo/RC0603FR-0710KL/726880",
-        "DatasheetUrl": "//www.yageo.com/upload/media/product/RC_L.pdf",
+        "DatasheetUrl": "//www.yageo.com/upload/media/product/RC_L.pdf", "PhotoUrl": "https://mm.digikey.com/Volume0/opasdata/d220001/medias/images/1/rc0603.jpg",
         "QuantityAvailable": 4510000,
         "Category": {"CategoryId": 52, "ParentId": 0, "Name": "Resistors",
                      "ChildCategories": [{"CategoryId": 53, "ParentId": 52, "Name": "Chip Resistor - Surface Mount", "ChildCategories": []}]},
@@ -180,6 +200,7 @@ mod tests {
         assert_eq!(p.unit_price, "$0.1 @1");
         assert_eq!((p.price_breaks.clone(), p.moq), (vec![(1, 0.1), (10, 0.012)], Some(1)));
         assert_eq!(p.datasheet_url, "https://www.yageo.com/upload/media/product/RC_L.pdf");
+        assert!(p.image_url.ends_with("rc0603.jpg"));
         assert_eq!(p.category_hint, "Resistors Chip Resistor - Surface Mount");
         assert_eq!(p.supplier_ids, vec![("DigiKey".to_string(), "311-10.0KHRCT-ND".to_string())]);
     }

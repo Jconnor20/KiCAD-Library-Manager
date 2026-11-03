@@ -79,6 +79,7 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
                 description: http::text(p, "/Description"),
                 category_hint: http::text(p, "/Category"),
                 datasheet_url: http::https(http::text(p, "/DataSheetUrl")),
+                image_url: http::https(http::text(p, "/ImagePath")),
                 stock: stock(&http::text(p, "/Availability")),
                 price_breaks: p["PriceBreaks"].as_array().into_iter().flatten().filter_map(|b| Some((b["Quantity"].as_u64()?, parse_price(&http::text(b, "/Price"))?))).collect(),
                 price_currency: http::text(b, "/Currency"),
@@ -102,7 +103,7 @@ mod tests {
     const REPLY: &str = r#"{
       "Errors": [],
       "SearchResults": {"NumberOfResult": 2, "Parts": [
-        {"Availability": "12,345 In Stock", "DataSheetUrl": "https://www.vishay.com/doc?20035", "Description": "Thick Film Resistors - SMD 10Kohms 1% 0603",
+        {"Availability": "12,345 In Stock", "DataSheetUrl": "https://www.vishay.com/doc?20035", "ImagePath": "https://www.mouser.com/images/vishay/crcw.jpg", "Description": "Thick Film Resistors - SMD 10Kohms 1% 0603",
          "Category": "Thick Film Resistors - SMD", "Manufacturer": "Vishay / Dale", "ManufacturerPartNumber": "CRCW060310K0FKEA",
          "Min": "1", "Mult": "1", "LeadTime": "84 Days", "MouserPartNumber": "71-CRCW0603-10K-E3", "ProductAttributes": [{"AttributeName": "Standard Pack Qty", "AttributeValue": "5000"}],
          "PriceBreaks": [{"Quantity": 1, "Price": "$0.10", "Currency": "USD"}, {"Quantity": 10, "Price": "$0.019", "Currency": "USD"}]},
@@ -116,6 +117,7 @@ mod tests {
         let p = &parts[0];
         assert_eq!((p.mpn.as_str(), p.manufacturer.as_str()), ("CRCW060310K0FKEA", "Vishay / Dale"));
         assert_eq!(p.stock, Some(12345));
+        assert!(p.image_url.ends_with("crcw.jpg"));
         assert_eq!((p.price_breaks.clone(), p.price_currency.as_str(), p.moq, p.lead_time_days), (vec![(1, 0.10), (10, 0.019)], "USD", Some(1), Some(84)));
         assert_eq!(lead_days("2 Weeks"), Some(14));
         assert_eq!(lead_days("N/A"), None);

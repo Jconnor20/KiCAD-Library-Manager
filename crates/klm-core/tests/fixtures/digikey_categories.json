@@ -1,0 +1,6 @@
+{"Categories":[
+ {"CategoryId":52,"ParentId":0,"Name":"Resistors","ProductCount":1000,"ChildCategories":[
+   {"CategoryId":53,"ParentId":52,"Name":"Chip Resistor - Surface Mount","ProductCount":900,"ChildCategories":[]},
+   {"CategoryId":54,"ParentId":52,"Name":"Through Hole Resistors","ProductCount":100}]},
+ {"CategoryId":3,"ParentId":0,"Name":"Capacitors","ProductCount":5,"ChildCategories":[]},
+ {"ParentId":0,"Name":"Broken"}]}
