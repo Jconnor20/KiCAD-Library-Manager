@@ -12,7 +12,7 @@ use std::path::Path;
 const QUERY: &str = "query Search($q: String!) { supSearch(q: $q, limit: 10) { results { part { \
     mpn shortDescription totalAvail manufacturer { name } category { name } bestDatasheet { url } bestImage { url } \
     specs { attribute { name shortname } displayValue } \
-    sellers { company { name } offers { sku moq multipack prices { quantity price currency } } } } } } }";
+    sellers { company { name } offers { sku moq multipackQuantity prices { quantity price currency } } } } } } }";
 
 pub struct Nexar {
     http: Client,
@@ -106,7 +106,7 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
                 part.unit_price = format!("${price} @{q}");
                 // MOQ and pack size come from the offer that gave the shown price.
                 part.moq = best_offer.and_then(|o| o["moq"].as_u64());
-                part.pack_qty = best_offer.and_then(|o| o["multipack"].as_u64());
+                part.pack_qty = best_offer.and_then(|o| o["multipackQuantity"].as_u64());
             }
             part
         })
@@ -117,7 +117,7 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
 mod tests {
     use super::*;
 
-    // Shape follows the Nexar supSearch response for the query above.
+    // Shape follows the Nexar supSearch schema (field names checked by live introspection; values hand-written because the quota was spent).
     const REPLY: &str = r#"{"data": {"supSearch": {"results": [{"part": {
         "mpn": "LM358DR", "shortDescription": "Dual Operational Amplifier, 8-Pin SOIC", "totalAvail": 98000,
         "manufacturer": {"name": "Texas Instruments"}, "category": {"name": "Operational Amplifiers"},
@@ -126,7 +126,7 @@ mod tests {
                   {"attribute": {"name": "Case/Package", "shortname": "case_package"}, "displayValue": "SOIC-8"}],
         "sellers": [
           {"company": {"name": "Mouser Electronics"}, "offers": [{"sku": "595-LM358DR", "prices": [{"quantity": 1, "price": 0.55, "currency": "USD"}]}]},
-          {"company": {"name": "Digi-Key"}, "offers": [{"sku": "296-1395-1-ND", "moq": 1, "multipack": 2500, "prices": [{"quantity": 1, "price": 0.52, "currency": "USD"}, {"quantity": 100, "price": 0.3, "currency": "EUR"}]}]},
+          {"company": {"name": "Digi-Key"}, "offers": [{"sku": "296-1395-1-ND", "moq": 1, "multipackQuantity": 2500, "prices": [{"quantity": 1, "price": 0.52, "currency": "USD"}, {"quantity": 100, "price": 0.3, "currency": "EUR"}]}]},
           {"company": {"name": "Somewhere Else"}, "offers": [{"sku": "ZZ", "prices": []}]}]}}]}}}"#;
 
     #[test]
@@ -141,6 +141,13 @@ mod tests {
         assert_eq!(p.unit_price, "$0.52 @1");
         assert_eq!((p.moq, p.pack_qty), (Some(1), Some(2500)));
         assert_eq!(p.supplier_ids, vec![("Mouser".to_string(), "595-LM358DR".to_string()), ("DigiKey".to_string(), "296-1395-1-ND".to_string())]);
+    }
+
+    #[test]
+    fn plan_limit_reply_is_reported_not_swallowed() {
+        // Recorded live (W6.1): the free plan's part quota ran out, so `data` is null.
+        let e = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/nexar_quota_exceeded.json")).unwrap()).unwrap_err();
+        assert!(e.to_string().contains("part limit"), "{e}");
     }
 
     #[test]

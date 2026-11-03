@@ -7,8 +7,8 @@ A running list of what each merged work package left undone, cut short or made r
 ## Wave 5
 
 ### W5.1 Search by part type
-- **Category APIs never called live.** The Nexar `supCategories`/`category_id` query and DigiKey's `CategoryFilter` search with an empty keyword follow the docs but are untested.
-- **Mouser has no category browsing.** It's assumed to have no category list; not checked against its docs.
+- **Category APIs.** DigiKey's category list and `CategoryFilter` search with an empty keyword were called live in W6.1 and work (the list nests under `Children`, which the parser had wrong; fixed). Nexar category browsing isn't built: the old unused parser was removed. The Nexar free plan's part quota was already spent, so `supCategories` itself is unverified; its fields (`id name parentId numParts path`) were checked against the schema.
+- **Mouser has no category browsing.** Assumed from its docs; not checked live because no Mouser key was stored in W6.1.
 - **CAD icons** are known ahead of import only for LCSC/EasyEDA parts. Nothing ever shows a SPICE model.
 - **No LCSC thumbnails.** The image field in LCSC's search reply is unknown.
 
@@ -42,7 +42,7 @@ A running list of what each merged work package left undone, cut short or made r
 - **Search.**
   - Availability icons show what is known before import, not what the import will find.
   - ~~LCSC and Nexar MOQ and pack fields aren't filled.~~ Fixed in W5.5.
-  - The DigiKey `StandardPackage` field name is untested.
+  - DigiKey `StandardPackage` is confirmed live (on each product variation; absent for tubes, so pack size stays blank).
 - **Datasheet finder.** With no distributor source enabled, it can only retry existing links. Search results are used only when their MPN matches the part's.
 - **History.**
   - Retention settings apply to every library.
@@ -54,8 +54,10 @@ A running list of what each merged work package left undone, cut short or made r
 ## Wave 4
 
 ### W4.1 BOM import and enrichment
-- **No country of origin.** The DigiKey, Mouser and LCSC search replies don't seem to carry it, so the column is missing. Not checked against their API docs.
-- **Lead-time fields unverified.** DigiKey `ManufacturerLeadWeeks` and Mouser `LeadTime` were coded from memory and never called live.
+- **No country of origin.** The recorded DigiKey, LCSC/JLCPCB and Nexar-schema replies have no such field (W6.1), so the column stays missing. Mouser's reply is unchecked (no key).
+- **Lead time.** DigiKey `ManufacturerLeadWeeks` is confirmed live (a string of weeks). Mouser `LeadTime` is unverified (no Mouser key stored). LCSC has none. Nexar has `factoryLeadDays` per offer but isn't read.
+- **Nexar free plan** allows 10 parts; once spent every search fails with that message, so Nexar values (stock, prices, MOQ, pack size) are unverified. Its field names were checked by schema introspection: `multipack` didn't exist and is now `multipackQuantity`.
+- **DigiKey token** requests timed out at the app's 20 s limit in 3 of 5 live runs (other runs took under 2 s).
 - **Shipping region is DigiKey only.** Mouser and LCSC ignore it (the BOM tab says so).
 - **Fixed BOM field names:** `MPN`, `Manufacturer`, `LCSC`, `DigiKey`, `Mouser`. A project using other field names won't match.
 - **Only DigiKey's first packaging variation is read**, so cut tape vs reel pricing may be wrong.
