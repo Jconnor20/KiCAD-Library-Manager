@@ -28,10 +28,16 @@ fn altium_and_eagle_fixtures_convert() {
     for (name, src) in [("sch", "third_party/altium_pipe.SchLib"), ("pcb", "third_party/altium_pipe.PcbLib"), ("lbr", "eagle_r0603.lbr")] {
         let (input, work) = (fresh(&format!("{name}-in")), fresh(&format!("{name}-work")));
         std::fs::copy(here.join(src), input.join(Path::new(src).file_name().unwrap())).unwrap();
-        let scan = foreign::scan(&input, &Rules::default(), &work).unwrap();
+        let scan = foreign::scan(&input, &Rules::default(), &work);
+        if name == "pcb" {
+            // Footprints only: converted, but there is no symbol to make a part from.
+            assert!(scan.is_err(), "{src}");
+            continue;
+        }
+        let scan = scan.unwrap();
         eprintln!("{src}: {} parts, unsupported {:?}, skipped {:?}", scan.parts.len(), scan.unsupported, scan.skipped);
         // PcbLib has footprints only, so it yields no parts but must not be reported as unreadable.
-        assert!(!scan.parts.is_empty() || name == "pcb", "{src} gave no parts: {:?}", scan.unsupported);
+        assert!(!scan.parts.is_empty(), "{src} gave no parts: {:?}", scan.unsupported);
         assert!(scan.unsupported.is_empty(), "{src}: {:?}", scan.unsupported);
     }
 }
