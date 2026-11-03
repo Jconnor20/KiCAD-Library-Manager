@@ -145,7 +145,7 @@ impl LibraryTab {
             Action::CopyToProject { category, name, overwrite } => {
                 // Only a library new to the project touches KiCad's tables.
                 if project.as_ref().is_some_and(|p| p.needs_link(&category)) {
-                    cx.when_kicad_closed(AppMsg::Library(Msg::CopyToProject { category, name, overwrite }));
+                    cx.send(AppMsg::Library(Msg::CopyToProject { category, name, overwrite }));
                 } else {
                     self.copy_to_project(&category, &name, overwrite, cx);
                 }
@@ -200,7 +200,7 @@ impl LibraryTab {
                     // Only a category library new to KiCad's tables touches them.
                     let new_lib = root.as_ref().is_some_and(|r| edit.category.as_deref().is_some_and(|c| r.needs_link(c)));
                     if new_lib {
-                        cx.when_kicad_closed(AppMsg::Library(Msg::Edit { scope, targets, edit }));
+                        cx.send(AppMsg::Library(Msg::Edit { scope, targets, edit }));
                     } else {
                         self.edit(scope, &targets, &edit, cx);
                     }
@@ -221,7 +221,7 @@ impl LibraryTab {
                     match from {
                         // Only a library that doesn't hold the part yet can be new to KiCad's tables.
                         Some(from) if targets.iter().any(|t| !t.has_part(&category, &name) && t.needs_link(&category)) => {
-                            cx.when_kicad_closed(AppMsg::Library(Msg::Attach { from, targets, category, name, path }));
+                            cx.send(AppMsg::Library(Msg::Attach { from, targets, category, name, path }));
                         }
                         Some(from) => self.attach(&from, &targets, &category, &name, &path, cx),
                         None => cx.log.push(format!("Could not add the file to {name}: its library is not available")),

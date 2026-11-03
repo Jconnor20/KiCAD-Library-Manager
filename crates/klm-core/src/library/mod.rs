@@ -99,8 +99,10 @@ impl LibraryRoot {
     /// Whether KiCad's tables are missing this category's symbol or footprint library.
     pub fn needs_link(&self, category: &str) -> bool {
         let nick = self.nickname(category);
-        !kicad_env::is_registered(&self.table_dir.join("sym-lib-table"), &nick)
-            || !kicad_env::is_registered(&self.table_dir.join("fp-lib-table"), &nick)
+        ["sym-lib-table", "fp-lib-table"].iter().any(|t| {
+            let table = self.table_dir.join(t);
+            !kicad_env::is_registered(&table, &nick) && !kicad_env::is_queued(&table, &nick)
+        })
     }
 
     /// Existing categories that KiCad's tables don't (or no longer) list.
@@ -114,8 +116,8 @@ impl LibraryRoot {
         if self.needs_link(category) {
             crate::snapshot::ensure(self, &format!("link {nick} in KiCad"))?;
         }
-        let new_sym = kicad_env::register_lib(&self.table_dir.join("sym-lib-table"), &nick, &format!("{var}/symbols/{cat}.kicad_sym"))?;
-        let new_fp = kicad_env::register_lib(&self.table_dir.join("fp-lib-table"), &nick, &format!("{var}/footprints/{cat}.pretty"))?;
+        let new_sym = kicad_env::register_or_queue(&self.table_dir.join("sym-lib-table"), &nick, &format!("{var}/symbols/{cat}.kicad_sym"))?;
+        let new_fp = kicad_env::register_or_queue(&self.table_dir.join("fp-lib-table"), &nick, &format!("{var}/footprints/{cat}.pretty"))?;
         Ok(new_sym || new_fp)
     }
 

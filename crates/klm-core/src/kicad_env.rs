@@ -82,7 +82,28 @@ fn quiet(program: &Path) -> Command {
 
 /// True while any KiCad window is open. KiCad keeps its library tables and path variables in
 /// memory and writes them back over any edits made meanwhile, so those edits must wait.
+static RUNNING_CACHE: Mutex<Option<(std::time::Instant, bool)>> = Mutex::new(None);
+
+/// `kicad_running_now`, remembered for 5 s so UI clicks don't each spawn `tasklist`.
 pub fn kicad_running() -> bool {
+    let c = RUNNING_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, v)) = *c
+        && at.elapsed() < std::time::Duration::from_secs(5)
+    {
+        return v;
+    }
+    drop(c);
+    kicad_running_now()
+}
+
+/// Uncached check (which also refreshes the cache), for "has the user closed KiCad yet?" re-checks.
+pub fn kicad_running_now() -> bool {
+    let v = scan_processes();
+    *RUNNING_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), v));
+    v
+}
+
+fn scan_processes() -> bool {
     let (prog, args): (&str, &[&str]) = if cfg!(windows) { ("tasklist", &["/NH", "/FO", "CSV"]) } else { ("ps", &["-A", "-o", "comm="]) };
     let Ok(out) = quiet(Path::new(prog)).args(args).output() else { return false };
     String::from_utf8_lossy(&out.stdout).lines().any(|l| {
@@ -166,9 +187,109 @@ pub fn register_lib(table: &Path, nickname: &str, uri: &str) -> Result<bool> {
     Ok(true)
 }
 
+/// A table entry waiting for KiCad to close, so a new library can be written while KiCad is open.
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+pub struct PendingLib {
+    pub table: PathBuf,
+    pub nickname: String,
+    pub uri: String,
+}
+
+/// Where queued entries are kept. `None` (the CLI, tests) means nothing is ever queued.
+static QUEUE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+pub fn set_pending_queue(path: Option<PathBuf>) {
+    *QUEUE.lock().unwrap_or_else(|e| e.into_inner()) = path;
+}
+
+fn queue_path() -> Option<PathBuf> {
+    QUEUE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+pub fn pending_in(queue: &Path) -> Vec<PendingLib> {
+    std::fs::read_to_string(queue).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// Adds `entry` to the queue file. False if the same table and nickname are already waiting.
+pub fn enqueue_in(queue: &Path, entry: PendingLib) -> Result<bool> {
+    let mut all = pending_in(queue);
+    if all.iter().any(|e| e.table == entry.table && e.nickname == entry.nickname) {
+        return Ok(false);
+    }
+    all.push(entry);
+    if let Some(dir) = queue.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    write_atomic(queue, &serde_json::to_string_pretty(&all)?)?;
+    Ok(true)
+}
+
+/// Registers every queued entry and empties the queue; entries that fail stay queued. Returns how many were added.
+/// The caller makes sure KiCad is closed.
+pub fn apply_in(queue: &Path) -> Result<usize> {
+    let (mut added, mut keep) = (0, vec![]);
+    for e in pending_in(queue) {
+        match register_lib(&e.table, &e.nickname, &e.uri) {
+            Ok(true) => added += 1,
+            Ok(false) => {}
+            Err(_) => keep.push(e),
+        }
+    }
+    if keep.is_empty() {
+        let _ = std::fs::remove_file(queue);
+    } else {
+        write_atomic(queue, &serde_json::to_string_pretty(&keep)?)?;
+    }
+    Ok(added)
+}
+
+pub fn pending_count() -> usize {
+    queue_path().map_or(0, |q| pending_in(&q).len())
+}
+
+/// Whether `nickname` is waiting to be added to `table`.
+pub fn is_queued(table: &Path, nickname: &str) -> bool {
+    queue_path().is_some_and(|q| pending_in(&q).iter().any(|e| e.table == table && e.nickname == nickname))
+}
+
+/// Applies the queue if KiCad is closed (cached check). Returns how many libraries were added.
+pub fn apply_pending() -> Result<usize> {
+    match queue_path() {
+        Some(q) if q.exists() && !kicad_running() => apply_in(&q),
+        _ => Ok(0),
+    }
+}
+
+/// Like `register_lib`, but while KiCad is open (and queueing is on) the entry is queued instead.
+/// Returns true if the library was added or queued.
+pub fn register_or_queue(table: &Path, nickname: &str, uri: &str) -> Result<bool> {
+    match queue_path() {
+        Some(q) if kicad_running() => {
+            if is_registered(table, nickname) {
+                return Ok(false);
+            }
+            enqueue_in(&q, PendingLib { table: table.to_path_buf(), nickname: nickname.into(), uri: uri.into() })
+        }
+        _ => register_lib(table, nickname, uri),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_dedupes_and_applies() {
+        let dir = crate::test_dir("queue");
+        let (table, queue) = (dir.join("sym-lib-table"), dir.join("pending.json"));
+        let e = PendingLib { table: table.clone(), nickname: "KLM_ICs".into(), uri: "x/ICs.kicad_sym".into() };
+        assert!(enqueue_in(&queue, e.clone()).unwrap());
+        assert!(!enqueue_in(&queue, e).unwrap());
+        assert_eq!(pending_in(&queue).len(), 1);
+        assert_eq!(apply_in(&queue).unwrap(), 1);
+        assert!(is_registered(&table, "KLM_ICs"));
+        assert!(pending_in(&queue).is_empty());
+    }
 
     #[test]
     fn register_lib_appends_once_and_backs_up() {
