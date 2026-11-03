@@ -7,8 +7,11 @@ use std::path::PathBuf;
 #[serde(default)]
 pub struct Settings {
     pub global_root: Option<PathBuf>,
-    /// Folder watched for vendor ZIPs; the OS Downloads folder when unset.
-    pub downloads_dir: Option<PathBuf>,
+    /// Folders watched for vendor ZIPs; the OS Downloads folder when empty.
+    pub watch_dirs: Vec<PathBuf>,
+    /// Old single-folder setting, read once and moved into `watch_dirs` by `parse`.
+    #[serde(skip_serializing)]
+    downloads_dir: Option<PathBuf>,
     pub last_project: Option<PathBuf>,
     /// `kicad-cli` to use when KiCad isn't installed in the usual place; found automatically when unset.
     pub kicad_cli: Option<PathBuf>,
@@ -34,8 +37,19 @@ impl Settings {
     pub fn load() -> Self {
         path()
             .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| serde_json::from_str(&t).ok())
+            .and_then(|t| Self::parse(&t))
             .unwrap_or_default()
+    }
+
+    /// Parses a settings file, migrating the old `downloads_dir` into `watch_dirs`.
+    fn parse(text: &str) -> Option<Self> {
+        let mut s: Self = serde_json::from_str(text).ok()?;
+        if let Some(d) = s.downloads_dir.take() {
+            if !s.watch_dirs.contains(&d) {
+                s.watch_dirs.push(d);
+            }
+        }
+        Some(s)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -48,8 +62,9 @@ impl Settings {
         self.source_enabled.get(source).copied().unwrap_or(true)
     }
 
-    pub fn downloads(&self) -> Option<PathBuf> {
-        self.downloads_dir.clone().or_else(dirs::download_dir)
+    /// The folders to watch: the configured ones, or the OS Downloads folder.
+    pub fn downloads(&self) -> Vec<PathBuf> {
+        if self.watch_dirs.is_empty() { dirs::download_dir().into_iter().collect() } else { self.watch_dirs.clone() }
     }
 }
 
@@ -62,10 +77,13 @@ mod tests {
         let mut s = Settings::default();
         assert!(s.is_enabled("DigiKey"));
         s.source_enabled.insert("Mouser".into(), false);
-        s.downloads_dir = Some("D:/dl".into());
+        s.watch_dirs = vec!["D:/dl".into(), "E:/x".into()];
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert!(!back.is_enabled("Mouser") && back.is_enabled("DigiKey"));
-        assert_eq!(back.downloads_dir, s.downloads_dir);
+        assert_eq!(back.watch_dirs, s.watch_dirs);
+        // An old config's single folder becomes the first watch folder.
+        let old = Settings::parse(r#"{"downloads_dir":"D:/old"}"#).unwrap();
+        assert_eq!(old.watch_dirs, vec![PathBuf::from("D:/old")]);
         // Old files without the new field still load.
         assert!(serde_json::from_str::<Settings>(r#"{"global_root":"C:/x"}"#).unwrap().source_enabled.is_empty());
     }

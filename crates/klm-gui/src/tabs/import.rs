@@ -313,16 +313,17 @@ impl ImportTab {
     }
 
     fn start_watcher(&mut self, cx: &mut AppCtx) {
-        let Some(dir) = cx.settings.downloads() else {
+        let dirs = cx.settings.downloads();
+        if dirs.is_empty() {
             cx.log.push("No Downloads folder found; use \"Import ZIP…\" instead.".into());
             return;
-        };
-        cx.log.push(format!("Watching {} for part ZIPs", dir.display()));
+        }
+        cx.log.push(format!("Watching {} for part ZIPs", dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")));
         let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
         self.watch_stop = Arc::new(AtomicBool::new(false));
         let stop = self.watch_stop.clone();
         std::thread::spawn(move || {
-            let mut w = Watcher::new(dir);
+            let mut w = Watcher::new(dirs);
             while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 for zip in w.poll() {

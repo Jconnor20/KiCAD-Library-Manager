@@ -19,14 +19,14 @@ enum Action {
     Rebuild,
     /// Run a search with the stored credentials of this source.
     Test(&'static str),
-    /// New Downloads folder to watch (`None` = the OS default).
-    Downloads(Option<PathBuf>),
+    /// New list of folders to watch (empty = the OS default).
+    Downloads(Vec<PathBuf>),
     /// New `kicad-cli` to use (`None` = find it automatically).
     KicadCli(Option<PathBuf>),
     TestCli,
     Note(String),
-    /// Naming rules changed: save the settings.
-    SaveNaming,
+    /// Naming rules, shipping region or similar changed: save the settings.
+    Save,
     Standards(standards::Action),
 }
 
@@ -36,12 +36,14 @@ pub struct SettingsTab {
     testing: bool,
     inputs: HashMap<(&'static str, &'static str), String>,
     stored: HashSet<(&'static str, &'static str)>,
+    /// Key boxes whose typed text is shown instead of dots.
+    shown: HashSet<(&'static str, &'static str)>,
     standards: standards::Standards,
 }
 
 impl SettingsTab {
     pub fn new() -> Self {
-        let mut v = Self { open: false, testing: false, inputs: HashMap::new(), stored: HashSet::new(), standards: Default::default() };
+        let mut v = Self { open: false, testing: false, inputs: HashMap::new(), stored: HashSet::new(), shown: HashSet::new(), standards: Default::default() };
         v.refresh();
         v
     }
@@ -64,7 +66,7 @@ impl SettingsTab {
         let ctx = cx.ctx.clone();
         let mut action = Action::None;
         let modal = egui::Modal::new(egui::Id::unique("settings")).show(&ctx, |ui| {
-            ui.set_width(560.0);
+            ui.set_width(700.0);
             ui.set_max_height(520.0);
             action = self.show(ui, &mut cx.settings, self.testing);
         });
@@ -77,7 +79,7 @@ impl SettingsTab {
             Action::Test(name) => self.test_source(name, cx),
             Action::Note(n) => cx.log.push(n),
             Action::Downloads(dir) => {
-                cx.settings.downloads_dir = dir;
+                cx.settings.watch_dirs = dir;
                 cx.save_settings();
                 cx.send(AppMsg::Import(import::Msg::RestartWatcher));
             }
@@ -87,7 +89,7 @@ impl SettingsTab {
                 cx.save_settings();
             }
             Action::TestCli => self.test_cli(cx),
-            Action::SaveNaming => cx.save_settings(),
+            Action::Save => cx.save_settings(),
             Action::Standards(a) => self.standards.act(a, cx),
         }
     }
@@ -156,11 +158,17 @@ impl SettingsTab {
                         ui.weak("stored for later, no search source yet");
                     }
                 });
-                egui::Grid::new(info.name).num_columns(3).spacing([8.0, 4.0]).show(ui, |ui| {
+                egui::Grid::new(info.name).num_columns(4).spacing([8.0, 4.0]).show(ui, |ui| {
                     for (key, label) in info.fields {
                         ui.label(*label);
                         let text = self.inputs.entry((info.name, key)).or_default();
-                        ui.add(egui::TextEdit::singleline(text).password(true).desired_width(300.0));
+                        let show = self.shown.contains(&(info.name, *key));
+                        ui.add(egui::TextEdit::singleline(text).password(!show).desired_width((ui.available_width() - 160.0).max(240.0)));
+                        if ui.selectable_label(show, "👁").on_hover_text("Show or hide what you type").clicked() {
+                            if !self.shown.remove(&(info.name, *key)) {
+                                self.shown.insert((info.name, *key));
+                            }
+                        }
                         ui.weak(if self.stored.contains(&(info.name, *key)) { "stored" } else { "not set" });
                         ui.end_row();
                     }
@@ -204,18 +212,32 @@ impl SettingsTab {
 
             ui.add_space(16.0);
             ui.strong("Downloads folder");
-            ui.weak("KLM watches this folder for vendor ZIPs (SnapMagic, Ultra Librarian, SamacSys).");
-            ui.horizontal(|ui| {
-                ui.label(settings.downloads().map_or("none found".into(), |d| d.display().to_string()));
-                if ui.button("Browse…").clicked() {
-                    if let Some(d) = rfd::FileDialog::new().set_title("Folder to watch for vendor ZIPs").pick_folder() {
-                        action = Action::Downloads(Some(d));
+            ui.weak("KLM watches these folders for vendor ZIPs (SnapMagic, Ultra Librarian, SamacSys). With none added, the OS Downloads folder is used.");
+            let mut dirs = settings.watch_dirs.clone();
+            let mut remove = None;
+            for (i, d) in dirs.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(d.display().to_string());
+                    if ui.small_button("Remove").clicked() {
+                        remove = Some(i);
                     }
+                });
+            }
+            if settings.watch_dirs.is_empty() {
+                ui.label(settings.downloads().first().map_or("none found".into(), |d| format!("{} (default)", d.display())));
+            }
+            if let Some(i) = remove {
+                dirs.remove(i);
+                action = Action::Downloads(dirs.clone());
+            }
+            if ui.button("Add folder…").clicked() {
+                if let Some(d) = rfd::FileDialog::new().set_title("Folder to watch for vendor ZIPs").pick_folder() {
+                    if !dirs.contains(&d) {
+                        dirs.push(d);
+                    }
+                    action = Action::Downloads(dirs);
                 }
-                if settings.downloads_dir.is_some() && ui.button("Use default").clicked() {
-                    action = Action::Downloads(None);
-                }
-            });
+            }
 
             ui.add_space(16.0);
             ui.strong("kicad-cli");
@@ -239,11 +261,11 @@ impl SettingsTab {
             ui.strong("Shipping region");
             ui.weak("Country code (US, DE, ...) used for BOM stock and prices; each project can override it. Only DigiKey uses it so far.");
             if ui.add(egui::TextEdit::singleline(&mut settings.shipping_region).hint_text("e.g. DE").desired_width(80.0)).lost_focus() {
-                action = Action::SaveNaming;
+                action = Action::Save;
             }
 
             if naming_section(ui, &mut settings.rules) {
-                action = Action::SaveNaming;
+                action = Action::Save;
             }
             ui.add_space(16.0);
             match self.standards.show(ui, &mut settings.standards) {
