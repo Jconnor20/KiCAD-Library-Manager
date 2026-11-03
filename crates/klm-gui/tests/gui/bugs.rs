@@ -88,6 +88,10 @@ fn b4_search_sidebar_icons_have_glyphs() {
         let mut h = app(size, Tab::Search);
         with_probe(&mut h);
         settle(&mut h);
+        // The side list starts closed on narrow windows (W7.4).
+        if h.query_by_label("Recently imported").is_none() {
+            click(&mut h, "Saved & recent");
+        }
         assert!(h.query_by_label("Recently imported").is_some(), "side list missing");
         let missing = missing_glyphs(&h);
         assert!(missing.is_empty(), " Search at {size:?} draws {missing:?} as empty boxes (star buttons, sort arrows)");
