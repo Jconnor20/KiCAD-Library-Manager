@@ -201,15 +201,138 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
   - LCSC/Nexar MOQ fields
   - show snapshot kind in `klm-cli history`
 
-## Wave 6: Later
+## Review after Wave 5 (2026-11-03)
+
+- **Built against the original list:** R1, R2, R3, R9 and R10 are done. R4 and R7 mostly. R5, R6 and R8 are partial: Altium/EasyEDA never tried on real files, export is CLI-only, and there's no country of origin or shipping estimate.
+- **Verified:** about 200 automated tests pass. **Nothing in [TESTING.md](TESTING.md) has been checked by hand**, and several distributor API fields were coded from memory and never called live (see LIMITS.md). Most of Waves 1–5 is "built, unverified".
+- **The UI was opened and screenshotted (0.3.0, 1280×800 and the default 836×599).** What it showed:
+  - **Settings is one long scrolling popup.** It's fixed at 700×520 whatever the window size, has no Close button (Esc or click outside only), and **its API key boxes are about 40 px wide**: the W4.5.3 "wider key fields" fix doesn't take, because `available_width()` inside the Grid cell is tiny. The sectioned Settings menu was never built; W4.5.3 kept the single popup.
+  - **Floating windows leak across tabs.** Alternatives and Preview, opened on the Library tab, stay on top of History and other tabs.
+  - **At the default size Search's header is cut off** and the log takes about a third of the height.
+  - **Missing glyph:** "Recently imported" on Search shows an empty box (□) for its icon. "Recent searches" uses a red 📌 to mean "save", which reads as "already pinned".
+  - **Sim model shows orange "missing" on every row,** although sim models are optional.
+  - **Mixed signals:** ✔ draws purple, not the green the code asks for. "Clear" appears twice (project and log). "Relink libraries" appears twice and behaves differently (top bar: at once; Library: dry run first).
+  - **Alternatives** opens on the first part (RP2040), not the selected one. Its label sits after its dropdown ("RP2040 (ICs) ▼ For part").
+  - **Preview thumbnails** are about 140×105 px, so symbol text can't be read without enlarging.
+  - **History** has three buttons on every row, and Delete sits next to Roll back. It doesn't show which files a snapshot changed.
+  - **Not in the GUI at all:** export, health report, deleting a part. Standardise only runs from inside Settings.
+- **Testing used the real config.** The GUI has no way to point at a test config, so opening it for a test uses your real library (this review only opened views and pressed Cancel).
+
+## Wave 6: Verification and hardening (5 in parallel, ships 0.4.0)
+
+No new features. Prove what's built works, fix what doesn't, and leave tests behind so it stays fixed. Findings that aren't fixed go into LIMITS.md.
+
+- [ ] **W6.0 Test sandbox (run first, here)** (S)
+  - **Owns:** `core/settings.rs` (config dir), `gui/main.rs` (one argument)
+  - A `KLM_CONFIG_DIR` env var / `--config <dir>` that moves `settings.json`, `parts.db`, caches, the pending-table queue and KiCad's config dir lookup into a temp folder, so tests and agents never touch the real library.
+  - **Done when:** the GUI and `klm-cli` run end to end against a temp folder, and the real `%APPDATA%` folder is unchanged afterwards.
+- [ ] **W6.1 Live API contract check** (M) ⚑
+  - **Owns:** `core/sources/*`, `core/bom.rs` field mapping, `core/tests/fixtures/live/`
+  - Call DigiKey, Mouser, Nexar and LCSC once each with your keys. Record the replies (keys redacted) as fixtures, and fix every field that was guessed: DigiKey `ManufacturerLeadWeeks`, `StandardPackage`, `CategoryFilter`; Mouser `LeadTime` and category list; Nexar `supCategories`; LCSC image field; country of origin wherever an API has it.
+  - Live calls go in `#[ignore]` tests (`cargo test -- --ignored live`); everyday tests replay the fixtures.
+  - **Needs:** your API keys in Credential Manager.
+  - **Done when:** every field listed in LIMITS.md as "untested" or "from memory" is either confirmed by a recorded reply or removed.
+- [ ] **W6.2 Real-file import corpus** (M)
+  - **Owns:** `core/tests/corpus_e2e.rs`, `docs/testdata-manifest.md`, fixes in `core/sources/foreign.rs` and `zip_import.rs`
+  - Real Altium `.SchLib`/`.PcbLib`/`.IntLib`, EasyEDA exports, an Ultra Librarian ZIP, a legacy `.lib` symbol and an STL-only model, each imported end to end and rendered by `kicad-cli`.
+  - **Done when:** each format either imports and renders, or fails with the clear message, and the test says which.
+- [ ] **W6.3 GUI test harness** (M) ⚑
+  - **Owns:** `crates/klm-gui/tests/` (new), `egui_kittest` as a dev-dependency, plus the smallest change needed to build `App` with a test config (after W6.0).
+  - Headless tests that open every tab and every dialog through AccessKit names (as this review did by hand), and assert the bugs above stay fixed: key fields at least 300 px wide, no tab's window shown on another tab, nothing clipped at the default size. Save a PNG of each screen to `target/ui-snapshots/` for review.
+  - **Needs:** W6.0
+  - **Done when:** `cargo test -p klm-gui` opens all 6 tabs, Settings and every Library dialog without panicking, and saves their snapshots.
+- [ ] **W6.4 Scale and KiCad-open checks** (S)
+  - **Owns:** `core/tests/scale_e2e.rs` (new), `crates/klm-cli/tests/cli_health.rs` (new)
+  - Generate a 2,000-part library and time `list_parts`, `check_library` and an Alternatives scan. Record the numbers in LIMITS.md, and flag anything over 200 ms that runs on the UI thread.
+  - An end-to-end test for `klm-cli health`, which has only argument-parsing tests today.
+  - Replay `pending-tables.json` against a KiCad config that changed in between, and confirm the outside edit isn't lost silently.
+- [ ] **W6.5 Manual pass (you)** (M)
+  - Work through [TESTING.md](TESTING.md) with the latest build and real KiCad, ticking items or noting failures. Agent-findable bugs from W6.1–W6.4 should already be fixed, so this pass is about KiCad itself: the plugin, the PCM install, placed parts, KiCad 10.
+  - **Done when:** every TESTING.md item is ticked or has a LIMITS.md entry.
+
+## Wave 7: Clean UI (5 in parallel after W7.0, ships 0.5.0)
+
+Driven by the screenshots above. Each WP checks its own tab with the W6.3 harness and adds the snapshots to its merge.
+
+- [ ] **W7.0 Shared look (run first, here)** (S)
+  - **Owns:** `gui/tabs/ui_kit.rs` (new), `gui/main.rs` (fonts and visuals only)
+  - One place for status cells (✔ / missing / broken / optional "—"), badges, a sortable header, and a font fallback that has every glyph we use (fixes the □). The colours for ok/warn/error/info.
+  - A `TableBuilder` wrapper (`egui_extras`, already a dependency) that only draws visible rows, with resizable columns and a fixed header.
+  - The shared hooks other WPs call, so they don't all edit `main.rs`: `cx.open_settings(Section)` (an empty `Section` enum that W7.1 fills in) and `cx.log(Level, …)`.
+- [ ] **W7.1 Settings as a sectioned popup, like Altium's Preferences or Fusion's** (L)
+  - **Owns:** `gui/tabs/settings.rs`, `gui/tabs/standards.rs`, `gui/tabs/settings/` (new, one file per page if it grows)
+  - **Stays a popup** (modal over the app), sized to about 80% of the window, resizable, with an **✕ close button in its title bar** as well as Esc.
+  - **Left:** a search box over a tree of sections. Typing filters the tree to pages whose labels match. **Right:** the selected page, with a title and its options in titled groups, in two columns when wide enough.
+  - **Tree:**
+    - **General:** Libraries (global location, Change location…), Watch folders, KiCad (`kicad-cli` path and Test)
+    - **Sources:** one page each for LCSC, DigiKey, Mouser, Nexar and SnapMagic (enabled, keys, Test with the result shown on the page: ✔ 25 results / ✘ reason)
+    - **Search:** cache time (today only in `settings.json`), default display currency
+    - **Import:** category rules, name template, MPN case, house-style symbols
+    - **Standards:** Symbols, Footprints
+    - **BOM:** shipping region (and field names after W8.4)
+    - **History:** retention and auto versions (moved from the History tab)
+  - **Footer:** "Restore defaults" for the page shown, then OK / Cancel / Apply. The popup edits a copy of `Settings`: Apply or OK saves it, Cancel or ✕ throws it away. API keys are the one exception: "Save keys" writes to Credential Manager at once, as now.
+  - API key boxes fill the row (no Grid around them), with show/hide.
+  - **Open at a section:** fills in W7.0's `cx.open_settings(Section)` for any tab to call (Search's "no sources", BOM's region, Import's watch folder). This replaces the old Wave 6 nice-to-have.
+  - History's retention controls move here from the History tab. Standards keeps its rules here; its Dry run/Apply moves to the Library tab (W7.3).
+  - **Done when:** the harness opens every page by clicking the tree and through the search box, Cancel leaves `settings.json` unchanged, and a key box is at least 300 px at the default window size.
+- [ ] **W7.2 App shell** (M)
+  - **Owns:** `gui/main.rs`
+  - Default size 1200×800, and size and position remembered (eframe `persistence`).
+  - Log: coloured by severity, a smaller default height, and an "N errors" badge in the top bar that opens it, using W7.0's `(Level, String)` messages.
+  - **Floating windows belong to their tab:** hidden when you switch away, and back when you return. Or make them modals.
+  - Opens on Library once set up (Import only for first run). One Relink (the dry-run one). Rename the project's "Clear" to "Close project".
+  - First-run checklist: global library → KiCad found → a source enabled → a watch folder, each linking to its place.
+- [ ] **W7.3 Library tab** (L) ⚑
+  - **Owns:** `gui/tabs/library.rs`, `edit_dialog.rs`, `preview.rs`, `alternatives.rs`, `batch_dialog.rs`
+  - Moves to the W7.0 table: select all/none, shift-click ranges, and parts loaded off the UI thread.
+  - Sim model shows "—" when absent (it's optional). Status cells offer the fix on click: missing datasheet → find it, missing 3D → attach.
+  - Toolbar: **Standardise…** (dry run, then apply), **Export selected…** (W4.4 core), **Health report…** (W4.2 core), **Delete** (after W8.1, or hidden until then).
+  - Restyle gets the same dry-run review as the rest.
+  - Alternatives opens on the selected part, with its label before the dropdown. Preview thumbnails at least 240 px, with a larger default window.
+- [ ] **W7.4 Search tab** (M)
+  - **Owns:** `gui/tabs/search.rs`
+  - W7.0 table, so nothing is cut off at the default size. An empty-state message before the first search.
+  - An **"In library"** badge on results whose MPN you already have, with "Open in Library".
+  - Side panel: ☆ to save a recent search, a clear "Saved" list, and working icons for "Recently imported".
+  - CAD-availability as text badges (Sym / FP / 3D / SPICE) instead of 🔣⏚🧊. "(native)" in the price header becomes the currency, or "as listed".
+  - "No sources enabled" links to Settings → Sources.
+- [ ] **W7.5 Import, History, BOM and Clean up** (M)
+  - **Owns:** `gui/tabs/import.rs`, `history.rs`, `bom.rs`, `cleanup.rs`
+  - Import: "Import folder…" and "Import files…" buttons instead of the "files" checkbox.
+  - History: actions in a row menu (⋯ or right-click), Delete kept away from Roll back, and a "what changed" list of files per snapshot.
+  - BOM: sortable and filterable (shortfalls only). Missing parts get "Search" and "Import". The Alternatives cell can swap in an alternate. Region links to Settings when empty.
+
+## Wave 8: Closing the gaps (5 in parallel, ships 0.6.0)
+
+What the original plan or earlier WPs promised that isn't there yet.
+
+- [ ] **W8.1 Delete a part** (S)
+  - **Owns:** `core/library/remove.rs` (new), `klm-cli remove`
+  - Remove a part's symbol, and its footprint, 3D model, datasheet and sim model when no other part uses them, after a snapshot. Removing it from the store and alternatives too.
+- [ ] **W8.2 Rules everywhere (W3.3 leftovers)** (M)
+  - **Owns:** `core/batch.rs`, `core/rules.rs`, `klm-cli import`
+  - Batch import and `klm-cli import` use your category rules. The name template is applied on import and edit as a separate symbol name, so the MPN field is never rewritten. Standardise's `TODO(W3.3)` closed.
+- [ ] **W8.3 Better alternatives (W3.2 / W5.3 leftovers)** (M) ⚑
+  - **Owns:** `core/alternatives.rs`, `core/matching.rs`
+  - Unit-aware values (0.1uF = 100nF, 4k7 = 4.7kΩ). Package aliases (`R_0603` = `RESC1608X55N`). Ungroup, and rejected suggestions remembered in the store.
+- [ ] **W8.4 BOM and health (W4.1 / W4.2 leftovers)** (M)
+  - **Owns:** `core/bom.rs`, `core/health.rs`
+  - Configurable BOM field names per project. Rate limiting and Mouser order multiples. All DigiKey packaging variations (cut tape vs reel). Country of origin wherever W6.1 found it.
+  - Health reads the schematics (placed symbols missing from every library). Orphans matched by full path, not file name. A part with no footprint reported once.
+- [ ] **W8.5 Export and docs (R6 leftovers)** (S)
+  - **Owns:** `core/export.rs`, `README.md`, `LICENSE`
+  - No footprint name collisions in the merged `.pretty`, and 3D paths checked in KiCad and Fusion.
+  - README rewritten for 0.6.0: every tab, every CLI command, and no "developed on other branches". Licence chosen (open question 1) and `LICENSE` added.
+
+## Later
 
 - [ ] **Team / shared libraries (Rev):** a shared folder or git repository, conflict detection, locking, rules for merging metadata.
 - [ ] **KiCad 9 output:** write files that KiCad 9 can still open.
 - [ ] **macOS and Linux builds,** and a cross-platform PCM package.
 - [ ] **Native Altium and Eagle/Fusion export (R6)** ⚑: write `.SchLib`/`.PcbLib` and `.lbr` directly.
-- [ ] **Shipping cost and delivery time estimates (R8 extension),** once W4.1 is in use.
+- [ ] **Shipping cost and delivery time estimates (R8 extension),** once W8.4 is in use.
 - [ ] **SnapMagic search inside the app,** if they grant API access.
-- [ ] **Open Settings at a given section (nice to have):** a hint elsewhere (e.g. Search's "no sources enabled") opens the Settings popup scrolled to the relevant part, such as the API keys or watch folders, via a shared field on the app state.
 - [ ] **More CLI commands** as needed, added WP by WP.
 
 ---
