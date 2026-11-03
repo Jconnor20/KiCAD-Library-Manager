@@ -1,6 +1,7 @@
 use super::batch_dialog::{self, BatchDialog, ImportAllSetup, Progress, SetupAction};
 use super::library;
 use super::preview::PreviewPanel;
+use super::ui_kit::Section;
 use crate::{AppCtx, Msg as AppMsg, new_work_dir};
 use eframe::egui;
 use klm_core::batch::{self, Op, Target};
@@ -56,8 +57,6 @@ pub struct ImportTab {
     batch_works: Vec<PathBuf>,
     /// Single-symbol files made by "Import library…"; removed once its batch has run.
     foreign_work: Option<PathBuf>,
-    /// "Import library…" picks files instead of a folder.
-    pick_files: bool,
 }
 
 /// Reads one ZIP on the calling thread and reports what it found.
@@ -96,7 +95,7 @@ fn scan_zip(zip: &Path, tx: &Sender<AppMsg>, rules: Option<&klm_core::rules::Rul
                     let _ = tx.send(AppMsg::Import(Msg::Foreign(scan, work)));
                     return;
                 }
-                (_, Ok((_, true))) => "an Altium project (.LibPkg) with no library files; pick the .SchLib and .PcbLib files with Import library…",
+                (_, Ok((_, true))) => "an Altium project (.LibPkg) with no library files; pick the .SchLib and .PcbLib files with Import files…",
                 (None, Ok((n, _))) if n > 0 => "only Altium/Eagle files inside; use Import ZIP… to convert them",
                 _ => "no KiCad, Altium or Eagle library files inside, ignored",
             };
@@ -200,7 +199,6 @@ impl ImportTab {
             batch: None,
             batch_works: vec![],
             foreign_work: None,
-            pick_files: false,
         };
         tab.start_watcher(cx);
         tab
@@ -399,6 +397,17 @@ impl ImportTab {
         }
     }
 
+    /// Scans a folder, or library files copied into one, and opens the review of what it found.
+    pub fn import_library(&mut self, picked: Vec<PathBuf>, cx: &mut AppCtx) {
+        cx.busy = true;
+        let (tx, ctx, rules, work) = (cx.tx.clone(), cx.ctx.clone(), cx.settings.rules.clone(), new_work_dir());
+        std::thread::spawn(move || {
+            let scan = std::fs::create_dir_all(&work).map_err(anyhow::Error::from).and_then(|_| stage(&picked, &work)).and_then(|dir| foreign::scan(&dir, &rules, &work));
+            let _ = tx.send(AppMsg::Import(Msg::Foreign(scan, work)));
+            ctx.request_repaint();
+        });
+    }
+
     fn open_dialog(&mut self, i: usize, cx: &AppCtx) {
         self.dialog = Some(ImportDialog::new(self.pending[i].id, &self.pending[i].part, categories(cx), cx.global_root().is_some(), cx.project.is_some(), &cx.settings.rules));
     }
@@ -436,19 +445,16 @@ impl ImportTab {
                     });
                 }
             }
-            ui.checkbox(&mut self.pick_files, "files").on_hover_text("Pick library files (.lbr, .SchLib, .PcbLib, .kicad_sym…) instead of a folder");
-            if ui.add_enabled(!cx.busy, egui::Button::new("Import library…")).on_hover_text("Import a folder of KiCad libraries (.kicad_sym, .pretty, 3D models), or Eagle/Altium/EasyEDA libraries kicad-cli can convert. Shows a preview first.").clicked() {
-                // A folder, or one or more library files (.lbr, .SchLib, .PcbLib, .kicad_sym, ...).
-                let picked = if self.pick_files { rfd::FileDialog::new().pick_files() } else { rfd::FileDialog::new().pick_folder().map(|d| vec![d]) };
-                if let Some(picked) = picked {
-                    cx.busy = true;
-                    let (tx, ctx, rules, work) = (cx.tx.clone(), cx.ctx.clone(), cx.settings.rules.clone(), new_work_dir());
-                    std::thread::spawn(move || {
-                        let scan = std::fs::create_dir_all(&work).map_err(anyhow::Error::from).and_then(|_| stage(&picked, &work)).and_then(|dir| foreign::scan(&dir, &rules, &work));
-                        let _ = tx.send(AppMsg::Import(Msg::Foreign(scan, work)));
-                        ctx.request_repaint();
-                    });
-                }
+            let tip = "Eagle/Altium/EasyEDA libraries kicad-cli can convert, or KiCad libraries (.kicad_sym, .pretty, 3D models). Shows a preview first.";
+            if ui.add_enabled(!cx.busy, egui::Button::new("Import folder…")).on_hover_text(format!("Import a folder of libraries. {tip}")).clicked()
+                && let Some(d) = rfd::FileDialog::new().pick_folder()
+            {
+                self.import_library(vec![d], cx);
+            }
+            if ui.add_enabled(!cx.busy, egui::Button::new("Import files…")).on_hover_text(format!("Import library files (.lbr, .SchLib, .PcbLib, .kicad_sym…). {tip}")).clicked()
+                && let Some(files) = rfd::FileDialog::new().pick_files()
+            {
+                self.import_library(files, cx);
             }
             if ui.add_enabled(!cx.busy && !self.pending.is_empty(), egui::Button::new("Import all…")).on_hover_text("Import every part waiting here in one go, after a preview").clicked() {
                 self.batch_works = self.pending.iter().map(|p| p.work.clone()).collect();
@@ -459,7 +465,17 @@ impl ImportTab {
                 ui.spinner();
             }
         });
-        ui.weak("Download a part's KiCad ZIP from SnapMagic, Ultra Librarian or SamacSys and it appears here.");
+        ui.horizontal_wrapped(|ui| {
+            if ui.link("Watch folders…").clicked() {
+                cx.open_settings(Section::General);
+            }
+            let dirs = cx.settings.downloads();
+            ui.weak(if dirs.is_empty() {
+                "No watch folder: download a part's KiCad ZIP and use Import ZIP…, or set one.".to_string()
+            } else {
+                format!("Download a part's KiCad ZIP from SnapMagic, Ultra Librarian or SamacSys and it appears here. Watching {}.", dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", "))
+            });
+        });
         ui.add_space(6.0);
         if self.pending.is_empty() {
             ui.label("Nothing waiting.");

@@ -1,8 +1,8 @@
 use crate::{AppCtx, Msg as AppMsg};
+use super::ui_kit::{self, Col, Level, Section, Sort};
 use eframe::egui::{self, RichText};
 use klm_core::library::Scope;
-use klm_core::settings::AutoVersion;
-use klm_core::snapshot::{self, Info, Kind};
+use klm_core::snapshot::{self, Change, ChangeKind, Info, Kind};
 
 pub enum Msg {
     /// Put the library back as it was when snapshot `id` was taken.
@@ -23,12 +23,44 @@ pub struct HistoryTab {
     /// Name being typed for a version: of snapshot `id`, or of a new snapshot when `None`.
     naming: Option<(Option<String>, String)>,
     versions_only: bool,
-    retention: bool,
+    /// Snapshot whose changed files are listed below the table.
+    selected: Option<String>,
+    /// Files the `selected` snapshot changed; re-read with the snapshot list.
+    changed: Option<(String, Result<Vec<Change>, String>)>,
+}
+
+/// What a row's menu asked for.
+enum Act {
+    Roll(Info),
+    Delete(Info),
+    Minor(String),
+    Name(String),
+}
+
+fn row_menu(ui: &mut egui::Ui, s: &Info, act: &mut Option<Act>) {
+    if ui.button("Roll back to before this").clicked() {
+        *act = Some(Act::Roll(s.clone()));
+        ui.close();
+    }
+    if s.kind == Kind::Major {
+        if ui.button("Make minor").clicked() {
+            *act = Some(Act::Minor(s.id.clone()));
+            ui.close();
+        }
+    } else if ui.button("Mark as version…").clicked() {
+        *act = Some(Act::Name(s.id.clone()));
+        ui.close();
+    }
+    ui.separator();
+    if ui.button(RichText::new("Delete…").color(Level::Error.color(ui.visuals()))).clicked() {
+        *act = Some(Act::Delete(s.clone()));
+        ui.close();
+    }
 }
 
 impl Default for HistoryTab {
     fn default() -> Self {
-        Self { scope: Scope::Global, snapshots: None, seen: None, confirm: None, confirm_delete: None, naming: None, versions_only: false, retention: false }
+        Self { scope: Scope::Global, snapshots: None, seen: None, confirm: None, confirm_delete: None, naming: None, versions_only: false, selected: None, changed: None }
     }
 }
 
@@ -87,6 +119,7 @@ impl HistoryTab {
         }
         if self.snapshots.is_none() {
             self.seen = stamp;
+            self.changed = None;
         }
         let snapshots = self.snapshots.get_or_insert_with(|| snapshot::list(&root));
         let last = snapshots.iter().find(|s| s.kind == Kind::Major);
@@ -99,81 +132,100 @@ impl HistoryTab {
                 self.naming = Some((None, String::new()));
             }
             ui.checkbox(&mut self.versions_only, "Versions only");
-            if ui.button("Retention…").clicked() {
-                self.retention = !self.retention;
+            if ui.link("Retention settings…").clicked() {
+                cx.open_settings(Section::General);
             }
         });
-        if self.retention {
-            let h = &mut cx.settings.history;
-            let before = h.clone();
-            ui.horizontal(|ui| {
-                ui.label("Keep last");
-                ui.add(egui::DragValue::new(&mut h.keep_minors).range(1..=500));
-                ui.label("automatic snapshots (versions are never removed). Size cap in MB, 0 = none:");
-                let mut cap = h.max_minor_mb.unwrap_or(0);
-                ui.add(egui::DragValue::new(&mut cap).range(0..=100_000));
-                h.max_minor_mb = (cap > 0).then_some(cap);
-                egui::ComboBox::from_label("Make a version automatically").selected_text(format!("{:?}", h.auto_version)).show_ui(ui, |ui| {
-                    for v in [AutoVersion::Off, AutoVersion::Daily, AutoVersion::Weekly, AutoVersion::Monthly] {
-                        ui.selectable_value(&mut h.auto_version, v, format!("{v:?}"));
-                    }
-                });
-            });
-            if *h != before {
-                snapshot::set_policy(h);
-                if let Err(e) = cx.settings.save() {
-                    cx.log.push(format!("Could not save settings: {e:#}"));
-                }
-            }
-        }
         if snapshots.is_empty() {
             ui.weak("No snapshots yet. One is taken automatically before every import, edit, attach, copy or move.");
             return;
         }
-        let (mut pick, mut delete, mut kind) = (None, None, None);
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            egui::Grid::new("history").num_columns(5).striped(true).spacing([14.0, 6.0]).show(ui, |ui| {
-                for h in ["When", "Change", "Size", "", ""] {
-                    ui.strong(h);
-                }
-                ui.end_row();
-                for s in snapshots.iter().filter(|s| !self.versions_only || s.kind == Kind::Major) {
-                    ui.label(ago(s.ts));
-                    ui.horizontal(|ui| {
-                        if s.kind == Kind::Major {
-                            ui.label(RichText::new(format!("Version: {}", s.version.as_deref().unwrap_or("(unnamed)"))).strong().color(ui.visuals().selection.stroke.color));
-                        }
-                        ui.label(&s.label);
-                    });
-                    ui.label(size(s.bytes));
-                    if ui.button("Roll back to before this").clicked() {
-                        pick = Some(s.clone());
-                    }
-                    ui.horizontal(|ui| {
-                        if s.kind == Kind::Major {
-                            if ui.button("Make minor").clicked() {
-                                kind = Some(s.id.clone());
+        let shown: Vec<&Info> = snapshots.iter().filter(|s| !self.versions_only || s.kind == Kind::Major).collect();
+        if self.selected.as_ref().is_some_and(|id| !shown.iter().any(|s| s.id == *id)) {
+            self.selected = None;
+        }
+        if let Some(id) = &self.selected
+            && self.changed.as_ref().is_none_or(|(c, _)| c != id)
+        {
+            self.changed = Some((id.clone(), snapshot::changes(&root, id).map_err(|e| format!("{e:#}"))));
+        }
+        let selected = self.selected.clone();
+        if let (Some(id), Some((_, res))) = (&selected, &self.changed) {
+            let label = shown.iter().find(|s| s.id == *id).map_or("", |s| s.label.as_str());
+            egui::Panel::bottom("history_changes").resizable(true).default_size(150.0).show(ui, |ui| {
+                match res {
+                    Ok(list) => {
+                        ui.strong(format!("What \"{label}\" changed ({} file{})", list.len(), if list.len() == 1 { "" } else { "s" }));
+                        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                            for c in list.iter().take(300) {
+                                ui.horizontal(|ui| {
+                                    let (text, level) = match c.kind {
+                                        ChangeKind::Added => ("added", Level::Ok),
+                                        ChangeKind::Removed => ("removed", Level::Error),
+                                        ChangeKind::Modified => ("modified", Level::Warn),
+                                    };
+                                    ui_kit::badge(ui, text, level);
+                                    ui.label(&c.path);
+                                });
                             }
-                        } else if ui.button("Mark as version…").clicked() {
-                            self.naming = Some((Some(s.id.clone()), String::new()));
-                        }
-                        if ui.button("Delete").clicked() {
-                            delete = Some(s.clone());
-                        }
-                    });
-                    ui.end_row();
+                            if list.len() > 300 {
+                                ui.weak(format!("…and {} more", list.len() - 300));
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        ui.colored_label(Level::Error.color(ui.visuals()), format!("Could not work out what changed: {e}"));
+                    }
                 }
             });
+        } else {
+            egui::Panel::bottom("history_changes").resizable(false).show(ui, |ui| {
+                ui.weak("Click a row to see which files that change touched.");
+            });
+        }
+        ui.style_mut().interaction.selectable_labels = false; // so a click on any cell selects the row
+        let (mut act, mut pick) = (None, None);
+        let cols = [Col::new("When", 90.0).no_sort(), Col::rest("Change").no_sort(), Col::new("Size", 70.0).no_sort(), Col::new("", 34.0).no_sort()];
+        ui_kit::table(ui, "history", &cols, &mut Sort { col: usize::MAX, asc: false }, shown.len(), |i, row| {
+            let s = shown[i];
+            row.set_selected(selected.as_deref() == Some(s.id.as_str()));
+            row.col(|ui| {
+                ui.label(ago(s.ts));
+            });
+            row.col(|ui| {
+                if s.kind == Kind::Major {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("Version: {}", s.version.as_deref().unwrap_or("(unnamed)"))).strong().color(ui.visuals().selection.stroke.color));
+                        ui.label(&s.label);
+                    });
+                } else {
+                    ui.label(&s.label);
+                }
+            });
+            row.col(|ui| {
+                ui.label(size(s.bytes));
+            });
+            row.col(|ui| {
+                ui.menu_button("⋯", |ui| row_menu(ui, s, &mut act)).response.on_hover_text("Actions for this snapshot");
+            });
+            let r = row.response();
+            if r.clicked() {
+                pick = Some(s.id.clone());
+            }
+            r.context_menu(|ui| row_menu(ui, s, &mut act));
         });
         if pick.is_some() {
-            self.confirm = pick;
+            self.selected = pick;
         }
-        if delete.is_some() {
-            self.confirm_delete = delete;
-        }
-        if let Some(id) = kind {
-            let r = snapshot::set_kind(&root, &id, Kind::Minor, None);
-            self.done(r, cx);
+        match act {
+            Some(Act::Roll(s)) => self.confirm = Some(s),
+            Some(Act::Delete(s)) => self.confirm_delete = Some(s),
+            Some(Act::Name(id)) => self.naming = Some((Some(id), String::new())),
+            Some(Act::Minor(id)) => {
+                let r = snapshot::set_kind(&root, &id, Kind::Minor, None);
+                self.done(r, cx);
+            }
+            None => {}
         }
     }
 
