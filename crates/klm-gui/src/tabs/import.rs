@@ -22,9 +22,7 @@ pub enum Msg {
     Gather { part: Part, work: PathBuf, waiting: usize },
     /// One source's answer for the "Get…" whose files go under `work`.
     Answer { work: PathBuf, source: String, found: anyhow::Result<Option<Part>> },
-    /// Import `part` now (KiCad is closed, or the libraries are already in its tables).
-    Run { index: usize, part: Part, category: String, targets: Vec<LibraryRoot> },
-    Imported { index: usize, notes: Vec<String> },
+    Imported { id: u64, notes: Vec<String> },
     ImportFailed(String),
     /// The Downloads folder setting changed.
     RestartWatcher,
@@ -36,6 +34,8 @@ pub enum Msg {
 }
 
 struct Pending {
+    /// Stable across removals, unlike a position in the list.
+    id: u64,
     part: Part,
     /// Extracted files; removed once the part is imported or dismissed.
     work: PathBuf,
@@ -104,7 +104,12 @@ fn adopt(part: &mut Part, from: &Path, to: &Path) -> bool {
     true
 }
 
-fn run_import(cx: &mut AppCtx, index: usize, part: Part, category: String, targets: Vec<LibraryRoot>) {
+fn next_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+fn run_import(cx: &mut AppCtx, id: u64, part: Part, category: String, targets: Vec<LibraryRoot>) {
     cx.busy = true;
     let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
     std::thread::spawn(move || {
@@ -128,7 +133,7 @@ fn run_import(cx: &mut AppCtx, index: usize, part: Part, category: String, targe
                 }
             }
         }
-        let _ = tx.send(AppMsg::Import(Msg::Imported { index, notes }));
+        let _ = tx.send(AppMsg::Import(Msg::Imported { id, notes }));
         ctx.request_repaint();
     });
 }
@@ -175,10 +180,10 @@ impl ImportTab {
                     matching::merge(&mut part, &self.awaiting_cad.remove(i));
                 }
                 cx.log.push(format!("Found {} ({})", part.mpn, part.source));
-                self.pending.push(Pending { part, work });
+                self.pending.push(Pending { id: next_id(), part, work });
             }
             Msg::Gather { part, work, waiting } => {
-                let mut dialog = ImportDialog::new(usize::MAX, &part, categories(cx), cx.global_root().is_some(), cx.project.is_some(), &cx.settings.rules);
+                let mut dialog = ImportDialog::new(0, &part, categories(cx), cx.global_root().is_some(), cx.project.is_some(), &cx.settings.rules);
                 let auto = (part.manufacturer.clone(), part.description.clone());
                 dialog.gathered = Some(Gathered { files: Combined::default(), work, waiting, auto, edited: (false, false) });
                 self.dialog = Some(dialog);
@@ -201,13 +206,12 @@ impl ImportTab {
                     let _ = std::fs::remove_dir_all(&work);
                 }
             }
-            Msg::Run { index, part, category, targets } => run_import(cx, index, part, category, targets),
-            Msg::Imported { index, notes } => {
+            Msg::Imported { id, notes } => {
                 cx.busy = false;
                 cx.log.extend(notes);
                 cx.send(AppMsg::Library(library::Msg::Refresh));
-                if index < self.pending.len() {
-                    let p = self.pending.remove(index);
+                if let Some(i) = self.pending.iter().position(|p| p.id == id) {
+                    let p = self.pending.remove(i);
                     let _ = std::fs::remove_dir_all(p.work);
                 }
             }
@@ -288,19 +292,15 @@ impl ImportTab {
                     self.awaiting_cad.push(dialog.part.clone());
                 }
                 DialogAction::Import { part, category, targets } => {
-                    let mut index = dialog.index;
+                    let mut id = dialog.id;
                     // A "Get…" part's files live until its import finishes, like a ZIP's.
                     if let Some(g) = dialog.gathered.take() {
-                        self.pending.push(Pending { part: part.clone(), work: g.work });
-                        index = self.pending.len() - 1;
+                        id = next_id();
+                        self.pending.push(Pending { id, part: part.clone(), work: g.work });
                     }
                     self.dialog = None;
-                    // Only new libraries touch KiCad's tables; adding to a linked one is safe while it's open.
-                    if targets.iter().any(|r| r.needs_link(&category)) {
-                        cx.when_kicad_closed(AppMsg::Import(Msg::Run { index, part, category, targets }));
-                    } else {
-                        run_import(cx, index, part, category, targets);
-                    }
+                    // New libraries are queued for KiCad's tables when it closes, so this never needs KiCad closed.
+                    run_import(cx, id, part, category, targets);
                 }
             }
         }
@@ -351,7 +351,7 @@ impl ImportTab {
     }
 
     fn open_dialog(&mut self, i: usize, cx: &AppCtx) {
-        self.dialog = Some(ImportDialog::new(i, &self.pending[i].part, categories(cx), cx.global_root().is_some(), cx.project.is_some(), &cx.settings.rules));
+        self.dialog = Some(ImportDialog::new(self.pending[i].id, &self.pending[i].part, categories(cx), cx.global_root().is_some(), cx.project.is_some(), &cx.settings.rules));
     }
 
     fn setup_screen(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
@@ -449,7 +449,7 @@ enum DialogAction {
 
 /// Review a detected part, pick its category and where it goes.
 struct ImportDialog {
-    index: usize,
+    id: u64,
     part: Part,
     category: String,
     categories: Vec<String>,
@@ -493,11 +493,11 @@ impl Gathered {
 }
 
 impl ImportDialog {
-    fn new(index: usize, part: &Part, categories: Vec<String>, has_global: bool, has_project: bool, rules: &klm_core::rules::Rules) -> Self {
+    fn new(id: u64, part: &Part, categories: Vec<String>, has_global: bool, has_project: bool, rules: &klm_core::rules::Rules) -> Self {
         let mut part = part.clone();
         part.mpn = rules.normalise_mpn(&part.mpn);
         Self {
-            index,
+            id,
             category: rules.category_for(&part),
             part,
             categories,

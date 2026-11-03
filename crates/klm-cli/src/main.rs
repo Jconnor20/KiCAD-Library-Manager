@@ -303,7 +303,7 @@ fn import(zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Opt
         print!("{plan}");
         return Ok(ExitCode::SUCCESS);
     }
-    if plan.touches_kicad_tables() {
+    if plan.touches_kicad_tables() || plan.adds_libraries() {
         ensure_kicad_closed()?;
     }
     let mut failed = false;

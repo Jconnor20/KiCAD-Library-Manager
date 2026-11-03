@@ -31,6 +31,8 @@ enum Msg {
     Log(String),
     /// Re-add KLM libraries missing from KiCad's tables.
     Relink,
+    /// Add queued libraries to KiCad's tables, after the close-KiCad prompt if it is open.
+    ApplyPending,
     MoveGlobal(PathBuf),
     Search(search::Msg),
     Import(import::Msg),
@@ -64,6 +66,9 @@ struct AppCtx {
     /// An action that edits KiCad's library tables, held until KiCad is closed.
     blocked: Option<Msg>,
     still_open: bool,
+    /// Libraries waiting to be added to KiCad's tables once it closes.
+    pending_libs: usize,
+    last_poll: std::time::Instant,
 }
 
 impl AppCtx {
@@ -139,6 +144,7 @@ impl App {
     fn new(ctx: &egui::Context, project_arg: Option<PathBuf>) -> Self {
         let mut settings = Settings::load();
         kicad_env::set_kicad_cli_override(settings.kicad_cli.clone());
+        kicad_env::set_pending_queue(dirs::config_dir().map(|d| d.join("KiCAD-Library-Manager").join("pending-libs.json")));
         klm_core::snapshot::set_store_path(klm_core::store::Store::default_path());
         klm_core::snapshot::set_policy(&settings.history);
         if let Some(p) = &project_arg {
@@ -158,6 +164,8 @@ impl App {
             tx,
             blocked: None,
             still_open: false,
+            pending_libs: 0,
+            last_poll: std::time::Instant::now(),
         };
         if let Err(e) = &cx.kicad_config {
             cx.log.push(format!("KiCad not found: {e}"));
@@ -176,17 +184,41 @@ impl App {
             cx,
             rx,
         };
+        app.apply_pending();
         app.check_links();
         app
     }
 
+    /// Adds queued libraries to KiCad's tables if KiCad is closed.
+    fn apply_pending(&mut self) {
+        let cx = &mut self.cx;
+        if kicad_env::pending_count() > 0 {
+            match kicad_env::apply_pending() {
+                Ok(0) => {}
+                Ok(n) => {
+                    cx.log.push(format!("Added {n} queued librar{} to KiCad's library list", if n == 1 { "y" } else { "ies" }));
+                    cx.send(Msg::Library(library::Msg::Refresh));
+                }
+                Err(e) => cx.log.push(format!("Could not add queued libraries to KiCad: {e:#}")),
+            }
+        }
+        cx.pending_libs = kicad_env::pending_count();
+    }
+
     /// Re-adds KLM libraries that KiCad dropped from its tables (e.g. it saved over them while open).
     fn check_links(&mut self) {
-        if self.cx.roots().iter().all(|r| r.unlinked().is_empty() && !r.has_old_paths()) {
+        let roots = self.cx.roots();
+        let (missing, old) = (roots.iter().any(|r| !r.unlinked().is_empty()), roots.iter().any(|r| r.has_old_paths()));
+        if !missing && !old {
             return;
         }
         if kicad_env::kicad_running() {
-            self.cx.log.push("Some KLM libraries are missing from KiCad's library list. Close KiCad, then click \"Re-link libraries\".".into());
+            let what = match (missing, old) {
+                (true, true) => "Some KLM libraries are missing from KiCad's library list and some use old ${KLM_LIB} paths",
+                (true, false) => "Some KLM libraries are missing from KiCad's library list",
+                _ => "Some KLM libraries use old ${KLM_LIB} paths",
+            };
+            self.cx.log.push(format!("{what}. Close KiCad, then click \"Re-link libraries\"."));
         } else {
             self.relink();
         }
@@ -239,6 +271,7 @@ impl App {
             match msg {
                 Msg::Log(s) => self.cx.log.push(s),
                 Msg::Relink => self.relink(),
+                Msg::ApplyPending => self.apply_pending(),
                 Msg::MoveGlobal(dir) => self.move_global(&dir),
                 Msg::Search(m) => self.search_tab.handle(m, &mut self.cx),
                 Msg::Import(m) => self.import_tab.handle(m, &mut self.cx),
@@ -274,10 +307,10 @@ impl App {
         if cancel {
             cx.blocked = None;
         } else if proceed {
-            if kicad_env::kicad_running() {
+            if kicad_env::kicad_running_now() {
                 cx.still_open = true;
             } else if let Some(msg) = cx.blocked.take() {
-                cx.when_kicad_closed(msg);
+                cx.send(msg); // just checked uncached; the cached check could still say "open"
             }
         }
     }
@@ -296,6 +329,12 @@ impl App {
                 {
                     if let Some(d) = rfd::FileDialog::new().set_title("New location for the global library").pick_folder() {
                         cx.when_kicad_closed(Msg::MoveGlobal(d));
+                    }
+                }
+                if cx.pending_libs > 0 {
+                    ui.label(format!("{} pending", cx.pending_libs)).on_hover_text("Written to KiCad's library list; re-checked when KiCad closes in case it saves over them");
+                    if ui.button("Apply now").clicked() {
+                        cx.when_kicad_closed(Msg::ApplyPending);
                     }
                 }
                 if ui.button("Relink libraries").on_hover_text("Add any KLM libraries missing from KiCad's library list").clicked() {
@@ -331,6 +370,13 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_messages();
+        if self.cx.last_poll.elapsed() >= std::time::Duration::from_secs(5) {
+            self.cx.last_poll = std::time::Instant::now();
+            if self.cx.pending_libs > 0 {
+                self.apply_pending();
+            }
+        }
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(5));
 
         egui::Panel::top("top").show(ui, |ui| {
             ui.add_space(6.0);
