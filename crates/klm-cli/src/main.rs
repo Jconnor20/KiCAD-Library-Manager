@@ -334,7 +334,9 @@ fn pick<'a>(report: &'a cleanup::Report, sel: &str) -> Result<&'a cleanup::Entry
 fn cleanup_cmd(projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, moves: Vec<String>, apply: bool) -> Result<ExitCode> {
     let s = settings()?;
     let projects = if projects.is_empty() { s.last_project.clone().into_iter().collect() } else { projects };
-    let report = cleanup::scan(&kicad_config()?, &projects);
+    let projects: Vec<PathBuf> = projects.iter().map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone())).collect();
+    let config = kicad_config()?;
+    let report = cleanup::scan(&config, &projects);
     let acting = !(remove.is_empty() && fix.is_empty() && moves.is_empty());
     if !acting {
         for (i, e) in report.entries.iter().enumerate() {
@@ -375,7 +377,8 @@ fn cleanup_cmd(projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, mo
         println!("Preview only; nothing was changed. Add --apply to do it.");
         return Ok(ExitCode::SUCCESS);
     }
-    let real = std::env::var_os("KLM_KICAD_CONFIG").is_none();
+    // An overridden config dir isn't the real KiCad's, but a project's tables still are.
+    let real = std::env::var_os("KLM_KICAD_CONFIG").is_none() || plan.tables.iter().any(|t| !t.file.starts_with(&config));
     if !plan.tables.is_empty() {
         for b in cleanup::apply(&plan, real)? {
             println!("backup: {}", b.display());

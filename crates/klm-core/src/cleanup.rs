@@ -287,7 +287,7 @@ fn resolve(uri: &str, project: Option<&Path>, vars: &BTreeMap<String, String>) -
                 Some(p) => p.to_string_lossy().replace('\\', "/"),
                 None => return Resolved::Unverifiable("depends on the project that opens it".into()),
             }
-        } else if let Some(v) = vars.get(&var).cloned().or_else(|| std::env::var(&var).ok()) {
+        } else if let Some(v) = std::env::var(&var).ok().or_else(|| vars.get(&var).cloned()) {
             v
         } else if var.to_uppercase().starts_with("KICAD") || var == "KLM_LIB" {
             return Resolved::Unverifiable(format!("{var} is set by KiCad itself"));
@@ -299,12 +299,30 @@ fn resolve(uri: &str, project: Option<&Path>, vars: &BTreeMap<String, String>) -
     if s.contains('\\') && !Path::new(&s).exists() {
         return Resolved::Unverifiable("a path with backslashes, which KiCad reads differently".into());
     }
-    Resolved::Path(PathBuf::from(s))
+    let path = PathBuf::from(s);
+    if path.is_relative() {
+        // KiCad opens a relative path from the project; there is no telling from where for a global table.
+        return match project {
+            Some(p) => Resolved::Path(p.join(path)),
+            None => Resolved::Unverifiable("a relative path".into()),
+        };
+    }
+    Resolved::Path(path)
+}
+
+/// Whether the uri uses a variable KiCad defines itself (`${KICAD9_SYMBOL_DIR}`, `${KICAD9_3RD_PARTY}`, ...),
+/// as opposed to one the user made up that merely starts with KICAD.
+fn uses_kicad_var(uri: &str) -> bool {
+    let up = uri.to_uppercase();
+    up.match_indices("${KICAD").any(|(i, _)| {
+        let rest = &up[i + 7..];
+        rest.starts_with(|c: char| c.is_ascii_digit()) || rest.starts_with("_USER_TEMPLATE_DIR")
+    })
 }
 
 fn lock_reason(typ: &str, raw: &Raw) -> Option<&'static str> {
     let up = raw.uri.to_uppercase();
-    if up.contains("${KICAD") {
+    if uses_kicad_var(&raw.uri) {
         Some("a KiCad or plugin-manager library")
     } else if raw.descr.contains("Managed by KiCad Library Manager") || up.contains("${KLM_LIB}") {
         Some("managed by KLM (use Relink)")
@@ -417,6 +435,7 @@ pub fn scan(config: &Path, project_dirs: &[PathBuf]) -> Report {
             let (path, mut note) = match resolve(&raw.uri, project.as_deref(), &vars) {
                 Resolved::Path(p) => (Some(p), None),
                 Resolved::Unverifiable(why) => (None, Some((IssueKind::Unverifiable, why))),
+                Resolved::Undefined(v) if project.is_some() => (None, Some((IssueKind::Unverifiable, format!("{v} may be a text variable of the project")))),
                 Resolved::Undefined(v) => (None, Some((IssueKind::Broken, format!("the variable {v} is not defined in KiCad's settings")))),
             };
             let mut locked = lock_reason(&raw.typ, raw);
@@ -439,13 +458,15 @@ pub fn scan(config: &Path, project_dirs: &[PathBuf]) -> Report {
             if raw.uri.trim().is_empty() {
                 note = Some((IssueKind::Broken, "has no path".into()));
             } else if let Some(p) = &r.entries[idx].path {
+                let plain = raw.typ.eq_ignore_ascii_case("KiCad");
                 let ok = match kind {
+                    _ if !plain => p.exists(),
                     Kind::Symbol => p.is_file(),
                     Kind::Footprint => p.is_dir(),
                 };
                 if !ok {
                     note = Some((IssueKind::Broken, format!("{} doesn't exist", p.display())));
-                } else if kind == Kind::Footprint && !p.extension().is_some_and(|x| x == "pretty") {
+                } else if plain && kind == Kind::Footprint && !p.extension().is_some_and(|x| x == "pretty") {
                     note = Some((IssueKind::Broken, "isn't a .pretty folder".into()));
                 }
             }
@@ -580,6 +601,7 @@ pub fn plan(report: &Report, actions: &[Action]) -> Result<Plan> {
                     }
                 }
                 Action::FixPath { new_path, .. } => {
+                    let new_path = &std::path::absolute(new_path).unwrap_or_else(|_| new_path.clone());
                     let ok = match entry.kind {
                         Kind::Symbol => new_path.is_file() && new_path.extension().is_some_and(|x| x == "kicad_sym" || x == "lib"),
                         Kind::Footprint => new_path.is_dir() && new_path.extension().is_some_and(|x| x == "pretty"),
@@ -627,6 +649,7 @@ pub fn apply(plan: &Plan, check_kicad: bool) -> Result<Vec<PathBuf>> {
     }
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     let mut backups: Vec<PathBuf> = vec![];
+    let mut written: Vec<&TablePlan> = vec![];
     for t in &plan.tables {
         let mut bak = PathBuf::from(format!("{}.klm-cleanup-{ts}.bak", t.file.display()));
         for n in 2.. {
@@ -637,13 +660,21 @@ pub fn apply(plan: &Plan, check_kicad: bool) -> Result<Vec<PathBuf>> {
         }
         std::fs::write(&bak, &t.before).with_context(|| format!("backing up {}", t.file.display()))?;
         backups.push(bak.clone());
-        let done = kicad_env::write_atomic(&t.file, &t.after).and_then(|()| {
+        // A table that is a link (a dotfiles repo) is written through, so the link survives.
+        let write = |text: &str| {
+            if std::fs::symlink_metadata(&t.file).is_ok_and(|m| m.file_type().is_symlink()) { std::fs::write(&t.file, text).map_err(anyhow::Error::from) } else { kicad_env::write_atomic(&t.file, text) }
+        };
+        let done = write(&t.after).and_then(|()| {
             if std::fs::read_to_string(&t.file)? == t.after { Ok(()) } else { bail!("{} doesn't read back as written", t.file.display()) }
         });
         if let Err(e) = done {
-            let _ = kicad_env::write_atomic(&t.file, &t.before);
-            return Err(e.context(format!("{} was put back as it was; backup at {}", t.file.display(), bak.display())));
+            // Put back this table and every one already written, so a failed run changes nothing.
+            for w in written.iter().copied().chain([t]) {
+                let _ = std::fs::write(&w.file, &w.before);
+            }
+            return Err(e.context(format!("every table was put back as it was; backups: {}", backups.iter().map(|b| b.display().to_string()).collect::<Vec<_>>().join(", "))));
         }
+        written.push(t);
     }
     Ok(backups)
 }
@@ -703,7 +734,9 @@ pub fn plan_move(report: &Report, entry: &Entry, rules: &Rules, global: &Library
     std::fs::write(stage.join(format!("{}.kicad_sym", crate::library::sanitize(&entry.name))), &text)?;
     let nicks: BTreeSet<&str> = lib.children("symbol").filter_map(|s| property(s, "Footprint")?.split_once(':').map(|(n, _)| n)).collect();
     for nick in nicks {
-        let fp = report.entries.iter().find(|e| e.kind == Kind::Footprint && e.name == nick && e.path.as_ref().is_some_and(|p| p.is_dir()));
+        // The symbol's own project table overrides the global one of the same name.
+        let usable = |e: &&Entry| e.kind == Kind::Footprint && e.name == nick && !e.disabled && e.path.as_ref().is_some_and(|p| p.is_dir());
+        let fp = report.entries.iter().filter(usable).find(|e| e.project == entry.project).or_else(|| report.entries.iter().filter(usable).find(|e| e.project.is_none()));
         match fp.and_then(|e| e.path.as_ref()) {
             Some(dir) => copy_dir(dir, &stage.join(format!("{nick}.pretty"))).with_context(|| format!("copying {}", dir.display()))?,
             None => mv.caveats.push(format!("footprint library {nick} isn't in any scanned table, so its footprints can't come along")),
@@ -793,6 +826,20 @@ mod tests {
         assert!(std::fs::read_dir(&cfg).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains("klm-cleanup")), "backup made");
         assert!(libs.join("good.kicad_sym").exists(), "library files stay");
         assert!(!std::fs::read_to_string(cfg.join("fp-lib-table")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn working_entries_are_not_called_broken() {
+        let base = crate::test_dir("cleanup_false_broken");
+        let (cfg, prj) = (base.join("cfg"), base.join("prj"));
+        std::fs::create_dir_all(prj.join("libs/My.pretty")).unwrap();
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(prj.join("p.kicad_pro"), "{}").unwrap();
+        std::fs::write(prj.join("old.mod"), "x").unwrap();
+        std::fs::write(prj.join("fp-lib-table"), "(fp_lib_table (lib (name \"Rel\")(type \"KiCad\")(uri \"libs/My.pretty\")(options \"\")(descr \"\")) (lib (name \"Leg\")(type \"Legacy\")(uri \"${KIPRJMOD}/old.mod\")(options \"\")(descr \"\")) (lib (name \"Txt\")(type \"KiCad\")(uri \"${PARTS}/x.pretty\")(options \"\")(descr \"\")) (lib (name \"Mine\")(type \"KiCad\")(uri \"${KICAD_USER_LIBS}/x.pretty\")(options \"\")(descr \"\")))").unwrap();
+        let r = scan(&cfg, &[prj]);
+        assert!(!r.issues.iter().any(|i| i.kind == IssueKind::Broken && i.entry < 3), "{:?}", r.issues);
+        assert!(r.entries.iter().find(|e| e.name == "Mine").unwrap().actionable, "a user's own KICAD_* variable is theirs");
     }
 
     #[test]

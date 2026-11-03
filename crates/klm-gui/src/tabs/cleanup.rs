@@ -14,6 +14,8 @@ pub struct CleanupTab {
     report: Option<Report>,
     queue: Vec<Action>,
     mv: Option<(String, Move)>,
+    /// Preview of `queue` (lines, warnings) or why it can't be applied; recomputed when the queue changes, not every frame.
+    preview: Option<Result<(Vec<String>, Vec<String>), String>>,
 }
 
 fn tag(e: &Entry) -> String {
@@ -21,14 +23,23 @@ fn tag(e: &Entry) -> String {
 }
 
 impl CleanupTab {
+    fn refresh_preview(&mut self) {
+        self.preview = match (&self.report, self.queue.is_empty()) {
+            (Some(r), false) => Some(cleanup::plan(r, &self.queue).map(|p| (p.lines, p.warnings)).map_err(|e| format!("{e:#}"))),
+            _ => None,
+        };
+    }
+
     fn scan(&mut self, cx: &mut AppCtx) {
         self.queue.clear();
+        self.preview = None;
         let Ok(config) = cx.kicad_config.clone() else {
             cx.log.push("KiCad's config folder wasn't found, so there are no library tables to scan.".into());
             return;
         };
         let dirs: Vec<PathBuf> = cx.project.iter().chain(&self.projects).cloned().collect();
         self.report = Some(cleanup::scan(&config, &dirs));
+        self.refresh_preview();
     }
 
     fn apply(&mut self, cx: &mut AppCtx) {
@@ -125,6 +136,7 @@ impl CleanupTab {
         });
         if let Some(a) = want {
             self.queue.push(a);
+            self.refresh_preview();
         }
         if let Some(i) = move_of {
             match (cx.global_root(), &self.report) {
@@ -141,17 +153,17 @@ impl CleanupTab {
         if !self.queue.is_empty() {
             ui.separator();
             ui.strong("Changes to apply");
-            match self.report.as_ref().map(|r| cleanup::plan(r, &self.queue)) {
-                Some(Ok(plan)) => {
-                    plan.lines.iter().for_each(|l| {
+            match &self.preview {
+                Some(Ok((lines, warnings))) => {
+                    lines.iter().for_each(|l| {
                         ui.label(l);
                     });
-                    plan.warnings.iter().for_each(|w| {
+                    warnings.iter().for_each(|w| {
                         ui.colored_label(ui.visuals().warn_fg_color, w);
                     });
                 }
                 Some(Err(e)) => {
-                    ui.colored_label(ui.visuals().error_fg_color, format!("{e:#}"));
+                    ui.colored_label(ui.visuals().error_fg_color, e);
                 }
                 None => {}
             }
@@ -165,6 +177,7 @@ impl CleanupTab {
                 }
                 if ui.button("Discard").clicked() {
                     self.queue.clear();
+                    self.preview = None;
                 }
             });
         }
