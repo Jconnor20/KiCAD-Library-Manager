@@ -189,6 +189,8 @@ const FAMILIES: &[(&str, &[&str])] = &[
     ("sot223", &["sot223", "sot2233", "sot2233*", "sot223tab*"]),
     ("sot89", &["sot89", "sot893", "sot893*"]),
     ("soic{n}", &["soic{n}", "so{n}", "soic{n}39x*", "soic127p600x*-{n}n"]),
+    // 208 mil (5.3 mm body) sits between the 3.9 mm and 7.5 mm bodies and must not fall into either.
+    ("soic{n}-208", &["soic{n}w53x*", "soic{n}53x*", "soic{n}n208", "soic127p800x*-{n}n"]),
     ("soic{n}w", &["soic{n}w", "so{n}w", "soic{n}w*", "soic127p1030x*-{n}n"]),
 ];
 // Largest first, so the IPC pattern for 8 pins does not swallow "-18N".
@@ -337,6 +339,13 @@ mod tests {
         diff("SOIC-18", "SOIC127P600X171-8N");
         diff("SOIC-16W_7.5x10.3mm", "SOIC-16_3.9x9.9mm");
         diff("SOIC-8", "SOIC-14");
+        same("SOIC-8W_7.5x5.0mm_P1.27mm", "SOIC127P1030X265-8N");
+        same("SOIC-8W_5.3x5.3mm_P1.27mm", "SOIC127P800X215-8N");
+        same("SOIC-8_5.3x5.3mm_P1.27mm", "SOIC-8W_5.3x5.3mm_P1.27mm");
+        diff("SOIC-8W_5.3x5.3mm_P1.27mm", "SOIC-8W_7.5x5.0mm_P1.27mm");
+        diff("SOIC-8W_5.3x5.3mm_P1.27mm", "SOIC-8_3.9x4.9mm_P1.27mm");
+        diff("SOIC127P800X215-8N", "SOIC127P600X175-8N");
+        diff("SOIC127P1030X265-8N", "SOIC127P800X215-8N");
         assert!(package_id("Weird-Pkg").starts_with("raw:"));
     }
 

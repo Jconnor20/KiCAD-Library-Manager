@@ -137,8 +137,9 @@ Timings: `cargo test --release -p klm-core --test scale_e2e -- --ignored scale -
 - Left out on purpose: symbols with two pins or fewer, power symbols and hidden pins.
 
 ### W3.2 Alternatives and duplicates
-- **No ungroup.** A group can only be changed by confirming a new one over it.
-- **Rejected suggestions come back** on the next scan. Nothing remembers a rejection.
+- ~~**No ungroup.**~~ ~~**Rejected suggestions come back.**~~ Fixed in W8.3. Rejections are stored as `mpn@raw footprint name` and resolved to package ids when read, so editing the alias table keeps them. Confirming a group clears older rejections between its members.
+- **Scale with rejections (W8-fix):** `suggest_unrejected` over 2,000 parts with 1,024 stored rejections takes about 36 ms (release build, Windows 11, one run; `cargo test --release -p klm-core --test scale_e2e rejections -- --nocapture`).
+- **SOIC body widths:** 3.9 mm (`SOIC-8`, `P600`), 5.3 mm (208 mil, `P800`) and 7.5 mm (`SOIC-8W`, `P1030`) are separate packages. Other SOIC-like widths (e.g. `P760`) fall back to `raw:` and group only with the same name.
 - **Packages are matched by footprint name**, so the same package under different vendor names (`R_0603` vs `RESC1608X55N`) won't group. This is marked `shortcut:` in the code.
 
 ### W3.3 Naming and category rules

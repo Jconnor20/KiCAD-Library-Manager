@@ -137,6 +137,31 @@ fn two_thousand_parts_are_listed_checked_and_grouped() {
     assert!(!alternatives::suggest(&alt).is_empty(), "shared packages and values should give groups");
 }
 
+/// Rejections loaded (a thousand neighbour pairs plus the suggested groups' first pairs) must not make the filtered scan slow.
+#[test]
+fn two_thousand_parts_with_rejections_still_suggest_fast() {
+    let root = seed(&fresh("rejections"), PARTS);
+    let parts = alternatives::scan(&root);
+    let store = klm_core::store::Store::open(&fresh("rejections-db").join("parts.db")).unwrap();
+    let groups = alternatives::suggest(&parts);
+    let mut n = 0;
+    for g in groups.iter().take(1000) {
+        alternatives::reject(&store, &[&parts[g[0]], &parts[g[1]]]).unwrap();
+        n += 1;
+    }
+    assert!(n > 0);
+    for w in parts.windows(2).take(1000) {
+        alternatives::reject(&store, &[&w[0], &w[1]]).unwrap();
+        n += 1;
+    }
+    let t = Instant::now();
+    let left = alternatives::suggest_unrejected(&store, &parts).unwrap();
+    let ms = t.elapsed().as_secs_f64() * 1e3;
+    println!("suggest_unrejected, {PARTS} parts, {n} rejections: {ms:.1} ms");
+    assert!(left.len() <= groups.len());
+    assert!(ms < 5000.0, "took {ms} ms");
+}
+
 /// Timings for the Library tab and the Alternatives scan, on the release build. Not run by default:
 /// `cargo test --release -- --ignored scale --nocapture`.
 #[test]
