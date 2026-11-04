@@ -7,8 +7,8 @@ use klm_core::sources::combine;
 use klm_core::store::{Alternative, Store};
 use std::sync::mpsc::{Receiver, channel};
 
-/// Per suggested group: (index into `parts`, role, ticked).
-type Groups = Vec<Vec<(usize, String, bool)>>;
+/// Per suggested group: whether it is confirmed (stored), and its members as (index into `parts`, role, ticked).
+type Groups = Vec<(bool, Vec<(usize, String, bool)>)>;
 
 /// Suggested groups of equivalent parts in one library. The user ticks the members, picks a role for
 /// each and confirms; only then is the group stored and written into the symbols.
@@ -38,19 +38,27 @@ impl AlternativesPanel {
         std::thread::spawn(move || {
             let parts = alternatives::scan(&r);
             let store = Store::default_path().and_then(|p| Store::open(&p).ok());
-            let groups = alternatives::suggest(&parts)
+            let suggested = match &store {
+                Some(s) => alternatives::suggest_unrejected(s, &parts).unwrap_or_default(),
+                None => alternatives::suggest(&parts),
+            };
+            let groups = suggested
                 .into_iter()
                 .map(|g| {
-                    g.into_iter()
+                    let mut confirmed = false;
+                    let members = g
+                        .into_iter()
                         .enumerate()
                         .map(|(n, i)| {
                             // A stored role wins; otherwise the first part is the suggested preferred one.
                             let stored = store.as_ref().and_then(|s| alternatives::alternatives_of(s, &parts[i].mpn).ok()).and_then(|grp| {
                                 grp.into_iter().find(|a| klm_core::matching::same_mpn(&a.mpn, &parts[i].mpn)).map(|a| a.role)
                             });
+                            confirmed |= stored.is_some();
                             (i, stored.unwrap_or_else(|| if n == 0 { "preferred" } else { "substitute" }.into()), true)
                         })
-                        .collect()
+                        .collect();
+                    (confirmed, members)
                 })
                 .collect();
             let _ = tx.send((parts, groups));
@@ -193,7 +201,8 @@ impl AlternativesPanel {
             }
             ui.label("Parts with the same package and the same MPN or value. Tick the ones that really are equivalent, pick their roles and confirm. Nothing is merged; each symbol gets MPN_AltN fields for the BOM.");
             egui::ScrollArea::vertical().show(ui, |ui| {
-                for (g, group) in self.groups.iter_mut().enumerate() {
+                let mut gone = None;
+                for (g, (confirmed, group)) in self.groups.iter_mut().enumerate() {
                     ui.separator();
                     egui::Grid::new(("alt_group", g)).num_columns(6).striped(true).show(ui, |ui| {
                         for (i, role, ticked) in group.iter_mut() {
@@ -211,13 +220,36 @@ impl AlternativesPanel {
                             ui.end_row();
                         }
                     });
-                    if ui.button("Confirm group").clicked() {
-                        let members: Vec<_> = group.iter().filter(|m| m.2).map(|(i, role, _)| self.parts[*i].as_alternative(role)).collect();
-                        cx.log.push(match confirm(&self.root, &members) {
-                            Ok((first, written)) => format!("Grouped {} parts with {first} preferred; wrote alternatives into {written} symbols", members.len()),
-                            Err(e) => format!("Could not group the parts: {e:#}"),
-                        });
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Confirm group").clicked() {
+                            let members: Vec<_> = group.iter().filter(|m| m.2).map(|(i, role, _)| self.parts[*i].as_alternative(role)).collect();
+                            cx.log.push(match confirm(&self.root, &members) {
+                                Ok((first, written)) => {
+                                    *confirmed = true;
+                                    format!("Grouped {} parts with {first} preferred; wrote alternatives into {written} symbols", members.len())
+                                }
+                                Err(e) => format!("Could not group the parts: {e:#}"),
+                            });
+                        }
+                        let (label, hint) = if *confirmed {
+                            ("Ungroup", "Remove the alternatives this group wrote and stop suggesting it")
+                        } else {
+                            ("Reject", "These are not equivalent: stop suggesting this group")
+                        };
+                        if ui.button(label).on_hover_text(hint).clicked() {
+                            let members: Vec<&LibPart> = group.iter().map(|(i, ..)| &self.parts[*i]).collect();
+                            match dissolve(&self.root, &members, *confirmed) {
+                                Ok(msg) => {
+                                    cx.log.push(msg);
+                                    gone = Some(g);
+                                }
+                                Err(e) => cx.log.push(format!("Could not {}: {e:#}", label.to_lowercase())),
+                            }
+                        }
+                    });
+                }
+                if let Some(g) = gone {
+                    self.groups.remove(g);
                 }
             });
         });
@@ -230,4 +262,16 @@ fn confirm(root: &LibraryRoot, members: &[klm_core::store::Alternative]) -> anyh
     let store = Store::open(&Store::default_path().ok_or_else(|| anyhow::anyhow!("no config folder for the parts database"))?)?;
     let group = alternatives::confirm(&store, members)?;
     Ok((group[0].mpn.clone(), alternatives::write_back(root, &group)?))
+}
+
+/// Reject a suggested group, or ungroup a confirmed one (which also rejects it). The message to log.
+fn dissolve(root: &LibraryRoot, members: &[&LibPart], confirmed: bool) -> anyhow::Result<String> {
+    let store = Store::open(&Store::default_path().ok_or_else(|| anyhow::anyhow!("no config folder for the parts database"))?)?;
+    if confirmed {
+        let written = alternatives::ungroup(root, &store, &members[0].mpn)?;
+        Ok(format!("Ungrouped {}; cleared the alternatives from {written} symbols", members[0].mpn))
+    } else {
+        alternatives::reject(&store, members)?;
+        Ok(format!("Rejected the group of {}; it won't be suggested again", members[0].mpn))
+    }
 }

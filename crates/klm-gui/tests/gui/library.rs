@@ -254,7 +254,7 @@ fn l15_delete_goes_through_a_review() {
     assert_eq!(files(&root.dir), before, "Cancel must change nothing");
 
     click(&mut h, "Delete…");
-    click(&mut h, "Apply");
+    click(&mut h, "Delete");
     settle(&mut h);
     assert!(log_has(&h, "Deleted RP2040"), "nothing logged: {:?}", h.state().cx.log.lines);
     assert!(!root.has_part("ICs", "RP2040") && root.has_part("ICs", "LM358"));
@@ -356,4 +356,58 @@ fn l21_show_filters_to_one_part() {
     h.state().cx.send(crate::Msg::Library(crate::tabs::library::Msg::Show("RP2040".into())));
     h.run_ok();
     assert!(h.query_all_by_label("LM358").next().is_none() && h.query_all_by_label("RP2040").next().is_some());
+}
+
+/// The Alternatives window on a library where RC0603FR-0710KL is also in a second category, so the scan suggests that pair.
+fn alternatives_with_duplicate<'a>(confirmed: bool) -> Gui<'a> {
+    let mut h = library(SIZES[1]);
+    let root = h.state().cx.global_root().unwrap();
+    let part = klm_core::part::Part { mpn: "RC0603FR-0710KL".into(), manufacturer: "Yageo".into(), ..Default::default() };
+    let sym = root.dir.join("dup.kicad_sym");
+    std::fs::write(&sym, include_str!("dup.kicad_sym").replace("NAME", "RC0603FR-0710KL")).unwrap();
+    root.add_part(&klm_core::part::Part { symbol_file: Some(sym), ..part }, "Spare", false).unwrap();
+    if confirmed {
+        // A stored group, as Confirm would leave it (Confirm itself needs two different MPNs).
+        let store = klm_core::store::Store::open(&klm_core::store::Store::default_path().unwrap()).unwrap();
+        for (mpn, role) in [("RC0603FR-0710KL", "preferred"), ("RC-ALT", "substitute")] {
+            store.set_alternative("RC0603FR-0710KL", &klm_core::store::Alternative { mpn: mpn.into(), manufacturer: "Yageo".into(), supplier_ids: vec![], role: role.into() }).unwrap();
+        }
+    }
+    click(&mut h, "Alternatives…");
+    settle(&mut h);
+    h
+}
+
+fn suggested(h: &Gui) -> usize {
+    let root = h.state().cx.global_root().unwrap();
+    let store = klm_core::store::Store::open(&klm_core::store::Store::default_path().unwrap()).unwrap();
+    klm_core::alternatives::suggest_unrejected(&store, &klm_core::alternatives::scan(&root)).unwrap().len()
+}
+
+#[test]
+fn l21_reject_hides_a_suggestion_for_good() {
+    let _env = setup();
+    let mut h = alternatives_with_duplicate(false);
+    assert_eq!(suggested(&h), 1, "the duplicate is not suggested:\n{}", dump(&h));
+    assert!(h.query_by_label("Ungroup").is_none(), "an unconfirmed group offers Ungroup");
+    click(&mut h, "Reject");
+    settle(&mut h);
+    assert!(h.query_by_label("Reject").is_none() && h.query_by_label("Confirm group").is_none(), "the group is still shown");
+    assert!(log_has(&h, "Rejected the group"), "{:?}", h.state().cx.log.lines);
+    assert_eq!(suggested(&h), 0, "a rejected group came back on rescan");
+}
+
+#[test]
+fn l22_ungroup_dissolves_a_confirmed_group() {
+    let _env = setup();
+    let mut h = alternatives_with_duplicate(true);
+    assert!(h.query_by_label("Reject").is_none(), "a confirmed group offers Reject:
+{}", dump(&h));
+    click(&mut h, "Ungroup");
+    settle(&mut h);
+    assert!(h.query_by_label("Ungroup").is_none() && h.query_by_label("Confirm group").is_none(), "the group is still shown");
+    assert!(log_has(&h, "Ungrouped"), "{:?}", h.state().cx.log.lines);
+    let store = klm_core::store::Store::open(&klm_core::store::Store::default_path().unwrap()).unwrap();
+    assert!(klm_core::alternatives::alternatives_of(&store, "RC0603FR-0710KL").unwrap().is_empty());
+    assert_eq!(suggested(&h), 0, "an ungrouped group came back on rescan");
 }
