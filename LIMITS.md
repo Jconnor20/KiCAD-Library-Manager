@@ -95,7 +95,8 @@ Timings: `cargo test --release -p klm-core --test scale_e2e -- --ignored scale -
 ## Wave 4
 
 ### W4.1 BOM import and enrichment
-- **No country of origin.** The recorded DigiKey, LCSC/JLCPCB and Nexar-schema replies have no such field (W6.1), so the column stays missing. Mouser's reply is unchecked (no key).
+- **No country of origin.** The recorded DigiKey, LCSC/JLCPCB and Nexar-schema replies have no such field (W6.1), so the column stays missing. Mouser's documented reply (third-party docs; no key was available to record one) has `ProductCompliance` name/value pairs for HTS/ECCN-style codes and no country-of-origin field; if a live reply shows one, add it to `mouser.rs` with a fixture. `Mult` is documented as a string (like `Min`), which the parser reads; a live reply is still unrecorded.
+- **Health resolves stock library variables from the installed KiCad only.** `${KICADn_SYMBOL_DIR}`, `_FOOTPRINT_DIR` and `_3DMODEL_DIR` map to the installed version's `share/kicad/...` whatever `n` is (Windows/Linux layout, not macOS). A variable that can't be resolved (no install, unknown name) is still trusted, not reported.
 - **Lead time.** DigiKey `ManufacturerLeadWeeks` is confirmed live (a string of weeks). Mouser `LeadTime` is unverified (no Mouser key stored). LCSC has none. Nexar has `factoryLeadDays` per offer but isn't read.
 - **Nexar free plan** allows 10 parts; once spent every search fails with that message, so Nexar values (stock, prices, MOQ, pack size) are unverified. Its field names were checked by schema introspection: `multipack` didn't exist and is now `multipackQuantity`.
 - **DigiKey token** requests timed out at the app's 20 s limit in 3 of 5 live runs (other runs took under 2 s).
