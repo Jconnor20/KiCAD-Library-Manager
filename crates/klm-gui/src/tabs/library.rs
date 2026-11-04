@@ -62,6 +62,8 @@ enum Dry {
     Restyle { root: LibraryRoot, category: String, name: String, result: Result<Restyled, String> },
     Export { root: LibraryRoot, parts: Vec<Key>, path: String },
     Delete { root: LibraryRoot, plans: Vec<(Key, Result<RemovePlan, String>)> },
+    /// The worker planning a delete.
+    PlanningDelete(LibraryRoot, mpsc::Receiver<Vec<(Key, Result<RemovePlan, String>)>>),
     Scanning(mpsc::Receiver<Vec<Finding>>),
     Health(Vec<Finding>),
 }
@@ -346,9 +348,14 @@ impl LibraryTab {
                 self.dry = Some(Dry::Export { root, parts: sorted(&self.selected), path: path.display().to_string() });
             }
             Action::Delete(root, targets) => {
-                // shortcut: planned on the UI thread; reads every symbol library per part, so a huge selection may pause the UI.
-                let plans = targets.into_iter().map(|k| (k.clone(), root.plan_remove(&k.0, &k.1).map_err(|e| format!("{e:#}")))).collect();
-                self.dry = Some(Dry::Delete { root, plans });
+                let (tx, rx) = mpsc::channel();
+                let (r, ctx) = (root.clone(), cx.ctx.clone());
+                std::thread::spawn(move || {
+                    let plans = r.plan_remove_all(&targets);
+                    let _ = tx.send(targets.into_iter().zip(plans).map(|(k, p)| (k, p.map_err(|e| format!("{e:#}")))).collect());
+                    ctx.request_repaint();
+                });
+                self.dry = Some(Dry::PlanningDelete(root, rx));
             }
             Action::Health => {
                 if let Some(dir) = cx.project.clone() {
@@ -498,6 +505,11 @@ impl LibraryTab {
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(_) => self.dry = None,
             },
+            Some(Dry::PlanningDelete(root, rx)) => match rx.try_recv() {
+                Ok(plans) => self.dry = Some(Dry::Delete { root: root.clone(), plans }),
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(_) => self.dry = None,
+            },
             Some(Dry::Scanning(rx)) => match rx.try_recv() {
                 Ok(findings) => self.dry = Some(Dry::Health(findings)),
                 Err(mpsc::TryRecvError::Empty) => {}
@@ -506,14 +518,18 @@ impl LibraryTab {
             _ => {}
         }
         let ctx = cx.ctx.clone();
-        let working = matches!(self.dry, Some(Dry::Planning(_)));
+        let heading = match self.dry {
+            Some(Dry::Planning(_)) => ("Standardise", "Checking every symbol and footprint…"),
+            Some(Dry::PlanningDelete(..)) => ("Delete", "Checking what each part uses…"),
+            _ => ("Health report", "Checking the project's library…"),
+        };
         match &mut self.dry {
             None => {}
-            Some(Dry::Planning(_)) | Some(Dry::Scanning(_)) => {
+            Some(Dry::Planning(_)) | Some(Dry::PlanningDelete(..)) | Some(Dry::Scanning(_)) => {
                 let m = egui::Modal::new(egui::Id::NULL.with("dry_working")).show(&ctx, |ui| {
                     ui.set_width(520.0);
-                    ui.heading(if working { "Standardise" } else { "Health report" });
-                    ui.label(if working { "Checking every symbol and footprint…" } else { "Checking the project's library…" });
+                    ui.heading(heading.0);
+                    ui.label(heading.1);
                     ui.add_space(8.0);
                     ui.button("Cancel").clicked()
                 });
@@ -526,7 +542,7 @@ impl LibraryTab {
                 sections.extend(plan.errors.iter().map(|e| ("Can't be read".to_string(), vec![e.clone()])));
                 let note = format!("{}
 The rules are in Settings → Standards. A snapshot is taken first, so History can roll it back.", plan.root.dir.display());
-                match batch_dialog::review(&ctx, "dry_standardise", "Standardise", &sections, !plan.files.is_empty(), |ui| {
+                match batch_dialog::review(&ctx, "dry_standardise", "Apply", "Standardise", &sections, !plan.files.is_empty(), |ui| {
                     ui.weak(note);
                 }) {
                     Some(true) if cx.busy => cx.log(Level::Warn, "Standardise: wait for the running import or download to finish, then press Apply again"),
@@ -558,7 +574,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 };
                 let sections = vec![(format!("{category} / {name}"), lines)];
                 let note = "Keeps every field. A snapshot is taken first, so History can undo it. Wires on schematics that already use the symbol may need fixing.";
-                match batch_dialog::review(&ctx, "dry_restyle", "Restyle symbol", &sections, can_apply, |ui| {
+                match batch_dialog::review(&ctx, "dry_restyle", "Apply", "Restyle symbol", &sections, can_apply, |ui| {
                     ui.weak(note);
                 }) {
                     Some(true) if cx.busy => cx.log(Level::Warn, "Restyle: wait for the running import or download to finish, then press Apply again"),
@@ -579,7 +595,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 let sections: Vec<_> = parts.iter().map(|(c, n)| (format!("{c} / {n}"), vec![])).collect();
                 let title = format!("Export {} part(s) as a ZIP", parts.len());
                 let can = !parts.is_empty() && !path.trim().is_empty();
-                let answer = batch_dialog::review(&ctx, "dry_export", &title, &sections, can, |ui| {
+                let answer = batch_dialog::review(&ctx, "dry_export", "Apply", &title, &sections, can, |ui| {
                     ui.add_space(6.0);
                     if Path::new(path.trim()).exists() {
                         ui.colored_label(ui.visuals().warn_fg_color, "That file exists and will be replaced.");
@@ -619,12 +635,12 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 let can = !plans.is_empty() && plans.iter().all(|(_, p)| p.is_ok());
                 let title = format!("Delete {} part(s)", plans.len());
                 let note = "A snapshot is taken first, so History can roll it back. A footprint, 3D model, datasheet or sim model another part still uses is kept; it goes with the last part that uses it.";
-                match batch_dialog::review(&ctx, "dry_delete", &title, &sections, can, |ui| {
+                match batch_dialog::review(&ctx, "dry_delete", "Delete", &title, &sections, can, |ui| {
                     ui.add_space(6.0);
                     ui.colored_label(ui.visuals().warn_fg_color, "Deleted parts are removed from the library, KLM's database and alternatives.");
                     ui.weak(note);
                 }) {
-                    Some(true) if cx.busy => cx.log(Level::Warn, "Delete: wait for the running import or download to finish, then press Apply again"),
+                    Some(true) if cx.busy => cx.log(Level::Warn, "Delete: wait for the running import or download to finish, then press Delete again"),
                     Some(true) => {
                         let (root, keys): (LibraryRoot, Vec<Key>) = (root.clone(), plans.iter().map(|(k, _)| k.clone()).collect());
                         self.dry = None;

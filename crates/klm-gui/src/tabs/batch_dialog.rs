@@ -71,8 +71,8 @@ pub fn show(batch: &mut Option<BatchDialog>, ctx: &egui::Context) -> Option<Plan
 }
 
 /// The dry-run dialog for work that isn't a `batch::Plan` (standardise, restyle, export): a heading per item with
-/// its lines under it, and whatever `extra` adds above the buttons. `Some(true)` is Apply, `Some(false)` Cancel.
-pub fn review(ctx: &egui::Context, id: &str, title: &str, sections: &[(String, Vec<String>)], can_apply: bool, extra: impl FnOnce(&mut egui::Ui)) -> Option<bool> {
+/// its lines under it, and whatever `extra` adds above the buttons. `Some(true)` is the `confirm` button ("Apply", "Delete"), `Some(false)` Cancel.
+pub fn review(ctx: &egui::Context, id: &str, confirm: &str, title: &str, sections: &[(String, Vec<String>)], can_apply: bool, extra: impl FnOnce(&mut egui::Ui)) -> Option<bool> {
     let mut answer = None;
     let modal = egui::Modal::new(egui::Id::NULL.with(id)).show(ctx, |ui| {
         ui.set_width(520.0);
@@ -92,7 +92,7 @@ pub fn review(ctx: &egui::Context, id: &str, title: &str, sections: &[(String, V
         extra(ui);
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.add_enabled(can_apply, egui::Button::new("Apply")).clicked() {
+            if ui.add_enabled(can_apply, egui::Button::new(confirm)).clicked() {
                 answer = Some(true);
             }
             if ui.button(if can_apply { "Cancel" } else { "Close" }).clicked() {

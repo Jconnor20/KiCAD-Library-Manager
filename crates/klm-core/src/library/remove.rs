@@ -42,7 +42,7 @@ impl RemovePlan {
 impl LibraryRoot {
     /// Every other symbol (category / name) with a field equal to `value`. Reads every symbol library; one that
     /// can't be read is an error, since it might hold a user.
-    fn symbols_using(&self, skip: (&str, &str), value: &str) -> Result<Vec<String>> {
+    fn symbols_using(&self, skip: &[(String, String)], value: &str) -> Result<Vec<String>> {
         let mut users = vec![];
         for cat in self.categories() {
             let path = self.symbol_lib(&cat);
@@ -50,7 +50,7 @@ impl LibraryRoot {
                 .with_context(|| format!("parsing {}", path.display()))?;
             for s in lib.children("symbol") {
                 let name = s.arg(0).unwrap_or_default();
-                if (cat.as_str(), name) != skip && s.children("property").any(|p| p.arg(1) == Some(value)) {
+                if !skip.iter().any(|(c, n)| (c.as_str(), n.as_str()) == (cat.as_str(), name)) && s.children("property").any(|p| p.arg(1) == Some(value)) {
                     users.push(format!("{cat} / {name}"));
                 }
             }
@@ -59,11 +59,11 @@ impl LibraryRoot {
     }
 
     /// Footprint files (other than `skip`) whose text mentions `needle`.
-    fn footprints_mentioning(&self, skip: &std::path::Path, needle: &str) -> Result<Vec<String>> {
+    fn footprints_mentioning(&self, skip: &[PathBuf], needle: &str) -> Result<Vec<String>> {
         let mut users = vec![];
         for pretty in std::fs::read_dir(self.dir.join("footprints")).into_iter().flatten().flatten() {
             for f in std::fs::read_dir(pretty.path()).into_iter().flatten().flatten().map(|e| e.path()) {
-                if f != skip && super::has_ext(&f, &["kicad_mod"]) && std::fs::read_to_string(&f).with_context(|| format!("reading {}", f.display()))?.contains(needle) {
+                if !skip.contains(&f) && super::has_ext(&f, &["kicad_mod"]) && std::fs::read_to_string(&f).with_context(|| format!("reading {}", f.display()))?.contains(needle) {
                     users.push(f.file_stem().unwrap_or_default().to_string_lossy().into_owned());
                 }
             }
@@ -74,10 +74,34 @@ impl LibraryRoot {
     /// What deleting this part would remove and keep. Errors (and so refuses) when the part, a footprint
     /// or any library it must check for other users can't be read.
     pub fn plan_remove(&self, category: &str, symbol_name: &str) -> Result<RemovePlan> {
+        self.plan_remove_after(category, symbol_name, &[])
+    }
+
+    /// Plans every part of a selection as [`LibraryRoot::remove_part`] will run them, one after the other: each plan
+    /// treats the parts before it as already deleted, so a file shared by the selection is removed with the last part.
+    pub fn plan_remove_all(&self, parts: &[(String, String)]) -> Vec<Result<RemovePlan>> {
+        (0..parts.len()).map(|i| self.plan_remove_after(&parts[i].0, &parts[i].1, &parts[..i])).collect()
+    }
+
+    /// [`LibraryRoot::plan_remove`] as if the parts in `gone` were already deleted.
+    fn plan_remove_after(&self, category: &str, symbol_name: &str, gone: &[(String, String)]) -> Result<RemovePlan> {
         let cat = sanitize(category);
         let (lib, idx) = self.load_symbol(&cat, symbol_name)?;
         let sym = &lib.items()[idx];
-        let skip = (cat.as_str(), symbol_name);
+        let mut skip: Vec<(String, String)> = gone.iter().map(|(c, n)| (sanitize(c), n.clone())).collect();
+        skip.push((cat.clone(), symbol_name.into()));
+        let skip = &skip[..];
+        // Footprint files that the gone parts take with them (nothing outside `skip` uses them).
+        let mut gone_files = vec![];
+        for (c, n) in &skip[..skip.len() - 1] {
+            let Ok((l, i)) = self.load_symbol(c, n) else { continue };
+            let field = property(&l.items()[i], "Footprint").unwrap_or("").trim().to_string();
+            if let Some(fp) = field.strip_prefix(&format!("{}:", self.nickname(c))) {
+                if !fp.is_empty() && !fp.contains(['/', '\\']) && !fp.contains("..") && self.symbols_using(skip, &field)?.is_empty() {
+                    gone_files.push(self.footprint_file(c, fp));
+                }
+            }
+        }
         let mut plan = RemovePlan {
             category: cat.clone(),
             name: symbol_name.into(),
@@ -130,7 +154,9 @@ impl LibraryRoot {
                 for model in fp.children("model").filter_map(|m| m.arg(0)) {
                     match local(model, "3dmodels")? {
                         Some(path) => {
-                            let users = self.footprints_mentioning(&file, model)?;
+                            let mut skip_fp = gone_files.clone();
+                            skip_fp.push(file.clone());
+                            let users = self.footprints_mentioning(&skip_fp, model)?;
                             decide(&mut plan, "3D model", model.rsplit('/').next().unwrap_or(model).into(), Some(path), users, "file not found");
                         }
                         None => plan.keeps.push(Piece { kind: "3D model", name: model.into(), why: "not stored in this library".into() }),
@@ -220,6 +246,21 @@ mod tests {
         let plan = root.plan_remove("ICs", "B").unwrap();
         root.remove_part(&plan).unwrap();
         assert!(!exists(&root, "footprints/ICs.pretty/FP1.kicad_mod") && !exists(&root, "3dmodels/ICs.3dshapes/FP1.step") && !exists(&root, "datasheets/shared.pdf"));
+    }
+
+    #[test]
+    fn deleting_every_sharer_plans_the_shared_files_with_the_last() {
+        let root = fixture("remove_many");
+        let keys = vec![("ICs".to_string(), "A".to_string()), ("ICs".to_string(), "B".to_string())];
+        let plans: Vec<_> = root.plan_remove_all(&keys).into_iter().map(Result::unwrap).collect();
+        assert!(plans[0].keeps.iter().any(|p| p.kind == "footprint" && p.why.contains("ICs / B")), "{:?}", plans[0].lines());
+        let last: Vec<_> = plans[1].removes.iter().map(|p| p.kind).collect();
+        assert_eq!(last, ["symbol", "datasheet", "footprint", "3D model"], "{:?}", plans[1].lines());
+        assert!(plans[1].keeps.is_empty());
+        for p in &plans {
+            root.remove_part(&root.plan_remove(&p.category, &p.name).unwrap()).unwrap();
+        }
+        assert!(!exists(&root, "footprints/ICs.pretty/FP1.kicad_mod") && !exists(&root, "datasheets/shared.pdf"));
     }
 
     #[test]
