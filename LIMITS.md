@@ -35,7 +35,7 @@ Timings: `cargo test --release -p klm-core --test scale_e2e -- --ignored scale -
 |---|---|---|---|
 | `LibraryRoot::list_parts` | 345 | **yes, over 200 ms** | `klm-gui/src/tabs/library.rs:553`, `get_or_insert_with` in the Library tab's draw. Redone after every reset (`self.parts = None`, about ten sites), so an edit or refresh stalls the UI for this long. |
 | `checks::check_library` | 382 | no | Runs on a worker (`library.rs:542`). Over 200 ms, but off the UI thread. |
-| `alternatives::scan` + `suggest` | 52 | no | Runs on a worker (`alternatives.rs:36`). Store lookups per group are not timed. |
+| `alternatives::scan` + `suggest` | 53 | no | Runs on a worker (`alternatives.rs:36`). Store lookups per group are not timed. |
 
 - **`list_parts` blocks the UI.** Move it to a worker like `check_library`, or cache the result across resets. Not fixed here (no feature work in Wave 6).
 - **The scale fixture is written straight to disk.** `add_part` runs `kicad-cli` for each part, so 2,000 of them would take minutes. The reads all go through the real APIs. One footprint per package and one model per package is kinder than a real library.

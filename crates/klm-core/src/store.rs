@@ -38,6 +38,8 @@ const MIGRATIONS: &[&str] = &["
     );
 "];
 
+const REJECTED: &str = "rejected-alt:";
+
 pub struct Store {
     db: Connection,
 }
@@ -276,6 +278,23 @@ impl Store {
             self.db.execute("DELETE FROM tags WHERE part_mpn = ?1", [mpn])?;
         }
         self.log("delete", mpn)
+    }
+
+    /// Remembers suggestions the user rejected (W8.3), as pairs of member ids (`crate::alternatives::member_id`).
+    /// Kept as tags (`part_mpn` = first id, tag = `rejected-alt:` + second id), so there is no schema change.
+    pub fn add_rejected(&self, pairs: &[(String, String)]) -> Result<()> {
+        let tx = self.db.unchecked_transaction()?;
+        for (a, b) in pairs {
+            tx.execute("INSERT OR IGNORE INTO tags VALUES (?1, ?2)", [a.as_str(), &format!("{REJECTED}{b}")])?;
+        }
+        Ok(tx.commit()?)
+    }
+
+    /// Every rejected pair, as stored by [`Store::add_rejected`].
+    pub fn rejected(&self) -> Result<std::collections::HashSet<(String, String)>> {
+        let mut q = self.db.prepare("SELECT part_mpn, tag FROM tags WHERE tag LIKE 'rejected-alt:%'")?;
+        let rows = q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().map(|(a, t)| (a, t[REJECTED.len()..].to_string())).collect())
     }
 
     /// Deletes every alternative of `part_mpn`.
