@@ -24,7 +24,7 @@ KLM is found next to `launch.py`, else via the `KLM_EXE` environment variable, e
 ## The tabs
 - **Search**: one box over every enabled source (LCSC, DigiKey, Mouser, Nexar, SnapMagic) in one table. Filter to in-stock, star favourites, save searches, open a hit in Library, or send it to Import.
 - **Import**: the queue of parts waiting to import (from a watched Downloads folder, **Import ZIP…**, **Import files…**, **Import folder…**, **Fetch from SnapMagic…** or Search). Supports SnapMagic, Ultra Librarian, SamacSys and Octopart ZIPs. **Import…** lets you check MPN and category and tick Global and/or Project.
-- **Library**: every part in the global or project library with ✔ / missing / broken for footprint, 3D model, datasheet, sim model and KiCad entry. Actions: **Add**, **Edit selected…**, **Attach to selected…** (datasheet `.pdf`, SPICE `.lib .cir .sub .sp .spi .ibs`, 3D `.step .stp .wrl`; a 3D model goes on the footprint, so other parts sharing it get it too), **Alternatives…** (equivalent-part groups: find online or add by hand), **Copy selected to project**, **Export selected…** (portable ZIP, see below), **Copy as CSV**, **Standardise…**, **Health report…**, **Relink libraries**, **Find missing datasheets**. Coming in 0.6.0: **Delete** removes selected parts, files included, after a preview.
+- **Library**: every part in the global or project library with ✔ / missing / broken for footprint, 3D model, datasheet, sim model and KiCad entry. Actions: **Add**, **Edit selected…**, **Attach to selected…** (datasheet `.pdf`, SPICE `.lib .cir .sub .sp .spi .ibs`, 3D `.step .stp .wrl`; a 3D model goes on the footprint, so other parts sharing it get it too), **Alternatives…** (equivalent-part groups: find online or add by hand), **Copy selected to project**, **Export selected…** (portable ZIP, see below), **Copy as CSV**, **Standardise…**, **Health report…**, **Relink libraries**, **Find missing datasheets**. **Delete** removes the selected parts after a preview, with a snapshot first; footprints, 3D models, datasheets and sim models go too unless another part uses them.
 - **BOM**: reads the project's BOM, matches it to your libraries, prices it from the distributors and shows shortfalls. **Export CSV…** writes the result.
 - **History**: snapshots of the global or project library, newest first. Roll back to before any entry, mark a snapshot as a version, or delete old ones.
 - **Clean up**: finds duplicate, broken and unused entries in KiCad's library tables. Queue remove / fix path / move into KLM, review the preview, then apply. Tables are backed up first; library files are never deleted.
@@ -49,7 +49,7 @@ klm-cli cleanup [--project <dir>]... [--remove sym:<lib>|fp:<lib>]... [--fix sym
                                                       # scan KiCad's library tables; preview unless --apply
 klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
 klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]
-klm-cli remove ...                                    # coming in 0.6.0: delete parts from a library (see the Library tab's Delete)
+klm-cli remove <part> [--category <c>] [--project <dir>] [--yes]   # delete a part; preview unless --yes
 ```
 `import` guesses the category when `--category` is not given; `--to` defaults to global. KLM also keeps a small SQLite database (`parts.db` next to `settings.json`) for alternatives, tags and cached searches. It can be rebuilt from the libraries, and deleting it never affects KiCad.
 

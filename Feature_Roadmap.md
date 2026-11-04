@@ -32,9 +32,11 @@ Every WP also ends with `cargo test --workspace` passing and no build warnings. 
 - **Shipping region (R8):** not fixed. It's where the user is, or where the board is made (e.g. JLCPCB assembly ships from China). So it's a Settings default with a per-project override, in W4.1.
 - **CLI:** start small (`check`, `relink`, `import <zip>`) and grow it as features land.
 
+- **Licence:** GPL-3.0-or-later, with `LICENSE` added in W8.5.
+
 ## Open questions
 
-1. **Licence:** still undecided. `Cargo.toml` says GPL-3.0-or-later for now, and there's no `LICENSE` file until you choose.
+None at the moment.
 
 ---
 
@@ -310,20 +312,22 @@ Driven by the screenshots above. Each WP checks its own tab with the W6.3 harnes
 
 What the original plan or earlier WPs promised that isn't there yet.
 
-- [ ] **W8.1 Delete a part** (S)
+- Status (2026-11-04): all five merged and the version is 0.6.0. Still open: country of origin (no supplier reply carries it), the Alternatives tab's reject and ungroup buttons, and the follow-ups each WP reported. Fixes for these are under way. Not yet checked by hand.
+
+- [x] **W8.1 Delete a part** (S)
   - **Owns:** `core/library/remove.rs` (new), `klm-cli remove`
   - Remove a part's symbol, and its footprint, 3D model, datasheet and sim model when no other part uses them, after a snapshot. Removing it from the store and alternatives too.
-- [ ] **W8.2 Rules everywhere (W3.3 leftovers)** (M)
+- [x] **W8.2 Rules everywhere (W3.3 leftovers)** (M)
   - **Owns:** `core/batch.rs`, `core/rules.rs`, `klm-cli import`
   - Batch import and `klm-cli import` use your category rules. The name template is applied on import and edit as a separate symbol name, so the MPN field is never rewritten. Standardise's `TODO(W3.3)` closed.
-- [ ] **W8.3 Better alternatives (W3.2 / W5.3 leftovers)** (M) ⚑
+- [x] **W8.3 Better alternatives (W3.2 / W5.3 leftovers)** (M) ⚑
   - **Owns:** `core/alternatives.rs`, `core/matching.rs`
   - Unit-aware values (0.1uF = 100nF, 4k7 = 4.7kΩ). Package aliases (`R_0603` = `RESC1608X55N`). Ungroup, and rejected suggestions remembered in the store.
-- [ ] **W8.4 BOM and health (W4.1 / W4.2 leftovers)** (M)
+- [x] **W8.4 BOM and health (W4.1 / W4.2 leftovers)** (M)
   - **Owns:** `core/bom.rs`, `core/health.rs`
   - Configurable BOM field names per project. Rate limiting and Mouser order multiples. All DigiKey packaging variations (cut tape vs reel). Country of origin wherever W6.1 found it.
   - Health reads the schematics (placed symbols missing from every library). Orphans matched by full path, not file name. A part with no footprint reported once.
-- [ ] **W8.5 Export and docs (R6 leftovers)** (S)
+- [x] **W8.5 Export and docs (R6 leftovers)** (S)
   - **Owns:** `core/export.rs`, `README.md`, `LICENSE`
   - No footprint name collisions in the merged `.pretty`, and 3D paths checked in KiCad and Fusion.
   - README rewritten for 0.6.0: every tab, every CLI command, and no "developed on other branches". Licence chosen (open question 1) and `LICENSE` added.
