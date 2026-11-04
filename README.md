@@ -1,58 +1,57 @@
-# KiCad Library Manager (KLM)
+# KiCad Library Manager (KLM) 0.6.0
 
-One place to pull parts into KiCad: symbol, footprint, 3D model, datasheet and sim model, filed the same way every time and registered in KiCad automatically. Parts can go to a **global** library (every project) or a **project** library (`<project>/lib`), or both.
+One place to find, import, check, price and maintain the parts in your KiCad libraries: symbol, footprint, 3D model, datasheet and sim model, filed the same way every time and registered in KiCad automatically. Parts go to a **global** library (every project) or a **project** library (`<project>/lib`), or both.
 
-Vendor ZIP import (SnapMagic, Ultra Librarian, SamacSys, Octopart), the Library tab's per-part actions and the KiCad toolbar button work. Search sources (LCSC, DigiKey, Mouser, Nexar) are developed on other branches.
+Windows is the supported platform. Needs KiCad 9 or 10 installed (`kicad-cli` converts vendor files to the installed KiCad's format). Files are written in the newest installed KiCad's format, so open them with that version.
 
-## Use
+## Install and run
 ```
-cargo run --release -p klm-gui              # standalone
-cargo run --release -p klm-gui -- --project path/to/board.kicad_pro
+cargo build --release          # target\release\klm.exe (GUI, no console window) and klm-cli.exe
+cargo run --release -p klm-gui                                         # standalone
+cargo run --release -p klm-gui -- --project path/to/board.kicad_pro   # with a project
 ```
-1. First run: choose where the global library lives and click **Create global library**.
-2. Optionally **Choose project…** to enable project imports.
-3. Download a part's **KiCad** ZIP from SnapMagic, Ultra Librarian or SamacSys. It shows up under *Parts to import* (or use **Import ZIP…**).
-4. **Import…** → check MPN and category → tick Global and/or Project → **Import**.
-5. The **Library** tab lists every part with ✔ / missing / broken for its footprint, 3D model, datasheet, sim model and KiCad library entry. Tick *Only incomplete* to see what needs fixing.
+First run: choose where the global library lives and click **Create global library** (Import tab).
 
-Each row in the Library tab has:
-- **Attach…**: pick a datasheet (`.pdf`), SPICE model (`.lib .cir .sub .sp .spi .ibs`) or 3D model (`.step .stp .wrl`). KLM files it under the standard name and sets `Datasheet`, `Sim.Library`/`Sim.Name`/`Sim.Device`, or the footprint's 3D model path (keeping its offset and rotation). A 3D model goes on the footprint, so other parts using that footprint get it too.
-- **Copy to project** (Global view, needs a project): copies the symbol, footprint, 3D model, datasheet and sim model into `<project>/lib` with `PRJ_` paths. A copy that is already there is only replaced on Shift-click. A new project category library is added to KiCad's list, so KLM asks you to close KiCad first.
-- **Open datasheet**: opens the local PDF or the web page.
+### KiCad toolbar button (plugin / PCM)
+`kicad_plugin/` is an [IPC-API plugin](https://dev-docs.kicad.org/en/apis-and-binding/ipc-api/for-addon-developers/index.html) for KiCad 9 and 10. Its button (PCB editor and schematic editor) runs `launch.py`, which asks the open board for its project folder (via [`kicad-python`](https://gitlab.com/kicad/code/kicad-python), MIT, not bundled; KiCad installs it from PyPI into the plugin's own environment, which needs internet the first time) and starts `klm.exe --project <folder>`.
 
-To move the global library, click **Change location…** and pick the new folder. KLM moves it (same drive) or, if you already moved it yourself, just points at the new folder. Either way it rewrites every path in the library and in KiCad's library list. Boards placed before the move keep the old 3D paths until *Tools → Update Footprints from Library*.
-
-Needs KiCad 9 or 10 installed (`kicad-cli` converts vendor files to the installed KiCad's format). Files are written in the newest installed KiCad's format, so open them with that version.
-
-## KiCad toolbar button
-`kicad_plugin/` is an [IPC-API plugin](https://dev-docs.kicad.org/en/apis-and-binding/ipc-api/for-addon-developers/index.html) for KiCad 9 and 10. Its PCB editor toolbar button runs `launch.py`, which asks the open board for its project folder (via [`kicad-python`](https://gitlab.com/kicad/code/kicad-python), imported as `kipy`) and starts `klm.exe --project <folder>`.
-
-`kicad-python` is MIT-licensed (copyright The KiCad Developers). It is not bundled; KiCad installs it from PyPI into the plugin's own virtual environment, which needs internet the first time (KiCad uses `requirements.txt`).
-
-Install:
 1. In KiCad: *Preferences → Plugins → Enable KiCad API*. Restart KiCad.
-2. Build the package with `scripts\package.ps1`, then *Plugin and Content Manager → Install from File…* and choose `dist\klm-pcm-<version>.zip`. Or install by hand: copy `kicad_plugin\*` and `target\release\klm.exe` into one folder `Documents\KiCad\<version>\plugins\klm\`.
-3. Restart KiCad and open the PCB editor. KiCad sets up the plugin's environment in the background; the **Library Manager** button appears on the toolbar when that is done (if not, check *Preferences → Plugins* for the plugin and its error).
+2. Build the package with `scripts\package.ps1`; it writes `dist\klm-pcm-<version>.zip` (PCM layout: plugin plus `klm.exe`). Then *Plugin and Content Manager → Install from File…* and choose that zip. Or install by hand: copy `kicad_plugin\*` and `target\release\klm.exe` into `Documents\KiCad\<version>\plugins\klm\`.
+3. Restart KiCad. KiCad sets up the plugin's environment in the background; the **Library Manager** button appears when that is done (if not, check *Preferences → Plugins* for the plugin and its error).
 
-KLM is found next to `launch.py`, else via the `KLM_EXE` environment variable, else `klm` on `PATH`.
+KLM is found next to `launch.py`, else via the `KLM_EXE` environment variable, else `klm` on `PATH`. Plugin errors go to `%TEMP%\klm-plugin.log`.
+
+## The tabs
+- **Search**: one box over every enabled source (LCSC, DigiKey, Mouser, Nexar, SnapMagic) in one table. Filter to in-stock, star favourites, save searches, open a hit in Library, or send it to Import.
+- **Import**: the queue of parts waiting to import (from a watched Downloads folder, **Import ZIP…**, **Import files…**, **Import folder…**, **Fetch from SnapMagic…** or Search). Supports SnapMagic, Ultra Librarian, SamacSys and Octopart ZIPs. **Import…** lets you check MPN and category and tick Global and/or Project.
+- **Library**: every part in the global or project library with ✔ / missing / broken for footprint, 3D model, datasheet, sim model and KiCad entry. Actions: **Add**, **Edit selected…**, **Attach to selected…** (datasheet `.pdf`, SPICE `.lib .cir .sub .sp .spi .ibs`, 3D `.step .stp .wrl`; a 3D model goes on the footprint, so other parts sharing it get it too), **Alternatives…** (equivalent-part groups: find online or add by hand), **Copy selected to project**, **Export selected…** (portable ZIP, see below), **Copy as CSV**, **Standardise…**, **Health report…**, **Relink libraries**, **Find missing datasheets**. Coming in 0.6.0: **Delete** removes selected parts, files included, after a preview.
+- **BOM**: reads the project's BOM, matches it to your libraries, prices it from the distributors and shows shortfalls. **Export CSV…** writes the result.
+- **History**: snapshots of the global or project library, newest first. Roll back to before any entry, mark a snapshot as a version, or delete old ones.
+- **Clean up**: finds duplicate, broken and unused entries in KiCad's library tables. Queue remove / fix path / move into KLM, review the preview, then apply. Tables are backed up first; library files are never deleted.
+- **Settings** (popup): *General* (global library location, watch folders, `kicad-cli` path), *Sources* (enable each source, API keys, Test), *Search* (cache time, currency, part-name template), *Import* (category rules), *Standards* (symbol and footprint rules), *BOM* (shipping region), *History* (automatic snapshots and versions).
+
+To move the global library, use **Change location…**. KLM moves it (same drive) or, if you already moved it, points at the new folder, and rewrites every path in the library and in KiCad's library list. Boards placed before the move keep the old 3D paths until *Tools → Update Footprints from Library*.
+
+## Export
+**Export selected…** (or `klm-cli export`) writes one ZIP any KiCad-reading tool (including Altium and Fusion) can open: `symbols/klm_export.kicad_sym`, `footprints/klm_export.pretty/`, `3dmodels/`, `datasheets/`, `simulation/`, and `sym-lib-table` / `fp-lib-table` to paste into KiCad. Unzip it as a KiCad project folder: model paths use `${KIPRJMOD}/3dmodels/...`. Footprints with the same name but different content are kept apart (`NAME`, `NAME_2`), and the symbols point at the right one; identical footprints are written once.
 
 ## Command line
-`klm-cli` (built by `cargo build --release`) uses the same settings and libraries as the app, for scripts and CI:
+`klm-cli` uses the same settings and libraries as the app, for scripts and CI. `--config <dir>` (or `KLM_CONFIG_DIR`) keeps all files in one folder. Commands that add libraries or restyle refuse to run while KiCad is open.
 ```
-klm-cli check [--json] [--project <dir>]     # per-part footprint / 3D / datasheet / sim / in-KiCad status; exit 1 if any part is incomplete
-klm-cli relink [--project <dir>]             # re-add libraries KiCad dropped; refuses while KiCad is open
-klm-cli import <zip> [--category <c>] [--to global|project] [--project <dir>] [--overwrite]
+klm-cli check [--json] [--deep] [--project <dir>]    # per-part completeness; --deep adds part-check issues; exit 1 if incomplete
+klm-cli relink [--project <dir>]                      # fix old ${KLM_LIB} paths, re-add libraries KiCad dropped
+klm-cli history [--json] [--project <dir>]            # list snapshots
+klm-cli rollback <id> [--project <dir>]               # restore a snapshot (id from history)
+klm-cli standardise [--project <dir>] [--dry-run]     # apply the Settings standards rules
+klm-cli restyle <category> <part> [--project <dir>] [--dry-run]   # redraw one symbol in house style
+klm-cli health [--json | --csv] [--project <dir>]     # project health report; exit 1 on errors
+klm-cli cleanup [--project <dir>]... [--remove sym:<lib>|fp:<lib>]... [--fix sym:<lib>=<path>]... [--move sym:<lib>]... [--apply]
+                                                      # scan KiCad's library tables; preview unless --apply
+klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
+klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]
+klm-cli remove ...                                    # coming in 0.6.0: delete parts from a library (see the Library tab's Delete)
 ```
-`import` guesses the category when `--category` is not given, and refuses to add a new library to KiCad while KiCad is open. `--to project` uses `--project`, else the last project from the app. KLM also keeps a small SQLite database (`parts.db` next to `settings.json`) for alternatives, tags and cached searches. It can be rebuilt from the libraries, and deleting it never affects KiCad.
-
-## Releases
-Every wave bumps the minor version in the workspace `Cargo.toml` (the single source of truth; `scriptspackage.ps1` stamps it into the plugin metadata): Wave 4.5 is 0.2.0, W5 is 0.3.0, W6 is 0.4.0.
-
-## Build and package
-```
-cargo build --release          # target\release\klm.exe (no console window)
-scripts\package.ps1            # builds, then writes dist\klm-pcm-<version>.zip (PCM layout, plugin + klm.exe)
-```
+`import` guesses the category when `--category` is not given; `--to` defaults to global. KLM also keeps a small SQLite database (`parts.db` next to `settings.json`) for alternatives, tags and cached searches. It can be rebuilt from the libraries, and deleting it never affects KiCad.
 
 ## Layout
 ```
@@ -64,7 +63,10 @@ scripts\package.ps1            # builds, then writes dist\klm-pcm-<version>.zip 
 ```
 Paths inside KiCad files are the global library's real folder, or `${KIPRJMOD}/lib` for a project (so a project folder can move). Every symbol carries `MPN`, `Manufacturer`, `Description`, `Datasheet` and supplier part numbers.
 
-KiCad keeps its library list in memory and saves over outside changes, so KLM asks you to close KiCad before it adds a new library. On start-up, and from **Re-link libraries**, it re-adds any KLM library KiCad dropped. KiCad's tables are backed up to `.bak` before each change.
+KiCad keeps its library list in memory and saves over outside changes, so KLM asks you to close KiCad before it adds a new library. On start-up, and from **Relink libraries**, it re-adds any KLM library KiCad dropped. KiCad's tables are backed up to `.bak` before each change.
+
+## Releases
+Every wave bumps the minor version in the workspace `Cargo.toml` (the single source of truth; `scripts\package.ps1` stamps it into the plugin metadata).
 
 ## Code
 - `crates/klm-core`: all logic, with no UI code (sources, KiCad file editing, library layout).
@@ -72,3 +74,6 @@ KiCad keeps its library list in memory and saves over outside changes, so KLM as
 - `crates/klm-gui`: egui front end. It only draws and calls `klm-core`, so it can be replaced.
 
 `cargo test` runs the unit tests plus an end-to-end import that has the installed `kicad-cli` render the result.
+
+## Licence
+GPL-3.0-or-later. See `LICENSE`.

@@ -41,13 +41,51 @@ fn build(root: &LibraryRoot, parts: &[(String, String)], stage: &Path, zip_path:
     };
 
     let mut lib: Option<Sexpr> = None;
+    let mut written = std::collections::HashMap::<String, String>::new();
     let mut cats: Vec<String> = parts.iter().map(|(c, _)| sanitize(c)).collect();
     cats.sort();
     cats.dedup();
     for cat in cats {
+        let mut renames = std::collections::HashMap::new();
+        let pretty = staging.dir.join(format!("footprints/{cat}.pretty"));
+        for e in std::fs::read_dir(&pretty).into_iter().flatten().flatten() {
+            let mut fp = sexpr::parse(&std::fs::read_to_string(e.path())?)?;
+            for model in fp.items_mut().iter_mut().filter(|c| c.head() == Some("model")) {
+                if let Some(rel) = model.arg(0).and_then(|m| m.strip_prefix(&prefix)).map(String::from) {
+                    // KiCad and Fusion resolve model paths against the project dir, not the .kicad_mod.
+                    model.set_arg(0, Sexpr::str(&format!("${{KIPRJMOD}}/{rel}")));
+                }
+            }
+            let stem = e.path().file_stem().unwrap().to_string_lossy().into_owned();
+            let mut name = stem.clone();
+            let mut n = 1;
+            // Same name + same content is written once; same name + different content gets a suffix.
+            loop {
+                if name != stem {
+                    fp.set_arg(0, Sexpr::str(&name));
+                }
+                let text = sexpr::to_string(&fp);
+                match written.get(&name) {
+                    Some(prev) if *prev == text => break,
+                    Some(_) => {
+                        n += 1;
+                        name = format!("{stem}_{n}");
+                    }
+                    None => {
+                        put(&format!("footprints/{NICK}.pretty/{name}.kicad_mod"), text.as_bytes())?;
+                        written.insert(name.clone(), text);
+                        break;
+                    }
+                }
+            }
+            if name != stem {
+                renames.insert(stem, name);
+            }
+        }
+
         let mut part_lib = sexpr::parse(&std::fs::read_to_string(staging.dir.join(format!("symbols/{cat}.kicad_sym")))?)?;
         for sym in part_lib.items_mut().iter_mut().filter(|c| c.head() == Some("symbol")) {
-            let fp = property(sym, "Footprint").and_then(|f| f.strip_prefix(&format!("{}:", staging.nickname(&cat)))).map(|f| format!("{NICK}:{f}"));
+            let fp = property(sym, "Footprint").and_then(|f| f.strip_prefix(&format!("{}:", staging.nickname(&cat)))).map(|f| format!("{NICK}:{}", renames.get(f).map_or(f, |r| r.as_str())));
             if let Some(fp) = fp {
                 set_property(sym, "Footprint", &fp);
             }
@@ -64,17 +102,6 @@ fn build(root: &LibraryRoot, parts: &[(String, String)], stage: &Path, zip_path:
                 let symbols = part_lib.items().iter().filter(|c| c.head() == Some("symbol")).cloned();
                 all.items_mut().extend(symbols);
             }
-        }
-
-        let pretty = staging.dir.join(format!("footprints/{cat}.pretty"));
-        for e in std::fs::read_dir(&pretty).into_iter().flatten().flatten() {
-            let mut fp = sexpr::parse(&std::fs::read_to_string(e.path())?)?;
-            for model in fp.items_mut().iter_mut().filter(|c| c.head() == Some("model")) {
-                if let Some(rel) = model.arg(0).and_then(|m| m.strip_prefix(&prefix)).map(String::from) {
-                    model.set_arg(0, Sexpr::str(&format!("../../{rel}")));
-                }
-            }
-            put(&format!("footprints/{NICK}.pretty/{}", e.file_name().to_string_lossy()), sexpr::to_string(&fp).as_bytes())?;
         }
     }
     put("symbols/klm_export.kicad_sym", sexpr::to_string(&lib.context("nothing to export")?).as_bytes())?;
@@ -135,13 +162,15 @@ mod tests {
             assert!(ds.is_file(), "{}", ds.display());
             let footprint = sexpr::parse(&std::fs::read_to_string(&fp_file).unwrap()).unwrap();
             let model = footprint.child("model").unwrap().arg(0).unwrap();
-            assert!(!model.contains(':') && !model.contains("${") && !model.starts_with('/'), "{model}");
-            assert!(fp_file.parent().unwrap().join(model).is_file(), "{model}");
+            let model = model.strip_prefix("${KIPRJMOD}/").expect(model);
+            assert!(!model.contains(':') && !model.starts_with('/'), "{model}");
+            assert!(out.join(model).is_file(), "{model}");
         }
         for t in ["sym-lib-table", "fp-lib-table"] {
             assert!(std::fs::read_to_string(out.join(t)).unwrap().contains("klm_export"));
         }
         assert!(!text.contains(&d) && !text.contains("${KLM"));
+        assert_eq!(std::fs::read_dir(out.join("footprints/klm_export.pretty")).unwrap().count(), 2);
 
         // With kicad-cli installed, KiCad itself must be able to read what we wrote.
         if let Ok(cli) = crate::kicad_env::kicad_cli() {
@@ -150,5 +179,35 @@ mod tests {
             assert!(ok(&["sym".as_ref(), "upgrade".as_ref(), "-o".as_ref(), up.as_os_str(), out.join("symbols/klm_export.kicad_sym").as_os_str()]));
             assert!(ok(&["fp".as_ref(), "upgrade".as_ref(), out.join("footprints/klm_export.pretty").as_os_str()]));
         }
+    }
+
+    #[test]
+    fn colliding_footprint_names_are_kept_apart() {
+        let base = crate::test_dir("export_collide");
+        std::fs::create_dir_all(base.join("config")).unwrap();
+        let root = LibraryRoot::global(base.join("global"), base.join("config"));
+        root.ensure_layout().unwrap();
+        for (cat, n, body) in [("Caps", "C1", "a"), ("Res", "R1", "b"), ("Ind", "R2", "a")] {
+            let path = root.dir.join(format!("symbols/{cat}.kicad_sym"));
+            let old = std::fs::read_to_string(&path).unwrap_or_else(|_| "(kicad_symbol_lib (version 20241209) (generator test)
+)".into());
+            let sym = format!("(symbol \"{n}\" (property \"Footprint\" \"KLM_{cat}:SHARED\" (at 0 0 0)))");
+            std::fs::write(&path, old.trim_end().strip_suffix(')').unwrap().to_string() + &sym + ")").unwrap();
+            let pretty = root.dir.join(format!("footprints/{cat}.pretty"));
+            std::fs::create_dir_all(&pretty).unwrap();
+            std::fs::write(pretty.join("SHARED.kicad_mod"), format!("(footprint \"SHARED\" (descr \"{body}\"))")).unwrap();
+        }
+        let parts: Vec<_> = [("Caps", "C1"), ("Res", "R1"), ("Ind", "R2")].iter().map(|(c, n)| (c.to_string(), n.to_string())).collect();
+        let zip = base.join("out.zip");
+        export_zip(&root, &parts, &zip).unwrap();
+        let out = base.join("unzipped");
+        zip::ZipArchive::new(std::fs::File::open(&zip).unwrap()).unwrap().extract(&out).unwrap();
+        let lib = sexpr::parse(&std::fs::read_to_string(out.join("symbols/klm_export.kicad_sym")).unwrap()).unwrap();
+        let fp_of = |n: &str| property(lib.children("symbol").find(|s| s.arg(0) == Some(n)).unwrap(), "Footprint").unwrap().to_string();
+        let descr = |fp: String| std::fs::read_to_string(out.join(format!("footprints/klm_export.pretty/{}.kicad_mod", fp.strip_prefix("klm_export:").unwrap()))).unwrap();
+        assert_eq!(std::fs::read_dir(out.join("footprints/klm_export.pretty")).unwrap().count(), 2);
+        assert_eq!(fp_of("C1"), fp_of("R2"));
+        assert_ne!(fp_of("C1"), fp_of("R1"));
+        assert!(descr(fp_of("C1")).contains("\"a\"") && descr(fp_of("R1")).contains("\"b\""));
     }
 }
