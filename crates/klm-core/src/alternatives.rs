@@ -60,7 +60,8 @@ impl LibPart {
     /// the user confirms every group.
     fn value_key(&self) -> Option<String> {
         let text = self.value_text()?;
-        Some(value_key(&self.value, Kind::of_footprint(&self.footprint), false).unwrap_or_else(|| format!("t:{text}")))
+        let kind = Kind::of_footprint(&self.footprint);
+        Some(value_key(&self.value, kind, false).unwrap_or_else(|| format!("t:{kind:?}:{text}")))
     }
 
     /// Id of this part for rejected suggestions: the MPN in its package, so the same MPN in another
@@ -466,6 +467,8 @@ mod tests {
             lp("h", "L2", "4.7uH", "KLM:INDC1608X95N"),
             lp("i", "C0201", "100nF", "KLM:C_0201_0603Metric"),
         ];
+        let dnp = [lp("r", "R1", "DNP", "R_0603"), lp("c", "C1", "DNP", "C_0603")];
+        assert!(suggest(&dnp).is_empty(), "free-text values group only within a kind");
         assert_eq!(suggest(&parts), [vec![0, 1], vec![3, 4], vec![6, 7]], "0201 and 0603, 4.7k and 4.7 ohm, caps and inductors stay apart");
     }
 

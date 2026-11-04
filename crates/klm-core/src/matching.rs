@@ -83,7 +83,7 @@ pub fn value_key(value: &str, kind: Option<Kind>, allow_bare: bool) -> Option<St
     }
     let mut t = match toks.as_slice() {
         [one] => one.clone(),
-        [num, unit] if unit.chars().count() <= 4 => format!("{num}{unit}"),
+        [num, unit] if unit.chars().count() <= 4 && unit.starts_with(|c: char| c.is_alphabetic()) => format!("{num}{unit}"),
         _ => return None,
     };
     let lower = t.to_lowercase();
@@ -105,13 +105,19 @@ pub fn value_key(value: &str, kind: Option<Kind>, allow_bare: bool) -> Option<St
         t = t.chars().map(|c| if matches!(c, 'U' | 'N' | 'P') { c.to_ascii_lowercase() } else { c }).collect();
     }
     // Number [letter [digits]]: the letter is the multiplier, or the decimal point when digits follow ("1k5").
-    let (mut int, mut frac, mut exp, mut letter, mut dot) = (String::new(), String::new(), 0i32, None, false);
+    let (mut int, mut frac, mut exp, mut letter, mut dot, mut lead_r) = (String::new(), String::new(), 0i32, None, false, false);
     for c in t.chars() {
         match c {
             '0'..='9' if letter.is_some() && dot => return None,
             '0'..='9' if letter.is_none() && !dot => int.push(c),
             '0'..='9' => frac.push(c),
             '.' if letter.is_none() && !dot => dot = true,
+            // "R47" is 0.47 Ω.
+            'R' | 'r' if letter.is_none() && int.is_empty() && !dot => {
+                int.push('0');
+                letter = Some(c);
+                lead_r = true;
+            }
             _ if letter.is_none() && !int.is_empty() => {
                 exp = multiplier(c)?;
                 letter = Some(c);
@@ -119,7 +125,7 @@ pub fn value_key(value: &str, kind: Option<Kind>, allow_bare: bool) -> Option<St
             _ => return None,
         }
     }
-    if int.is_empty() {
+    if int.is_empty() || (lead_r && frac.is_empty()) {
         return None;
     }
     let mut exp = exp - frac.len() as i32;
@@ -182,8 +188,8 @@ const FAMILIES: &[(&str, &[&str])] = &[
     ("sot23-6", &["sot236", "sc74"]),
     ("sot223", &["sot223", "sot2233", "sot2233*", "sot223tab*"]),
     ("sot89", &["sot89", "sot893", "sot893*"]),
-    ("soic{n}", &["soic{n}", "so{n}", "soic{n}39x*", "soic127p600x*{n}n"]),
-    ("soic{n}w", &["soic{n}w", "so{n}w", "soic{n}w*", "soic127p1030x*{n}n"]),
+    ("soic{n}", &["soic{n}", "so{n}", "soic{n}39x*", "soic127p600x*-{n}n"]),
+    ("soic{n}w", &["soic{n}w", "so{n}w", "soic{n}w*", "soic127p1030x*-{n}n"]),
 ];
 // Largest first, so the IPC pattern for 8 pins does not swallow "-18N".
 const PIN_COUNTS: &[u32] = &[28, 24, 20, 18, 16, 14, 8];
@@ -225,12 +231,15 @@ fn one_package(name: &str) -> String {
         }
     }
     let k = alnum(name);
+    // IPC names end "…X175-8N": keep the dash so the height's last digit doesn't merge into the pin count.
+    let kd: String = lower.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
     for exact in [true, false] {
         for (canon, pats) in FAMILIES {
             for &n in if canon.contains("{n}") { PIN_COUNTS } else { &[0] } {
                 for pat in *pats {
                     let pat = pat.replace("{n}", &n.to_string());
-                    if if exact { pat == k } else { pat.contains('*') && glob(&pat, &k) } {
+                    let k = if pat.contains('-') { &kd } else { &k };
+                    if if exact { pat == *k } else { pat.contains('*') && glob(&pat, k) } {
                         return canon.replace("{n}", &n.to_string());
                     }
                 }
@@ -295,6 +304,9 @@ mod tests {
         assert_eq!(v("100", c), None, "bare number on a capacitor is ambiguous");
         assert!(value_key("100", c, true).is_some());
         assert_eq!(v("100nF 16V", c), v("100nF 50V", c));
+        assert_eq!(v("10 4k7", r), None, "two numbers are not a number and a unit");
+        assert_eq!(v("R47", r), v("0R47", r));
+        assert_eq!(v("R", r), None);
         assert_eq!(v("1m", r), Some("v:R1e-3".into()));
         assert_eq!(v("0.10uF", c), Some("v:C1e-7".into()));
     }
@@ -321,6 +333,8 @@ mod tests {
         same("SOIC-8", "SOIC127P600X175-8N");
         same("SOIC-8", "SOIC-8_3.9x4.9mm_P1.27mm");
         same("SO-16", "SOIC-16");
+        same("SOIC-8", "SOIC127P600X171-8N");
+        diff("SOIC-18", "SOIC127P600X171-8N");
         diff("SOIC-16W_7.5x10.3mm", "SOIC-16_3.9x9.9mm");
         diff("SOIC-8", "SOIC-14");
         assert!(package_id("Weird-Pkg").starts_with("raw:"));
