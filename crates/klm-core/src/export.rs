@@ -18,7 +18,9 @@ pub fn export_zip(root: &LibraryRoot, parts: &[(String, String)], zip_path: &Pat
     if parts.is_empty() {
         bail!("nothing to export");
     }
-    let stage = std::env::temp_dir().join(format!("klm-export-{}-{}", std::process::id(), crate::cache::now()));
+    // Whole seconds collide when two exports start together; a counter never does.
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let stage = std::env::temp_dir().join(format!("klm-export-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     let result = build(root, parts, &stage, zip_path);
     let _ = std::fs::remove_dir_all(&stage);
     result.map(|_| parts.len())
