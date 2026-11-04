@@ -312,7 +312,8 @@ Driven by the screenshots above. Each WP checks its own tab with the W6.3 harnes
 
 What the original plan or earlier WPs promised that isn't there yet.
 
-- Status (2026-11-04): all five merged and the version is 0.6.0. Still open: country of origin (no supplier reply carries it), the Alternatives tab's reject and ungroup buttons, and the follow-ups each WP reported. Fixes for these are under way. Not yet checked by hand.
+- Status (2026-11-04): all five merged and the version is 0.6.0. A fix round then closed the WPs' follow-ups: Reject and Ungroup in the Alternatives tab, the Delete dialog (label, shared files, planning on a worker), stale and alias-proof rejections, SOIC body widths, `{Package}` on edit, a real-import test, health resolving KiCad path variables, and parallel test runs no longer sharing temp folders (also an export bug). The full suite passes in parallel.
+- Still open: country of origin (no supplier reply carries it; see LIMITS.md), Mouser replies never checked live (no Mouser key), `KICADn_*` variables ignore the version, `{Package}` on edit for distributor-imported parts, rarer SOIC widths, the Delete preview's handling of 3D models shared with a deleted footprint, process-id-only temp paths in `bom.rs` and `download.rs`, and the 240 px thumbnail test under load. Not yet checked by hand in the app or KiCad.
 
 - [x] **W8.1 Delete a part** (S)
   - **Owns:** `core/library/remove.rs` (new), `klm-cli remove`
