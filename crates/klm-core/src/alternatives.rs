@@ -64,10 +64,11 @@ impl LibPart {
         Some(value_key(&self.value, kind, false).unwrap_or_else(|| format!("t:{kind:?}:{text}")))
     }
 
-    /// Id of this part for rejected suggestions: the MPN in its package, so the same MPN in another
-    /// package is a different suggestion.
+    /// Id of this part for rejected suggestions: the MPN at its raw footprint name (no library prefix).
+    /// The package is resolved when read ([`canonical_id`]), so editing the alias table keeps rejections.
     pub fn member_id(&self) -> String {
-        format!("{}@{}", key(&self.mpn), self.package())
+        let name = self.footprint.rsplit_once(':').map_or(self.footprint.as_str(), |(_, n)| n);
+        format!("{}@{}", key(&self.mpn), name.trim().to_ascii_lowercase())
     }
 }
 
@@ -132,13 +133,19 @@ pub fn suggest(parts: &[LibPart]) -> Vec<Vec<usize>> {
     out
 }
 
+/// A stored `mpn@footprint` id with the footprint resolved to today's package id.
+fn canonical_id(id: &str) -> String {
+    id.rsplit_once('@').map_or(id.to_string(), |(m, f)| format!("{m}@{}", package_id(f)))
+}
+
 /// [`suggest`] without the groups the user rejected. A group is hidden when every pair of its members
 /// was rejected, so a part added to it later brings it back.
 pub fn suggest_unrejected(store: &Store, parts: &[LibPart]) -> Result<Vec<Vec<usize>>> {
-    let rejected = store.rejected()?;
+    let rejected: std::collections::HashSet<_> =
+        store.rejected()?.iter().map(|(a, b)| pairs(&[canonical_id(a), canonical_id(b)]).remove(0)).collect();
     let mut groups = suggest(parts);
     groups.retain(|g| {
-        let ids: Vec<String> = g.iter().map(|&i| parts[i].member_id()).collect();
+        let ids: Vec<String> = g.iter().map(|&i| canonical_id(&parts[i].member_id())).collect();
         !pairs(&ids).iter().all(|p| rejected.contains(p))
     });
     Ok(groups)
@@ -281,6 +288,8 @@ pub fn confirm(store: &Store, members: &[Alternative]) -> Result<Vec<Alternative
             store.remove_alternatives(&anchor)?;
         }
     }
+    // Confirming says these belong together, so an older "not equivalent" between members is stale.
+    store.clear_rejected_among(&group.iter().map(|a| key(&a.mpn)).collect())?;
     for a in &group {
         store.set_alternative(&group[0].mpn, a)?;
     }
@@ -485,6 +494,33 @@ mod tests {
         parts.push(lp("f", "X", "X", "SOIC-8"));
         parts.push(lp("g", "X", "X", "SOIC127P600X175-8N"));
         assert_eq!(suggest_unrejected(&s, &parts).unwrap().len(), 2, "the same MPN in another package is a new suggestion");
+    }
+
+    #[test]
+    fn rejections_are_stored_raw_and_resolved_when_read() {
+        let s = Store::open(&crate::test_dir("alt_reject_raw").join("parts.db")).unwrap();
+        let parts = [lp("a", "A1", "10k", "KLM:RESC1608X55N"), lp("b", "B1", "10k", "KLM:R_0603")];
+        reject(&s, &[&parts[0], &parts[1]]).unwrap();
+        let stored = s.rejected().unwrap();
+        assert!(stored.iter().all(|(a, b)| a.contains("@resc1608x55n") || a.contains("@r_0603") && b.contains('@') && !a.contains("chip:")), "{stored:?}");
+        // What a changed alias table does: the stored footprint names resolve to whatever the table says now,
+        // so an entry written under an old package id (W8.3 data) and the raw one hide the same group.
+        s.add_rejected(&[("c1@chip:0603".into(), "d1@chip:0603".into())]).unwrap();
+        let more = [lp("c", "C1", "10k", "R_0603"), lp("d", "D1", "10k", "RESC1608X55N")];
+        assert!(suggest_unrejected(&s, &more).unwrap().is_empty());
+        assert!(suggest_unrejected(&s, &parts).unwrap().is_empty());
+    }
+
+    #[test]
+    fn confirming_a_group_clears_stale_rejections_between_members() {
+        let s = Store::open(&crate::test_dir("alt_reject_confirm").join("parts.db")).unwrap();
+        let (a, b, c) = (lp("a", "A1", "10k", "R_0603"), lp("b", "B1", "10k", "R_0603"), lp("c", "C1", "10k", "R_0603"));
+        reject(&s, &[&a, &b]).unwrap();
+        reject(&s, &[&a, &c]).unwrap();
+        confirm(&s, &[a.as_alternative("preferred"), b.as_alternative("substitute")]).unwrap();
+        let left = s.rejected().unwrap();
+        assert_eq!(left.len(), 1, "only the A1/C1 rejection survives: {left:?}");
+        assert!(left.iter().all(|(x, y)| x.contains("c1@") || y.contains("c1@")));
     }
 
     #[test]

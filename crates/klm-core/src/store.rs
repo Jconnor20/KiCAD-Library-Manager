@@ -297,6 +297,18 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().map(|(a, t)| (a, t[REJECTED.len()..].to_string())).collect())
     }
 
+    /// Forgets the rejected pairs whose two sides are both MPN keys in `mpns` (a group was confirmed).
+    pub fn clear_rejected_among(&self, mpns: &std::collections::HashSet<String>) -> Result<()> {
+        let of = |id: &str| id.rsplit_once('@').map_or(id.to_string(), |(m, _)| m.to_string());
+        let tx = self.db.unchecked_transaction()?;
+        for (a, b) in self.rejected()? {
+            if mpns.contains(&of(&a)) && mpns.contains(&of(&b)) {
+                tx.execute("DELETE FROM tags WHERE part_mpn = ?1 AND tag = ?2", [a.as_str(), &format!("{REJECTED}{b}")])?;
+            }
+        }
+        Ok(tx.commit()?)
+    }
+
     /// Deletes every alternative of `part_mpn`.
     pub fn remove_alternatives(&self, part_mpn: &str) -> Result<()> {
         self.db.execute("DELETE FROM alternatives WHERE part_mpn = ?1", [part_mpn])?;
