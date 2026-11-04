@@ -4,7 +4,7 @@
 use crate::library::{AttachKind, Check, LibraryRoot, Scope, sanitize};
 use crate::part::Part;
 use crate::sources::zip_import::read_zip;
-use crate::categories;
+use crate::rules::Rules;
 use anyhow::{Result, bail};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -54,7 +54,7 @@ impl fmt::Display for Change {
 enum Work {
     /// Nothing to do; the item failed while planning.
     Nothing,
-    Import { part: Part, category: String, targets: Vec<LibraryRoot>, overwrite: bool },
+    Import { part: Part, category: String, name: String, targets: Vec<LibraryRoot>, overwrite: bool },
     Attach { root: LibraryRoot, category: String, name: String, kind: AttachKind, file: PathBuf },
     Copy { from: LibraryRoot, to: LibraryRoot, category: String, name: String, overwrite: bool },
     FixPaths(LibraryRoot),
@@ -85,13 +85,13 @@ impl Item {
     fn run(&self, notes: &mut Vec<String>) -> Result<()> {
         match &self.work {
             Work::Nothing => bail!("nothing to do"),
-            Work::Import { part, category, targets, overwrite } => {
+            Work::Import { part, category, name, targets, overwrite } => {
                 let mut errors = vec![];
                 for root in targets {
                     let nick = root.nickname(category);
-                    match root.add_part(part, category, *overwrite) {
+                    match root.add_part_named(part, category, name, *overwrite) {
                         Ok(new_lib) => {
-                            notes.push(format!("Imported {} into {nick}", part.mpn));
+                            notes.push(format!("Imported {name} into {nick}"));
                             notes.extend(crate::symbols::take_note());
                             if new_lib {
                                 notes.push(format!("Added library {nick} to KiCad"));
@@ -175,9 +175,14 @@ fn act(exists: bool, what: String) -> Change {
     if exists { Change::Replace(what) } else { Change::Add(what) }
 }
 
-/// Works out what `ops` would do to the libraries, without writing to them. ZIPs are unpacked into a
-/// scratch folder that lives as long as the returned plan.
+/// [`plan_with`] without the user's rules: MPN as the symbol name, built-in category guess.
 pub fn plan(ops: Vec<Op>, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> Plan {
+    plan_with(ops, global, project, &Rules::default())
+}
+
+/// Works out what `ops` would do to the libraries, without writing to them. ZIPs are unpacked into a
+/// scratch folder that lives as long as the returned plan. Imports follow `rules`, as a single import does.
+pub fn plan_with(ops: Vec<Op>, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>, rules: &Rules) -> Plan {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     let roots = global.into_iter().chain(project).cloned().collect();
     let mut plan = Plan { items: vec![], warnings: vec![], scratch: std::env::temp_dir().join(format!("klm-batch-{}-{nanos}", std::process::id())), roots };
@@ -187,13 +192,13 @@ pub fn plan(ops: Vec<Op>, global: Option<&LibraryRoot>, project: Option<&Library
                 let name = zip.file_name().unwrap_or_default().to_string_lossy().into_owned();
                 // One item per import op, so the scratch folder can be named after its position.
                 let item = match read_zip(&zip, &plan.scratch.join(plan.items.len().to_string())) {
-                    Ok(Some(part)) => import_item(part, category, target, overwrite, global, project),
+                    Ok(Some(part)) => import_item(part, category, target, overwrite, global, project, rules),
                     Ok(None) => Item::new(name).fail("holds no KiCad symbol"),
                     Err(e) => Item::new(name).fail(format!("{e:#}")),
                 };
                 plan.items.push(item);
             }
-            Op::ImportPart { part, category, target, overwrite } => plan.items.push(import_item(part, category, target, overwrite, global, project)),
+            Op::ImportPart { part, category, target, overwrite } => plan.items.push(import_item(part, category, target, overwrite, global, project, rules)),
             Op::Attach { scope, file, parts } => {
                 let root = if scope == Scope::Global { global } else { project };
                 plan.items.extend(attach_items(root, &file, parts));
@@ -205,9 +210,12 @@ pub fn plan(ops: Vec<Op>, global: Option<&LibraryRoot>, project: Option<&Library
     plan
 }
 
-fn import_item(part: Part, category: Option<String>, target: Target, overwrite: bool, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> Item {
-    let category = category.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).unwrap_or_else(|| categories::guess(&part.category_hint).to_string());
-    let (cat, mpn) = (sanitize(&category), sanitize(&part.mpn));
+fn import_item(mut part: Part, category: Option<String>, target: Target, overwrite: bool, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>, rules: &Rules) -> Item {
+    part.mpn = rules.normalise_mpn(&part.mpn);
+    let category = category.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).unwrap_or_else(|| rules.category_for(&part));
+    let cat = sanitize(&category);
+    // The symbol is named by the template; the MPN field keeps the real MPN.
+    let mpn = sanitize(&rules.name_for(&part, &category));
     let mut item = Item::new(part.mpn.clone());
     item.warnings.extend(part.warnings.iter().cloned());
     if cat.is_empty() || mpn.is_empty() {
@@ -249,7 +257,7 @@ fn import_item(part: Part, category: Option<String>, target: Target, overwrite: 
             item.changes.push(Change::NewLibrary(nick));
         }
     }
-    item.work = Work::Import { part, category: cat, targets, overwrite };
+    item.work = Work::Import { part, category: cat, name: mpn, targets, overwrite };
     item
 }
 
@@ -487,6 +495,27 @@ mod tests {
         assert!(!project.needs_link("ICs") && global.unlinked().is_empty(), "the planned new libraries are in KiCad's tables");
         let ds: Vec<_> = global.list_parts().iter().map(|p| p.datasheet).collect();
         assert_eq!(ds, [Check::Ok, Check::Missing, Check::Ok]);
+    }
+
+    #[test]
+    fn imports_follow_the_users_rules() {
+        use crate::rules::{CategoryRule, MpnCase};
+        let (base, global, project) = setup("batch_rules", &[]);
+        let zip = base.join("z.zip");
+        make_zip(&zip);
+        let rules = Rules {
+            categories: vec![CategoryRule { keyword: "zipped".into(), category: "Special".into() }],
+            name_template: "X_{MPN}".into(),
+            mpn_case: MpnCase::Lower,
+        };
+        let op = |category: Option<&str>| vec![Op::ImportZip { zip: zip.clone(), category: category.map(String::from), target: Target::Global, overwrite: false }];
+        let p = plan_with(op(None), Some(&global), Some(&project), &rules);
+        assert!(p.items[0].changes.contains(&Change::Add("symbol X_zipped in KLM_Special".into())), "{p}");
+        let Work::Import { part, category, name, .. } = &p.items[0].work else { panic!("not an import") };
+        assert_eq!((category.as_str(), name.as_str(), part.mpn.as_str()), ("Special", "X_zipped", "zipped"), "the template names the symbol, not the MPN");
+        // An explicit category still beats the rules; no rules gives the old behaviour.
+        assert!(plan_with(op(Some("ICs")), Some(&global), Some(&project), &rules).items[0].changes.contains(&Change::Add("symbol X_zipped in KLM_ICs".into())));
+        assert!(plan(op(Some("ICs")), Some(&global), Some(&project)).items[0].changes.contains(&Change::Add("symbol ZIPPED in KLM_ICs".into())));
     }
 
     #[test]

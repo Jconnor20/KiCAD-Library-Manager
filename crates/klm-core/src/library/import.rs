@@ -11,8 +11,13 @@ use std::path::{Path, PathBuf};
 impl LibraryRoot {
     /// Imports `part` into `category`. Returns true if the category library was new to KiCad's tables.
     pub fn add_part(&self, part: &Part, category: &str, overwrite: bool) -> Result<bool> {
+        self.add_part_named(part, category, &part.mpn, overwrite)
+    }
+
+    /// [`add_part`](Self::add_part) with the symbol called `name` (the user's name template); the MPN field stays `part.mpn`.
+    pub fn add_part_named(&self, part: &Part, category: &str, name: &str, overwrite: bool) -> Result<bool> {
         let cat = sanitize(category);
-        let mpn = sanitize(&part.mpn);
+        let mpn = sanitize(name);
         if cat.is_empty() || mpn.is_empty() {
             bail!("category and MPN must not be empty");
         }
@@ -112,7 +117,7 @@ impl LibraryRoot {
             set_property(&mut symbol, "Footprint", &format!("{nick}:{fp}"));
         }
         if let Some(ds) = &part.datasheet_file {
-            let name = datasheet_name(&part.manufacturer, mpn);
+            let name = datasheet_name(&part.manufacturer, &sanitize(&part.mpn));
             copy_file(ds, &self.dir.join("datasheets").join(&name))?;
             set_property(&mut symbol, "Datasheet", &format!("{var}/datasheets/{name}"));
         } else if !part.datasheet_url.is_empty() {
@@ -129,7 +134,7 @@ impl LibraryRoot {
             set_property(&mut symbol, k, v);
         }
         if let Some(sim) = part.sim_files.first() {
-            self.attach_sim(&mut symbol, sim, mpn)?;
+            self.attach_sim(&mut symbol, sim, &sanitize(&part.mpn))?;
         }
 
         crate::symbols::restyle_imported(cat, &mut symbol);

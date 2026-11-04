@@ -3,7 +3,8 @@
 //! Two steps, like `batch`: [`plan`] works out every file that would change and how, without writing,
 //! and [`apply`] writes exactly that, after one snapshot of the library. Symbol rules are in `symbol`,
 //! footprint rules in `footprint`.
-// TODO(W3.3): apply the naming rules from `rules.rs` here once they are merged.
+//! Naming rules (`rules.rs`) are not applied here: Standardise never renames parts, so a library's existing
+//! symbol names, which may predate the name template, stay as they are.
 
 mod footprint;
 pub(crate) mod symbol;

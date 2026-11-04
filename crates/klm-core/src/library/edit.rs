@@ -3,6 +3,7 @@
 use super::fields::{merge_symbol, rename_symbol, same_geometry};
 use super::{LibraryRoot, copy_file, property, sanitize, set_property};
 use crate::kicad_env::write_atomic;
+use crate::rules::Rules;
 use crate::sexpr::{self, Sexpr};
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -46,6 +47,12 @@ impl LibraryRoot {
     /// new category's library and links it in KiCad; the old library stays, even if now empty. Refuses to
     /// replace a part of the same name.
     pub fn edit_part(&self, category: &str, symbol_name: &str, edit: &PartEdit) -> Result<Edited> {
+        self.edit_part_with(category, symbol_name, edit, &Rules::default())
+    }
+
+    /// [`edit_part`](Self::edit_part) naming the symbol by the user's template when the MPN or manufacturer
+    /// changes; the MPN field itself is never rewritten by the template.
+    pub fn edit_part_with(&self, category: &str, symbol_name: &str, edit: &PartEdit, rules: &Rules) -> Result<Edited> {
         let cat = sanitize(category);
         let (mut lib, idx) = self.load_symbol(&cat, symbol_name)?;
         let mut symbol = lib.items()[idx].clone();
@@ -60,8 +67,15 @@ impl LibraryRoot {
             }
             set_property(&mut symbol, key, value.trim());
         }
-        let new_mpn = edit.fields.iter().find(|(k, _)| k == "MPN").map(|(_, v)| sanitize(v)).filter(|m| !m.is_empty());
-        let name = new_mpn.unwrap_or_else(|| symbol_name.to_string());
+        let renames = edit.fields.iter().any(|(k, v)| (k == "MPN" && !sanitize(v).is_empty()) || (k == "Manufacturer" && !rules.name_template.trim().is_empty()));
+        let name = if renames {
+            let mpn = property(&symbol, "MPN").map(str::trim).filter(|m| !m.is_empty()).unwrap_or(symbol_name).to_string();
+            let maker = property(&symbol, "Manufacturer").unwrap_or("").to_string();
+            Some(sanitize(&rules.name(&[("MPN", &mpn), ("Manufacturer", &maker), ("Category", &new_cat)]))).filter(|n| !n.is_empty())
+        } else {
+            None
+        }
+        .unwrap_or_else(|| symbol_name.to_string());
         if name != symbol_name {
             rename_symbol(&mut symbol, &name);
             if property(&symbol, "Value") == Some(symbol_name) {
@@ -218,6 +232,19 @@ mod tests {
         assert_eq!(field(&root, "ICs", "NEW_2", "Value").as_deref(), Some("NEW_2"));
         let err = root.edit_part("ICs", "NEW_2", &edit(&[("MPN", "OTHER")], None)).unwrap_err().to_string();
         assert!(err.contains("already in KLM_ICs"), "{err}");
+    }
+
+    #[test]
+    fn name_template_names_the_symbol_but_not_the_mpn() {
+        let root = fixture("edit_template");
+        let rules = Rules { name_template: "{Manufacturer}_{MPN}".into(), ..Rules::default() };
+        let done = root.edit_part_with("ICs", "OLD", &edit(&[("MPN", "NEW-1")], None), &rules).unwrap();
+        assert_eq!(done.name, "ACME_NEW-1");
+        assert_eq!(field(&root, "ICs", "ACME_NEW-1", "MPN").as_deref(), Some("NEW-1"), "MPN field is not rewritten");
+        // A manufacturer edit re-names with the template; without a template it leaves the name alone.
+        let done = root.edit_part_with("ICs", "SOLO", &edit(&[("Manufacturer", "Globex")], None), &rules).unwrap();
+        assert_eq!(done.name, "Globex_SOLO");
+        assert_eq!(root.edit_part("ICs", "OTHER", &edit(&[("Manufacturer", "Globex")], None)).unwrap().name, "OTHER");
     }
 
     #[test]
