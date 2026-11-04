@@ -71,7 +71,9 @@ impl LibraryRoot {
         let name = if renames {
             let mpn = property(&symbol, "MPN").map(str::trim).filter(|m| !m.is_empty()).unwrap_or(symbol_name).to_string();
             let maker = property(&symbol, "Manufacturer").unwrap_or("").to_string();
-            Some(sanitize(&rules.name(&[("MPN", &mpn), ("Manufacturer", &maker), ("Category", &new_cat)]))).filter(|n| !n.is_empty())
+            // Import's package for a ZIP part is the footprint's name, so use the same here.
+            let package = property(&symbol, "Footprint").and_then(|f| f.rsplit(':').next()).unwrap_or("");
+            Some(sanitize(&rules.name(&[("MPN", &mpn), ("Manufacturer", &maker), ("Package", package), ("Category", &new_cat)]))).filter(|n| !n.is_empty())
         } else {
             None
         }
@@ -245,6 +247,17 @@ mod tests {
         let done = root.edit_part_with("ICs", "SOLO", &edit(&[("Manufacturer", "Globex")], None), &rules).unwrap();
         assert_eq!(done.name, "Globex_SOLO");
         assert_eq!(root.edit_part("ICs", "OTHER", &edit(&[("Manufacturer", "Globex")], None)).unwrap().name, "OTHER");
+    }
+
+    #[test]
+    fn package_in_a_template_names_the_part_as_import_does() {
+        let root = fixture("edit_package");
+        let rules = Rules { name_template: "{Package}_{MPN}".into(), ..Rules::default() };
+        // Import sets Part.package to the footprint's name (sources/foreign.rs).
+        let part = crate::part::Part { mpn: "NEW-1".into(), manufacturer: "ACME".into(), package: "FP1".into(), ..Default::default() };
+        let done = root.edit_part_with("ICs", "OLD", &edit(&[("MPN", "NEW-1")], None), &rules).unwrap();
+        assert_eq!(done.name, rules.name_for(&part, "ICs"));
+        assert_eq!(done.name, "FP1_NEW-1");
     }
 
     #[test]

@@ -192,3 +192,22 @@ fn import_applies_the_rules_from_settings() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("add symbol Z_testpart in KLM_Custom"), "{text}");
 }
+
+#[test]
+fn import_writes_rules_and_template_to_disk() {
+    if !kicad_env::kicad_cli().is_ok_and(|c| Command::new(c).arg("version").output().is_ok_and(|o| o.status.success())) {
+        panic!("kicad-cli not found or not runnable; this test must really run");
+    }
+    let dir = fresh("rules_disk");
+    let (config, lib, settings, zip) = (dir.join("config"), dir.join("lib"), dir.join("settings.json"), dir.join("t.zip"));
+    std::fs::create_dir_all(&config).unwrap();
+    let rules = r#"{"categories": [{"keyword": "testpart", "category": "Custom"}], "name_template": "Z_{MPN}"}"#;
+    std::fs::write(&settings, format!(r#"{{"global_root": {:?}, "rules": {rules}}}"#, lib.to_string_lossy().replace('\\', "/"))).unwrap();
+    make_zip(&zip);
+
+    let out = klm(&settings, &config, &["import", zip.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = std::fs::read_to_string(lib.join("symbols/Custom.kicad_sym")).expect("category library written");
+    assert!(text.contains("(symbol \"Z_TESTPART\""), "{text}");
+    assert!(text.contains("(property \"MPN\" \"TESTPART\""), "MPN must stay untouched: {text}");
+}
