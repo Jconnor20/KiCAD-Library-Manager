@@ -455,7 +455,7 @@ fn import(zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Opt
         .then(|| project.or(s.last_project.clone()).map(|dir| LibraryRoot::project(&dir)).context("no project: pass --project <dir>"))
         .transpose()?;
     let ops = zips.into_iter().map(|zip| Op::ImportZip { zip, category: category.clone(), target: to, overwrite }).collect();
-    let plan = batch::plan(ops, global.as_ref(), project.as_ref());
+    let plan = batch::plan_with(ops, global.as_ref(), project.as_ref(), &s.rules);
     if dry_run {
         print!("{plan}");
         return Ok(ExitCode::SUCCESS);

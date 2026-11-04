@@ -148,3 +148,18 @@ fn standardise_dry_run_then_apply_keeps_parts_loadable() {
         assert!(o.status.success(), "{args:?}: {}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     }
 }
+
+#[test]
+fn import_applies_the_rules_from_settings() {
+    let dir = fresh("rules");
+    let (config, lib, settings, zip) = (dir.join("config"), dir.join("lib"), dir.join("settings.json"), dir.join("t.zip"));
+    std::fs::create_dir_all(&config).unwrap();
+    let rules = r#"{"categories": [{"keyword": "testpart", "category": "Custom"}], "name_template": "Z_{MPN}", "mpn_case": "Lower"}"#;
+    std::fs::write(&settings, format!(r#"{{"global_root": {:?}, "rules": {rules}}}"#, lib.to_string_lossy().replace('\\', "/"))).unwrap();
+    make_zip(&zip);
+
+    let out = klm(&settings, &config, &["import", zip.to_str().unwrap(), "--dry-run"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("add symbol Z_testpart in KLM_Custom"), "{text}");
+}

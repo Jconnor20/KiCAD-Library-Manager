@@ -679,7 +679,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
         let root = if scope == Scope::Global { cx.global_root() } else { cx.project_root() };
         let Some(root) = root else { return };
         for (category, name) in targets {
-            match root.edit_part(category, name, edit) {
+            match root.edit_part_with(category, name, edit, &cx.settings.rules) {
                 Ok(done) => {
                     let mut line = format!("Edited {name}");
                     if done.name != *name {

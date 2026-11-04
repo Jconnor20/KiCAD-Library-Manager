@@ -290,7 +290,7 @@ impl ImportTab {
                         let target = if cx.global_root().is_some() { Target::Global } else { Target::Project };
                         let ops = scan.parts.into_iter().map(|f| Op::ImportPart { part: f.part, category: Some(f.category), target, overwrite: false }).collect();
                         self.foreign_work = Some(work);
-                        self.batch = Some(BatchDialog::Review(batch::plan(ops, cx.global_root().as_ref(), cx.project_root().as_ref())));
+                        self.batch = Some(BatchDialog::Review(batch::plan_with(ops, cx.global_root().as_ref(), cx.project_root().as_ref(), &cx.settings.rules)));
                     }
                 }
             }
@@ -317,7 +317,7 @@ impl ImportTab {
                 SetupAction::Cancel => self.batch_setup = None,
                 SetupAction::Preview(ops) => {
                     self.batch_setup = None;
-                    self.batch = Some(BatchDialog::Review(batch::plan(ops, global.as_ref(), project.as_ref())));
+                    self.batch = Some(BatchDialog::Review(batch::plan_with(ops, global.as_ref(), project.as_ref(), &cx.settings.rules)));
                 }
             }
         }
