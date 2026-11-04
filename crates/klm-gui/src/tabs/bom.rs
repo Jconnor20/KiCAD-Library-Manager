@@ -121,10 +121,11 @@ impl BomTab {
     fn load(&mut self, cx: &mut AppCtx, project: std::path::PathBuf) {
         self.running = true;
         let region = self.settings.region(&cx.settings.shipping_region).to_string();
+        let fields = self.settings.fields.clone().unwrap_or_else(|| cx.settings.bom_fields.clone());
         let (settings, roots, tx, ctx) = (cx.settings.clone(), cx.roots(), cx.tx.clone(), cx.ctx.clone());
         std::thread::spawn(move || {
             let res = (|| -> anyhow::Result<Loaded> {
-                let lines = bom::export(&project)?;
+                let lines = bom::export(&project, &fields)?;
                 let store = Store::default_path().and_then(|p| Store::open(&p).ok());
                 let (dist, mut notes) = bom::distributors(&settings, &region);
                 let ttl = settings.cache_ttl_minutes.unwrap_or(cache::DEFAULT_TTL_MINUTES) as i64 * 60;

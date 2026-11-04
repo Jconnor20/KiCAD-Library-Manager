@@ -18,8 +18,35 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Symbol fields read as supplier numbers.
-// shortcut: field names are fixed; add a Settings list if projects name them "LCSC Part" or "Digi-Key_PN".
 const SUPPLIER_FIELDS: &[&str] = &["LCSC", "DigiKey", "Mouser"];
+
+/// Which schematic fields hold each part number; parsing always uses the standard labels, so only the
+/// `kicad-cli` export reads these.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct BomFields {
+    pub mpn: String,
+    pub manufacturer: String,
+    pub lcsc: String,
+    pub digikey: String,
+    pub mouser: String,
+}
+
+impl Default for BomFields {
+    fn default() -> Self {
+        let s = |x: &str| x.to_string();
+        Self { mpn: s("MPN"), manufacturer: s("Manufacturer"), lcsc: s("LCSC"), digikey: s("DigiKey"), mouser: s("Mouser") }
+    }
+}
+
+impl BomFields {
+    /// Names in the order of the standard labels MPN, Manufacturer, LCSC, DigiKey, Mouser; a blank one is the standard.
+    fn names(&self) -> [String; 5] {
+        let d = Self::default();
+        let pick = |v: &str, def: String| if v.trim().is_empty() { def } else { v.trim().to_string() };
+        [pick(&self.mpn, d.mpn), pick(&self.manufacturer, d.manufacturer), pick(&self.lcsc, d.lcsc), pick(&self.digikey, d.digikey), pick(&self.mouser, d.mouser)]
+    }
+}
 
 /// One BOM line: the placed parts that are the same part, grouped here (not by kicad-cli, which
 /// would show mixed fields as a placeholder).
@@ -46,11 +73,13 @@ pub struct ProjectBom {
     /// Overrides the Settings shipping region when not empty.
     pub region: String,
     pub boards: u64,
+    /// This project's field names; the Settings ones when unset.
+    pub fields: Option<BomFields>,
 }
 
 impl Default for ProjectBom {
     fn default() -> Self {
-        Self { region: String::new(), boards: 1 }
+        Self { region: String::new(), boards: 1, fields: None }
     }
 }
 
@@ -74,9 +103,11 @@ impl ProjectBom {
 // ---- reading the BOM ----
 
 /// Runs `kicad-cli sch export bom` on the project's root schematic and returns the lines.
-pub fn export(project: &Path) -> Result<Vec<Line>> {
+pub fn export(project: &Path, fields: &BomFields) -> Result<Vec<Line>> {
     let sch = root_schematic(project)?;
     let out = std::env::temp_dir().join(format!("klm-bom-{}.csv", std::process::id()));
+    let [mpn, maker, lcsc, digikey, mouser] = fields.names();
+    let field_list = format!("Reference,Value,Footprint,${{DNP}},{mpn},{maker},{lcsc},{digikey},{mouser}");
     let args: Vec<std::ffi::OsString> = [
         "sch",
         "export",
@@ -84,7 +115,7 @@ pub fn export(project: &Path) -> Result<Vec<Line>> {
         "--output",
         &out.to_string_lossy(),
         "--fields",
-        "Reference,Value,Footprint,${DNP},MPN,Manufacturer,LCSC,DigiKey,Mouser",
+        &field_list,
         "--labels",
         "Reference,Value,Footprint,DNP,MPN,Manufacturer,LCSC,DigiKey,Mouser",
         "--field-delimiter",
@@ -250,6 +281,10 @@ pub struct Quote {
     pub breaks: Vec<(u64, f64)>,
     pub currency: String,
     pub moq: u64,
+    /// Order multiple (Mouser's `Mult`): the quantity bought is a whole number of these.
+    pub multiple: u64,
+    /// "Cut Tape (CT)", "Tape & Reel (TR)": one DigiKey part has a quote per packaging.
+    pub packaging: String,
     /// Factory lead time; used only when the stock doesn't cover the order.
     pub lead_days: Option<u32>,
     /// From a cache entry older than its lifetime, used because the network failed.
@@ -282,6 +317,9 @@ pub fn quote_of(source: &str, p: &Part) -> Quote {
         stock: p.stock,
         currency: if p.price_currency.is_empty() { currency::detect(&p.unit_price).unwrap_or_default() } else { p.price_currency.clone() },
         moq: p.moq.unwrap_or(1).max(1),
+        // DigiKey's pack size is a reel, not a multiple: its reel quotes already carry it as the MOQ.
+        multiple: if source == "Mouser" { p.pack_qty.unwrap_or(1).max(1) } else { 1 },
+        packaging: p.packaging.clone(),
         lead_days: p.lead_time_days,
         stale: false,
         breaks,
@@ -291,13 +329,15 @@ pub fn quote_of(source: &str, p: &Part) -> Quote {
 /// The cheapest way to buy at least `need` from this quote, in the quote's currency. `None` with no price breaks.
 pub fn price(q: &Quote, need: u64) -> Option<Priced> {
     let first = q.breaks.first()?.0;
-    let floor = need.max(q.moq).max(first);
+    let m = q.multiple.max(1);
+    let up = |n: u64| n.div_ceil(m) * m;
+    let floor = up(need.max(q.moq).max(first));
     let unit_at = |n: u64| q.breaks.iter().take_while(|b| b.0 <= n).last().map_or(q.breaks[0].1, |b| b.1);
     // Buying up to the next break can cost less than the exact quantity.
     // Only round up past stock when the exact quantity is already out of stock.
     let cap = q.stock.filter(|&s| s >= floor).unwrap_or(u64::MAX);
     let bought = std::iter::once(floor)
-        .chain(q.breaks.iter().map(|b| b.0).filter(|&n| n > floor && n <= cap))
+        .chain(q.breaks.iter().map(|b| up(b.0)).filter(|&n| n > floor && n <= cap))
         .min_by(|a, b| (unit_at(*a) * *a as f64).total_cmp(&(unit_at(*b) * *b as f64)))?;
     let unit = unit_at(bought);
     Some(Priced { bought, unit, ext: unit * bought as f64, in_stock: q.stock.is_some_and(|s| s >= bought) })
@@ -340,6 +380,8 @@ pub fn best(quotes: &[Quote], need: u64, target: &str, rates: Option<&Rates>) ->
 pub struct Distributor {
     pub cache_name: String,
     pub source: Box<dyn Source>,
+    /// Least time between two requests to it (Mouser allows about 30 a minute); cache hits don't wait.
+    pub interval: std::time::Duration,
 }
 
 /// The enabled sources, and why the others are out: "DigiKey: no API key".
@@ -350,16 +392,21 @@ pub fn distributors(settings: &crate::settings::Settings, region: &str) -> (Vec<
         if !settings.is_enabled(name) {
             continue;
         }
+        let interval = std::time::Duration::from_millis(match name {
+            "Mouser" => 2100,
+            "DigiKey" => 500,
+            _ => 0,
+        });
         let built: Option<(String, Box<dyn Source>)> = if name == "DigiKey" {
             sources::digikey::DigiKey::from_credentials().map(|d| {
                 let (site, cur) = sources::digikey::locale(region);
-                (format!("DigiKey@{site}/{cur}/v2"), Box::new(d.with_region(region)) as Box<dyn Source>)
+                (format!("DigiKey@{site}/{cur}/v3"), Box::new(d.with_region(region)) as Box<dyn Source>)
             })
         } else {
             sources::build(name).map(|s| (format!("{name}/v2"), s))
         };
         match built {
-            Some((cache_name, source)) => out.push(Distributor { cache_name, source }),
+            Some((cache_name, source)) => out.push(Distributor { cache_name, source, interval }),
             None => skipped.push(format!("{name}: no API key")),
         }
     }
@@ -380,13 +427,13 @@ pub fn pick<'a>(results: &'a [Part], line: &Line, source: &str) -> Option<&'a Pa
 
 /// Quotes for every line, one list per line, plus per-source problems ("LCSC: offline"). Results come
 /// from the cache when fresh, and from an expired entry when the network fails.
-// shortcut: lines are asked one after another with no rate limiting (Mouser allows ~30/min); add a throttle if big BOMs hit limits.
 pub fn fetch_quotes(lines: &[Line], dist: &[Distributor], store: Option<&Store>, ttl_secs: i64) -> (Vec<Vec<Quote>>, Vec<String>) {
     let mut problems = vec![];
     // (distributor, query) -> results and whether they came from an expired entry; one request per distinct query.
     let mut done: HashMap<(usize, String), Option<(Vec<Part>, bool)>> = HashMap::new();
     // Distributors that failed once: later queries use the cache only, so being offline costs one timeout.
     let mut failed: Vec<usize> = vec![];
+    let mut last_call: HashMap<usize, std::time::Instant> = HashMap::new();
     let quotes = lines
         .iter()
         .map(|line| {
@@ -398,7 +445,16 @@ pub fn fetch_quotes(lines: &[Line], dist: &[Distributor], store: Option<&Store>,
                     continue;
                 }
                 let skip = failed.contains(&di);
-                let res = done.entry((di, query.to_lowercase())).or_insert_with(|| match cache::search(store, &d.cache_name, &query, ttl_secs, || if skip { bail!("skipped") } else { d.source.search(&query) }) {
+                let res = done.entry((di, query.to_lowercase())).or_insert_with(|| match cache::search(store, &d.cache_name, &query, ttl_secs, || {
+                    if skip {
+                        bail!("skipped")
+                    }
+                    if let Some(wait) = last_call.get(&di).and_then(|t| d.interval.checked_sub(t.elapsed())) {
+                        std::thread::sleep(wait);
+                    }
+                    last_call.insert(di, std::time::Instant::now());
+                    d.source.search(&query)
+                }) {
                     Ok(r) => Some((r, false)),
                     Err(e) => {
                         if !skip {
@@ -410,7 +466,10 @@ pub fn fetch_quotes(lines: &[Line], dist: &[Distributor], store: Option<&Store>,
                 });
                 if let Some((results, stale)) = res {
                     if let Some(p) = pick(results, line, name) {
-                        out.push(Quote { stale: *stale, ..quote_of(name, p) });
+                        // Every packaging the source lists is a quote of its own (cut tape, reel...).
+                        for v in std::iter::once(p).chain(&p.variations) {
+                            out.push(Quote { stale: *stale, ..quote_of(name, v) });
+                        }
                     }
                 }
             }
@@ -707,7 +766,7 @@ C1,100n,C_0603,,,,,,\n";
         let store = Store::open(&crate::test_dir("bom_fetch").join("parts.db")).unwrap();
         let line = |r: &str| Line { refs: vec![r.into()], mpn: "ABC12345".into(), ..Line::default() };
         let lines = [line("R1"), Line { footprint: "other".into(), ..line("R2") }];
-        let d = |fail| vec![Distributor { cache_name: "LCSC/v2".into(), source: Box::new(Fake(Default::default(), fail)) }];
+        let d = |fail| vec![Distributor { cache_name: "LCSC/v2".into(), source: Box::new(Fake(Default::default(), fail)), interval: Default::default() }];
         let (q, problems) = fetch_quotes(&lines, &d(false), Some(&store), 60);
         assert!(problems.is_empty() && q[0][0].breaks == [(1, 0.5)] && q[1].len() == 1);
         // Expired (ttl 0 skips the cache) and offline: the old entry is used and marked stale.
@@ -717,6 +776,62 @@ C1,100n,C_0603,,,,,,\n";
         // Offline with nothing cached: no quote, a problem, no panic.
         let (q, problems) = fetch_quotes(&lines, &d(true), None, 60);
         assert!(q[0].is_empty() && problems.len() == 1);
+    }
+
+    #[test]
+    fn mouser_order_multiple_rounds_up() {
+        let mut q = quote("Mouser", &[(1, 0.10), (100, 0.05)], "USD", 10_000, 1, None);
+        q.multiple = 50;
+        assert_eq!(price(&q, 7).map(|p| p.bought), Some(50));
+        // 120 rounds to 150; 150 x 0.05 = 7.5 beats nothing cheaper.
+        assert_eq!(price(&q, 120).map(|p| (p.bought, p.unit)), Some((150, 0.05)));
+        let p = Part { pack_qty: Some(50), ..Part::default() };
+        assert_eq!((quote_of("Mouser", &p).multiple, quote_of("DigiKey", &p).multiple), (50, 1));
+    }
+
+    #[test]
+    fn requests_are_spaced_by_the_interval_but_cache_hits_are_not() {
+        let store = Store::open(&crate::test_dir("bom_rate").join("parts.db")).unwrap();
+        let line = |m: &str| Line { refs: vec!["R1".into()], mpn: m.into(), ..Line::default() };
+        let lines = [line("AAAAA1"), line("BBBBB2"), line("AAAAA1")];
+        let d = vec![Distributor { cache_name: "LCSC/v2".into(), source: Box::new(Fake(Default::default(), false)), interval: std::time::Duration::from_millis(150) }];
+        let t = std::time::Instant::now();
+        fetch_quotes(&lines, &d, Some(&store), 60);
+        let e = t.elapsed();
+        assert!(e >= std::time::Duration::from_millis(150) && e < std::time::Duration::from_millis(290), "two requests, one wait: {e:?}");
+    }
+
+    #[test]
+    fn every_packaging_is_quoted() {
+        let reel = Part { packaging: "Reel".into(), moq: Some(5000), price_breaks: vec![(5000, 0.002)], ..Part::default() };
+        let cut = Part { packaging: "Cut Tape".into(), price_breaks: vec![(1, 0.01)], variations: vec![reel], ..Part::default() };
+        let store = Store::open(&crate::test_dir("bom_pack").join("parts.db")).unwrap();
+        struct One(Part);
+        impl Source for One {
+            fn name(&self) -> &'static str {
+                "LCSC"
+            }
+            fn search(&self, _: &str) -> Result<Vec<Part>> {
+                Ok(vec![Part { mpn: "ABC12345".into(), ..self.0.clone() }])
+            }
+            fn fetch(&self, _: &Part, _: &Path) -> Result<Option<Part>> {
+                Ok(None)
+            }
+        }
+        let d = vec![Distributor { cache_name: "x".into(), source: Box::new(One(cut)), interval: Default::default() }];
+        let (q, _) = fetch_quotes(&[Line { refs: vec!["R1".into()], mpn: "ABC12345".into(), ..Line::default() }], &d, Some(&store), 60);
+        assert_eq!(q[0].iter().map(|q| q.packaging.as_str()).collect::<Vec<_>>(), ["Cut Tape", "Reel"]);
+        // For 10 parts the cut tape wins; best() weighs every packaging.
+        assert_eq!(best(&q[0], 10, "", None).map(|b| b.quote), Some(0));
+    }
+
+    #[test]
+    fn field_names_are_configurable_with_standard_defaults() {
+        let f = BomFields { mpn: "Part Number".into(), lcsc: " ".into(), ..BomFields::default() };
+        assert_eq!(f.names(), ["Part Number", "Manufacturer", "LCSC", "DigiKey", "Mouser"]);
+        let p: ProjectBom = serde_json::from_str(r#"{"fields":{"mpn":"PN"}}"#).unwrap();
+        assert_eq!(p.fields.unwrap().names()[..2], ["PN", "Manufacturer"]);
+        assert!(ProjectBom::default().fields.is_none());
     }
 
     #[test]

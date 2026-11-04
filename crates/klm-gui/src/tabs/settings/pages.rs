@@ -55,7 +55,7 @@ pub fn restore(d: &mut Settings, s: Section) {
         Section::Import => (d.rules, d.house_symbols_on_import) = (def.rules, def.house_symbols_on_import),
         Section::Symbols => standards::reset_symbols(&mut d.standards),
         Section::Footprints => standards::reset_footprints(&mut d.standards),
-        Section::Bom => d.shipping_region = def.shipping_region,
+        Section::Bom => (d.shipping_region, d.bom_fields) = (def.shipping_region, def.bom_fields),
         Section::History => d.history = History::default(),
         s => {
             if let Some(info) = source_info(s) {
@@ -231,10 +231,22 @@ impl SettingsTab {
                 ui.weak("Fixes that make parts follow the KiCad Library Conventions. Untick a rule to leave that alone. The Library tab runs them.");
                 standards::footprints(ui, &mut d.standards);
             }),
-            Section::Bom => group(ui, "Shipping region", |ui| {
-                ui.weak("Country code (US, DE, ...) used for BOM stock and prices; each project can override it. Only DigiKey uses it so far.");
-                ui.add(egui::TextEdit::singleline(&mut d.shipping_region).hint_text("e.g. DE").desired_width(80.0));
-            }),
+            Section::Bom => {
+                group(ui, "Shipping region", |ui| {
+                    ui.weak("Country code (US, DE, ...) used for BOM stock and prices; each project can override it. Only DigiKey uses it so far.");
+                    ui.add(egui::TextEdit::singleline(&mut d.shipping_region).hint_text("e.g. DE").desired_width(80.0));
+                });
+                group(ui, "Field names", |ui| {
+                    ui.weak("The schematic fields that hold each part number, if your symbols name them differently. A project can override them in its .klm-bom.json.");
+                    let f = &mut d.bom_fields;
+                    for (label, v) in [("MPN", &mut f.mpn), ("Manufacturer", &mut f.manufacturer), ("LCSC", &mut f.lcsc), ("DigiKey", &mut f.digikey), ("Mouser", &mut f.mouser)] {
+                        ui.horizontal(|ui| {
+                            ui.add_sized([100.0, 20.0], egui::Label::new(label));
+                            ui.add(egui::TextEdit::singleline(v).desired_width(200.0));
+                        });
+                    }
+                });
+            }
             Section::History => {
                 two(
                     ui,
