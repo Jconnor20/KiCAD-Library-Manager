@@ -237,11 +237,29 @@ fn l14_health_report() {
 }
 
 #[test]
-fn l15_no_delete_button() {
+fn l15_delete_goes_through_a_review() {
     let _env = setup();
     let mut h = library(SIZES[1]);
+    assert!(h.get_by_label("Delete…").accesskit_node().is_disabled(), "nothing to delete yet");
     click(&mut h, "RP2040");
-    assert!(h.query_all_by_label_contains("Delete").next().is_none(), "Delete is not built yet (W8.1)");
+    let root = h.state().cx.global_root().unwrap();
+    let before = files(&root.dir);
+
+    click(&mut h, "Delete…");
+    assert!(h.query_by_label("Delete 1 part(s)").is_some(), "no confirm dialog");
+    assert!(h.query_by_label("ICs / RP2040").is_some() && h.query_by_label_contains("Remove symbol RP2040").is_some());
+    assert!(missing_glyphs(&h).is_empty());
+    snap(&mut h, "library-delete");
+    click(&mut h, "Cancel");
+    assert_eq!(files(&root.dir), before, "Cancel must change nothing");
+
+    click(&mut h, "Delete…");
+    click(&mut h, "Apply");
+    settle(&mut h);
+    assert!(log_has(&h, "Deleted RP2040"), "nothing logged: {:?}", h.state().cx.log.lines);
+    assert!(!root.has_part("ICs", "RP2040") && root.has_part("ICs", "LM358"));
+    assert!(h.query_by_label("RP2040").is_none(), "row still listed");
+    assert!(!klm_core::snapshot::list(&root).is_empty(), "no snapshot to roll back to");
 }
 
 #[test]

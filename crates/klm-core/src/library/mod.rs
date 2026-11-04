@@ -9,11 +9,13 @@ mod edit;
 mod fields;
 mod import;
 mod relocate;
+mod remove;
 mod status;
 
 pub use attach::{ATTACH_EXTENSIONS, AttachKind};
 pub use edit::{EDIT_FIELDS, Edited, PartEdit};
 pub use fields::{property, set_property};
+pub use remove::{Piece, RemovePlan};
 pub use status::{Check, PartStatus};
 
 use crate::kicad_env;

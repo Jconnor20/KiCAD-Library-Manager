@@ -42,6 +42,7 @@ fn klm(settings: &Path, config: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_klm-cli"))
         .env("KLM_SETTINGS", settings)
         .env("KLM_KICAD_CONFIG", config)
+        .env("KLM_CONFIG_DIR", config) // keeps parts.db out of the real config folder
         .args(args)
         .output()
         .unwrap()
@@ -81,6 +82,34 @@ fn import_then_check_and_relink() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("incomplete"));
     assert!(klm(&settings, &config, &["relink"]).status.success());
     assert!(klm(&settings, &config, &["check"]).status.success());
+}
+
+#[test]
+fn remove_is_a_dry_run_until_yes_and_keeps_shared_files() {
+    let dir = fresh("remove");
+    let (config, lib, settings) = (dir.join("config"), dir.join("lib"), dir.join("settings.json"));
+    let g = lib.to_string_lossy().replace('\\', "/");
+    std::fs::create_dir_all(lib.join("symbols")).unwrap();
+    std::fs::create_dir_all(lib.join("footprints/ICs.pretty")).unwrap();
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(&settings, format!(r#"{{"global_root": {g:?}}}"#)).unwrap();
+    let part = |n: &str| format!(r#"(symbol "{n}" (property "Footprint" "KLM_ICs:FP" (at 0 0 0)) (property "MPN" "{n}" (at 0 0 0)))"#);
+    std::fs::write(lib.join("symbols/ICs.kicad_sym"), format!("(kicad_symbol_lib (version 20251024) {} {})", part("A"), part("B"))).unwrap();
+    std::fs::write(lib.join("footprints/ICs.pretty/FP.kicad_mod"), r#"(footprint "FP")"#).unwrap();
+    let sym = || std::fs::read_to_string(lib.join("symbols/ICs.kicad_sym")).unwrap();
+    let before = sym();
+
+    let out = klm(&settings, &config, &["remove", "A"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success() && text.contains("Remove symbol A") && text.contains("Keep footprint FP") && text.contains("Dry run"), "{text}");
+    assert_eq!(sym(), before, "a dry run writes nothing");
+
+    let out = klm(&settings, &config, &["remove", "A", "--yes"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!sym().contains("\"A\"") && sym().contains("\"B\""));
+    assert!(lib.join("footprints/ICs.pretty/FP.kicad_mod").is_file(), "B still uses the footprint");
+    assert!(!klm(&settings, &config, &["remove", "A", "--yes"]).status.success(), "already gone");
+    assert!(lib.join(".klm-history").is_dir(), "no snapshot");
 }
 
 #[test]
