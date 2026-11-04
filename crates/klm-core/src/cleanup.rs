@@ -260,7 +260,7 @@ fn parse_table(text: &str) -> Result<Vec<Raw>> {
 // ---- resolving and judging entries ----
 
 /// KiCad's user-defined path variables (`environment.vars` in `kicad_common.json`).
-fn user_vars(config: &Path) -> BTreeMap<String, String> {
+pub(crate) fn user_vars(config: &Path) -> BTreeMap<String, String> {
     let v: Option<serde_json::Value> = std::fs::read_to_string(config.join("kicad_common.json")).ok().and_then(|t| serde_json::from_str(strip_bom(&t).0).ok());
     let vars = v.as_ref().and_then(|v| v["environment"]["vars"].as_object());
     vars.into_iter().flatten().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()

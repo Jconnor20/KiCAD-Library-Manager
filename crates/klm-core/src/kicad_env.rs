@@ -80,6 +80,23 @@ fn resolve_cli(over: Option<&Path>) -> PathBuf {
     "kicad-cli".into()
 }
 
+/// Where the installed KiCad keeps the stock library folder a built-in variable names, e.g.
+/// `KICAD10_SYMBOL_DIR` -> `<install>/share/kicad/symbols`. The version digits are ignored: the installed
+/// KiCad's libraries stand in for any version's. None for other variables or when KiCad isn't found.
+pub fn default_var_dir(var: &str) -> Option<PathBuf> {
+    let rest = var.strip_prefix("KICAD")?.trim_start_matches(|c: char| c.is_ascii_digit());
+    let sub = match rest {
+        "_SYMBOL_DIR" => "symbols",
+        "_FOOTPRINT_DIR" => "footprints",
+        "_3DMODEL_DIR" => "3dmodels",
+        _ => return None,
+    };
+    // shortcut: Windows/Linux layout only; macOS keeps these under Contents/SharedSupport.
+    let root = resolve_cli(CLI_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()).as_deref()).parent()?.parent()?.to_path_buf();
+    let dir = root.join("share/kicad").join(sub);
+    dir.is_dir().then_some(dir)
+}
+
 /// Output of `kicad-cli version`, for the Settings "Test" button.
 pub fn kicad_cli_version() -> Result<String> {
     let cli = kicad_cli()?;
@@ -411,6 +428,14 @@ pub fn register_or_queue(table: &Path, nickname: &str, uri: &str) -> Result<bool
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stock_variables_map_to_the_install_when_present() {
+        assert!(default_var_dir("MY_DIR").is_none() && default_var_dir("KICAD10_OTHER").is_none());
+        if resolve_cli(None).is_file() {
+            assert!(default_var_dir("KICAD7_SYMBOL_DIR").is_some_and(|d| d.ends_with("symbols")), "any version number maps to the installed one");
+        }
+    }
+
     use super::*;
 
     #[test]

@@ -80,9 +80,24 @@ fn norm(path: &str, project_dir: &Path) -> String {
     p.to_lowercase()
 }
 
+/// The uri with every `${VAR}` filled in the way KiCad does: `${KIPRJMOD}`, then the environment, then
+/// `kicad_common.json` in `config`, then the installed KiCad's stock folders. None when one can't be
+/// resolved, in which case the library is trusted rather than reported.
+fn expand(uri: &str, project_dir: &Path, config: Option<&Path>) -> Option<String> {
+    let mut s = uri.replace("${KIPRJMOD}", &project_dir.to_string_lossy());
+    let user = config.map(crate::cleanup::user_vars).unwrap_or_default();
+    while let Some(open) = s.find("${") {
+        let len = s[open..].find('}')?;
+        let var = &s[open + 2..open + len];
+        let value = std::env::var(var).ok().or_else(|| user.get(var).cloned()).or_else(|| crate::kicad_env::default_var_dir(var).map(|d| d.to_string_lossy().into_owned()))?;
+        s.replace_range(open..open + len + 1, &value);
+    }
+    Some(s)
+}
+
 /// Placed symbols (`lib_id` "Nick:Name") whose library isn't in any table or doesn't hold the symbol.
 /// One finding per symbol, listing where it is placed. A library whose path uses a KiCad variable
-/// other than `${KIPRJMOD}` can't be read here and is trusted.
+/// that `expand` can't resolve is trusted.
 fn schematic_symbols(project_dir: &Path, global_tables: Option<&Path>, out: &mut Out) {
     let mut sheets = vec![];
     files_under(project_dir, &mut sheets);
@@ -108,10 +123,7 @@ fn schematic_symbols(project_dir: &Path, global_tables: Option<&Path>, out: &mut
         let message = match tables.iter().find(|e| e.0 == nick) {
             None => format!("library {nick} is in neither the project's nor the global sym-lib-table; placed as {}", at.join(", ")),
             Some((_, uri)) => {
-                let path = uri.replace("${KIPRJMOD}", &project_dir.to_string_lossy());
-                if path.contains("${") {
-                    continue;
-                }
+                let Some(path) = expand(uri, project_dir, global_tables) else { continue };
                 let lib = std::fs::read_to_string(&path).ok().and_then(|t| sexpr::parse(&t).ok());
                 if lib.is_some_and(|l| l.children("symbol").any(|s| s.arg(0) == Some(name))) {
                     continue;
@@ -138,8 +150,8 @@ pub fn scan(project_dir: &Path, global_tables: Option<&Path>) -> Vec<Finding> {
         }
         for (name, uri) in table_entries(&project_dir.join(file)) {
             let item = format!("{file}: {name}");
-            let path = uri.replace("${KIPRJMOD}", &project_dir.to_string_lossy());
-            if !path.contains("${") && !path.starts_with("http") && !Path::new(&path).exists() {
+            let path = expand(&uri, project_dir, global_tables);
+            if path.as_ref().is_some_and(|p| !p.starts_with("http") && !Path::new(p).exists()) {
                 out.add(Severity::Error, "library-table", &item, format!("{uri} doesn't exist"));
             }
             if global.contains(&name) {
@@ -423,11 +435,30 @@ mod tests {
         assert_eq!(f.len(), 2, "one per symbol, not per placement: {f:?}");
         assert!(f[0].item == "Nowhere:X" && f[0].message.contains("neither"));
         assert!(f[1].item == "PRJ_Test:Gone" && f[1].message.contains("U2 (a.kicad_sch), U3 (a.kicad_sch)") && !f[1].message.contains("#FLG"), "{f:?}");
-        // A library on an unknown path variable is trusted; a healthy placement is clean.
+        // A library on an unresolvable path variable is trusted; a healthy placement is clean.
         let g = crate::test_dir("health_sch_global");
-        std::fs::write(g.join("sym-lib-table"), "(sym_lib_table (lib (name \"Device\") (type \"KiCad\") (uri \"${KICAD9_SYMBOL_DIR}/Device.kicad_sym\")))").unwrap();
+        std::fs::write(g.join("sym-lib-table"), "(sym_lib_table (lib (name \"Device\") (type \"KiCad\") (uri \"${KLM_TEST_UNSET_VAR}/Device.kicad_sym\")))").unwrap();
         std::fs::write(dir.join("a.kicad_sch"), sch(&[("PRJ_Test:P1", "U1"), ("Device:R", "R1")])).unwrap();
         assert!(!scan(&dir, Some(&g)).iter().any(|f| f.kind == "schematic-symbol"));
+    }
+
+    #[test]
+    fn variable_libraries_are_resolved_and_checked() {
+        let dir = project("health_vars");
+        let g = crate::test_dir("health_vars_global");
+        let libs = g.join("mylibs");
+        std::fs::create_dir_all(&libs).unwrap();
+        std::fs::write(libs.join("Device.kicad_sym"), SYM).unwrap();
+        // The variable comes from kicad_common.json, as KiCad's Configure Paths dialog stores it.
+        std::fs::write(g.join("kicad_common.json"), format!(r#"{{"environment":{{"vars":{{"KLM_TEST_LIBS":"{}"}}}}}}"#, libs.to_string_lossy().replace('\\', "/"))).unwrap();
+        std::fs::write(g.join("sym-lib-table"), "(sym_lib_table (lib (name \"Device\") (type \"KiCad\") (uri \"${KLM_TEST_LIBS}/Device.kicad_sym\")))").unwrap();
+        std::fs::write(dir.join("a.kicad_sch"), sch(&[("Device:P1", "U1"), ("Device:Gone", "U2")])).unwrap();
+        let f: Vec<_> = scan(&dir, Some(&g)).into_iter().filter(|f| f.kind == "schematic-symbol").collect();
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert!(f[0].item == "Device:Gone" && f[0].message.contains("has no symbol"));
+        // A project table pointing at a missing folder under a resolvable variable is reported too.
+        std::fs::write(dir.join("sym-lib-table"), "(sym_lib_table (lib (name \"X\") (type \"KiCad\") (uri \"${KLM_TEST_LIBS}/Nope.kicad_sym\")))").unwrap();
+        assert!(scan(&dir, Some(&g)).iter().any(|f| f.kind == "library-table" && f.message.contains("doesn't exist")));
     }
 
     #[test]
