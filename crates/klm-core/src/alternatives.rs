@@ -9,7 +9,7 @@
 use crate::kicad_env::write_atomic;
 use crate::library::{LibraryRoot, property, sanitize};
 use crate::part::Part;
-use crate::matching::{key, same_mpn};
+use crate::matching::{Kind, key, package_id, package_ids, same_mpn, value_key};
 use crate::sexpr;
 use crate::store::{Alternative, Store};
 use anyhow::{Context, Result, bail};
@@ -40,20 +40,33 @@ impl LibPart {
         Alternative { mpn: self.mpn.clone(), manufacturer: self.manufacturer.clone(), supplier_ids: self.supplier_ids.clone(), role: role.into() }
     }
 
-    /// The footprint name without its library, normalised.
-    // shortcut: vendors name the same package differently (R_0603 vs RESC1608X55N), so those stay apart; add a package parser if users miss groups.
+    /// The footprint's canonical package (`chip:0603`, `sot23`): R_0603 and RESC1608X55N are the same one.
     fn package(&self) -> String {
-        let name = self.footprint.rsplit_once(':').map_or(self.footprint.as_str(), |(_, n)| n);
-        key(name)
+        package_id(&self.footprint)
     }
 
-    /// The `Value` field when it says something other than the part number ("10k", "100nF").
-    fn value_key(&self) -> Option<String> {
+    /// The `Value` field when it says something other than the part number ("10k", "100nF"), trimmed
+    /// and lower-cased with the unit signs dropped. This is what distributors are searched for.
+    fn value_text(&self) -> Option<String> {
         let v = self.value.trim();
         if v.is_empty() || same_mpn(v, &self.mpn) || same_mpn(v, &self.symbol) {
             return None;
         }
         Some(v.replace(['Ω', ' '], "").to_lowercase().replace("ohm", ""))
+    }
+
+    /// What grouping compares: the value as an exact quantity (0.1uF = 100nF = 100n), else its text.
+    /// Voltage and tolerance words are ignored, so a 16 V and a 50 V capacitor can share a suggestion;
+    /// the user confirms every group.
+    fn value_key(&self) -> Option<String> {
+        let text = self.value_text()?;
+        Some(value_key(&self.value, Kind::of_footprint(&self.footprint), false).unwrap_or_else(|| format!("t:{text}")))
+    }
+
+    /// Id of this part for rejected suggestions: the MPN in its package, so the same MPN in another
+    /// package is a different suggestion.
+    pub fn member_id(&self) -> String {
+        format!("{}@{}", key(&self.mpn), self.package())
     }
 }
 
@@ -100,7 +113,7 @@ pub fn suggest(parts: &[LibPart]) -> Vec<Vec<usize>> {
         let pkg = p.package();
         let mut keys = vec![(pkg.clone(), format!("m:{}", key(&p.mpn)))];
         if let Some(v) = p.value_key().filter(|_| !pkg.is_empty()) {
-            keys.push((pkg, format!("v:{v}")));
+            keys.push((pkg, v));
         }
         for k in keys {
             let j = *first.entry(k).or_insert(i);
@@ -118,26 +131,102 @@ pub fn suggest(parts: &[LibPart]) -> Vec<Vec<usize>> {
     out
 }
 
+/// [`suggest`] without the groups the user rejected. A group is hidden when every pair of its members
+/// was rejected, so a part added to it later brings it back.
+pub fn suggest_unrejected(store: &Store, parts: &[LibPart]) -> Result<Vec<Vec<usize>>> {
+    let rejected = store.rejected()?;
+    let mut groups = suggest(parts);
+    groups.retain(|g| {
+        let ids: Vec<String> = g.iter().map(|&i| parts[i].member_id()).collect();
+        !pairs(&ids).iter().all(|p| rejected.contains(p))
+    });
+    Ok(groups)
+}
+
+/// Every pair of ids in a group, each ordered, equal ids included (a plain duplicate pairs with itself).
+fn pairs(ids: &[String]) -> Vec<(String, String)> {
+    let mut out = vec![];
+    for (i, a) in ids.iter().enumerate() {
+        for b in &ids[i + 1..] {
+            out.push(if a <= b { (a.clone(), b.clone()) } else { (b.clone(), a.clone()) });
+        }
+    }
+    out
+}
+
+/// Remembers that `members` were not equivalent, so [`suggest_unrejected`] stops offering them.
+pub fn reject(store: &Store, members: &[&LibPart]) -> Result<()> {
+    let ids: Vec<String> = members.iter().map(|p| p.member_id()).collect();
+    store.add_rejected(&pairs(&ids))
+}
+
+/// Dissolves the confirmed group `mpn` belongs to: removes the `_AltN` fields it wrote (after one
+/// snapshot), forgets the group and rejects it so the scan doesn't suggest it again. Returns the symbols
+/// written; 0 when `mpn` isn't grouped.
+pub fn ungroup(root: &LibraryRoot, store: &Store, mpn: &str) -> Result<usize> {
+    let group = alternatives_of(store, mpn)?;
+    if group.is_empty() {
+        return Ok(0);
+    }
+    // Every member "obsolete" lists no alternatives, so write_back clears the fields; write before forgetting.
+    let cleared: Vec<_> = group.iter().map(|a| Alternative { role: "obsolete".into(), ..a.clone() }).collect();
+    let written = write_back(root, &cleared)?;
+    for (anchor, alt) in store.all_alternatives()? {
+        if group.iter().any(|g| same_mpn(&g.mpn, &alt.mpn)) {
+            store.remove_alternatives(&anchor)?;
+        }
+    }
+    let parts = scan(root);
+    let members: Vec<&LibPart> = parts.iter().filter(|p| group.iter().any(|g| same_mpn(&g.mpn, &p.mpn))).collect();
+    reject(store, &members)?;
+    Ok(written)
+}
+
 /// What to search distributors for to find equivalents of `part`: its value ("10k") when that says more
 /// than the part number, else the MPN.
 pub fn search_query(part: &LibPart) -> String {
-    part.value_key().unwrap_or_else(|| part.mpn.clone())
+    part.value_text().unwrap_or_else(|| part.mpn.clone())
 }
 
 /// The search results that could stand in for `part`: another MPN, the same package where both sides
 /// name one, and the part's value somewhere in the description or MPN when it has one.
-// shortcut: text matching only ("0.1uF" won't match "100nF"); parse units if users miss equivalents.
 pub fn equivalents(part: &LibPart, found: Vec<Part>) -> Vec<Part> {
-    let (pkg, value) = (part.package(), part.value_key());
+    let (pkgs, text) = (package_ids(&part.footprint), part.value_text());
+    let own_key = key(part.footprint.rsplit_once(':').map_or(part.footprint.as_str(), |(_, n)| n));
+    let kind = Kind::of_footprint(&part.footprint);
+    let canon = text.as_ref().and_then(|_| value_key(&part.value, kind, false));
+    let aliased = |ids: &[String]| ids.iter().any(|i| !i.starts_with("raw:"));
     found
         .into_iter()
         .filter(|f| !same_mpn(&f.mpn, &part.mpn))
         .filter(|f| {
+            let fids = package_ids(&f.package);
+            if fids.is_empty() || pkgs.is_empty() {
+                return true;
+            }
+            if aliased(&fids) && aliased(&pkgs) {
+                return fids.iter().any(|i| !i.starts_with("raw:") && pkgs.contains(i));
+            }
             let fp = key(&f.package);
-            fp.is_empty() || pkg.is_empty() || pkg.contains(&fp) || fp.contains(&pkg)
+            fp.is_empty() || own_key.is_empty() || own_key.contains(&fp) || fp.contains(&own_key)
         })
-        .filter(|f| value.as_ref().is_none_or(|v| key(&format!("{} {}", f.description, f.mpn)).replace(['Ω', ' '], "").replace("ohm", "").contains(v.as_str())))
+        .filter(|f| {
+            let Some(v) = &text else { return true };
+            let blob = format!("{} {}", f.description, f.mpn);
+            key(&blob).replace(['Ω', ' '], "").replace("ohm", "").contains(v.as_str()) || canon.as_ref().is_some_and(|c| mentions_value(&blob, c))
+        })
         .collect()
+}
+
+/// Whether some token of `text` ("CAP CER 0.1UF 50V", "RES 10K OHM 1%") is the value `canon`. Bare
+/// numbers never count, so a "0603" in a description is not 603 Ω.
+fn mentions_value(text: &str, canon: &str) -> bool {
+    let toks: Vec<&str> = text.split(|c: char| c.is_whitespace() || matches!(c, ',' | '/' | '(' | ')')).filter(|t| !t.is_empty()).collect();
+    toks.iter().enumerate().any(|(i, t)| {
+        let one = value_key(t, None, false);
+        let two = toks.get(i + 1).and_then(|u| value_key(&format!("{t} {u}"), None, false));
+        one.is_some_and(|v| v == canon) || two.is_some_and(|v| v == canon)
+    })
 }
 
 impl From<&Part> for Alternative {
@@ -358,6 +447,71 @@ mod tests {
         assert_eq!(field("ICs", "LM358", "MPN_Alt1").as_deref(), Some("ERJ-3EKF1002V"));
         assert_eq!(field("ICs", "LM358", "MPN_Alt2"), None);
         assert_eq!(field("ICs", "LM358", "Manufacturer_Alt2"), None);
+    }
+
+    fn lp(sym: &str, mpn: &str, value: &str, fp: &str) -> LibPart {
+        LibPart { category: "X".into(), symbol: sym.into(), mpn: mpn.into(), manufacturer: String::new(), value: value.into(), footprint: fp.into(), supplier_ids: vec![] }
+    }
+
+    #[test]
+    fn groups_across_units_and_package_names() {
+        let parts = [
+            lp("a", "CL10B104KB8NNNC", "0.1uF", "KLM:C_0603_1608Metric"),
+            lp("b", "GRM188R71H104KA93D", "100nF 50V", "KLM:CAPC1608X87N"),
+            lp("c", "OTHER", "100pF", "KLM:C_0603_1608Metric"),
+            lp("d", "RC1", "4k7", "KLM:R_0603"),
+            lp("e", "RC2", "4.7kΩ", "KLM:RESC1608X55N"),
+            lp("f", "RC3", "4R7", "KLM:R_0603"),
+            lp("g", "L1", "4R7", "KLM:L_0603"),
+            lp("h", "L2", "4.7uH", "KLM:INDC1608X95N"),
+            lp("i", "C0201", "100nF", "KLM:C_0201_0603Metric"),
+        ];
+        assert_eq!(suggest(&parts), [vec![0, 1], vec![3, 4], vec![6, 7]], "0201 and 0603, 4.7k and 4.7 ohm, caps and inductors stay apart");
+    }
+
+    #[test]
+    fn rejected_suggestions_stay_gone_until_a_new_member_joins() {
+        let s = Store::open(&crate::test_dir("alt_reject").join("parts.db")).unwrap();
+        let mut parts = vec![lp("a", "A1", "10k", "R_0603"), lp("b", "B1", "10k", "R_0603"), lp("c", "X", "X", "SOT-23"), lp("d", "X", "X", "SOT-23-3")];
+        assert_eq!(suggest_unrejected(&s, &parts).unwrap().len(), 2);
+        reject(&s, &[&parts[0], &parts[1]]).unwrap();
+        reject(&s, &[&parts[2], &parts[3]]).unwrap();
+        assert!(suggest_unrejected(&s, &parts).unwrap().is_empty(), "plain duplicates reject too");
+        parts.push(lp("e", "C1", "10k", "RESC1608X55N"));
+        assert_eq!(suggest_unrejected(&s, &parts).unwrap(), [vec![0, 1, 4]], "a new member brings the group back");
+        parts.push(lp("f", "X", "X", "SOIC-8"));
+        parts.push(lp("g", "X", "X", "SOIC127P600X175-8N"));
+        assert_eq!(suggest_unrejected(&s, &parts).unwrap().len(), 2, "the same MPN in another package is a new suggestion");
+    }
+
+    #[test]
+    fn ungroup_clears_fields_and_remembers() {
+        let root = library("alt_ungroup");
+        let s = Store::open(&crate::test_dir("alt_ungroup_db").join("parts.db")).unwrap();
+        let parts = scan(&root);
+        let by = |sym: &str| parts.iter().find(|p| p.symbol == sym).unwrap();
+        assert_eq!(ungroup(&root, &s, "LM358").unwrap(), 0, "not grouped");
+        let group = confirm(&s, &[by("RC0603FR-0710KL").as_alternative("preferred"), by("ERJ-3EKF1002V").as_alternative("substitute")]).unwrap();
+        write_back(&root, &group).unwrap();
+        assert_eq!(ungroup(&root, &s, "erj3ekf1002v").unwrap(), 3, "both Yageo copies and Panasonic");
+        assert!(alternatives_of(&s, "RC0603FR-0710KL").unwrap().is_empty());
+        let text = std::fs::read_to_string(root.dir.join("symbols/Resistors.kicad_sym")).unwrap();
+        assert!(!text.contains("MPN_Alt"), "all _AltN fields gone");
+        assert!(suggest_unrejected(&s, &parts).unwrap().iter().all(|g| !g.contains(&parts.iter().position(|p| p.symbol == "ERJ-3EKF1002V").unwrap())), "not suggested again");
+    }
+
+    #[test]
+    fn equivalents_read_units_in_descriptions() {
+        let part = lp("a", "CL10B104", "100nF", "KLM:C_0603_1608Metric");
+        let hit = |mpn: &str, desc: &str, pkg: &str| Part { mpn: mpn.into(), description: desc.into(), package: pkg.into(), ..Part::default() };
+        let found = vec![
+            hit("A", "CAP CER 0.1UF 50V X7R", "0603 (1608 Metric)"),
+            hit("B", "CAP CER 0.1UF 50V X7R", "0805 (2012 Metric)"),
+            hit("C", "CAP CER 1UF 50V", "0603"),
+            hit("D", "CAP CER 100 nF", "0603"),
+        ];
+        let mpns: Vec<_> = equivalents(&part, found).into_iter().map(|p| p.mpn).collect();
+        assert_eq!(mpns, ["A", "D"]);
     }
 
     #[test]
