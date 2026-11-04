@@ -18,7 +18,7 @@ const PARTS: usize = 2000;
 /// One sandbox for every test in this binary, set once before any test reads it.
 fn sandbox() -> PathBuf {
     static ONCE: Once = Once::new();
-    let d = std::env::temp_dir().join("klm-scale-sandbox");
+    let d = std::env::temp_dir().join(format!("klm-scale-sandbox-{}", std::process::id()));
     ONCE.call_once(|| {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();

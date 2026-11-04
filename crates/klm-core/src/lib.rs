@@ -31,7 +31,8 @@ pub mod symbols;
 /// Fresh, empty temp folder for a test.
 #[cfg(test)]
 pub(crate) fn test_dir(name: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join("klm-tests").join(name);
+    // Per process, so two test runs at once (two worktrees, two terminals) never wipe each other's folders.
+    let d = std::env::temp_dir().join(format!("klm-tests-{}", std::process::id())).join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
