@@ -32,6 +32,8 @@ pub struct Part {
     pub packaging: String,
     /// Days until a part that is out of stock ships from the factory, when the source says.
     pub lead_time_days: Option<u32>,
+    /// The source's other packagings of this part (DigiKey lists cut tape, reel...), each priced on its own.
+    pub variations: Vec<Part>,
     pub symbol_file: Option<PathBuf>,
     pub footprint_files: Vec<PathBuf>,
     pub model_files: Vec<PathBuf>,

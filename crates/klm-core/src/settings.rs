@@ -29,6 +29,8 @@ pub struct Settings {
     pub cache_ttl_minutes: Option<u64>,
     /// Default shipping region (ISO country, e.g. "DE") for BOM stock and prices; a project can override it.
     pub shipping_region: String,
+    /// Schematic field names the BOM reads part numbers from; a project can override them.
+    pub bom_fields: crate::bom::BomFields,
     /// How many snapshots are kept and when versions are made on their own.
     pub history: History,
 }

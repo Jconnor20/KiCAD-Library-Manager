@@ -98,6 +98,10 @@ impl DigiKey {
         for p in &mut parts {
             p.price_currency = self.locale.1.into();
             p.unit_price = coded_price(&p.unit_price, self.locale.1);
+            for v in &mut p.variations {
+                v.price_currency = self.locale.1.into();
+                v.unit_price = coded_price(&v.unit_price, self.locale.1);
+            }
         }
         Ok(parts)
     }
@@ -127,8 +131,7 @@ fn parse(v: &Value) -> Vec<Part> {
             let param = |name: &str| {
                 p["Parameters"].as_array().into_iter().flatten().find(|x| x["ParameterText"] == name).map(|x| http::text(x, "/ValueText"))
             };
-            let variation = &p["ProductVariations"][0];
-            let mut part = Part {
+            let base = Part {
                 mpn: http::text(p, "/ManufacturerProductNumber"),
                 manufacturer: http::text(p, "/Manufacturer/Name"),
                 description: http::text(p, "/Description/ProductDescription"),
@@ -136,27 +139,37 @@ fn parse(v: &Value) -> Vec<Part> {
                 datasheet_url: http::https(http::text(p, "/DatasheetUrl")),
                 image_url: http::https(http::text(p, "/PhotoUrl")),
                 package: param("Package / Case").or_else(|| param("Supplier Device Package")).unwrap_or_default(),
-                stock: p["QuantityAvailable"].as_u64(),
+                lead_time_days: p["ManufacturerLeadWeeks"].as_str().and_then(|w| w.trim().parse::<u32>().ok()).map(|w| w * 7),
                 ..Part::default()
             };
-            let id = http::text(variation, "/DigiKeyProductNumber");
-            if !id.is_empty() {
-                part.supplier_ids.push(("DigiKey".into(), id));
+            // One entry per packaging (cut tape, reel, Digi-Reel...), each with its own number, stock and prices.
+            let mut all: Vec<Part> = p["ProductVariations"].as_array().into_iter().flatten().map(|v| one_variation(p, v, base.clone())).collect();
+            if all.is_empty() {
+                all.push(one_variation(p, &Value::Null, base));
             }
-            // shortcut: only the first packaging variation is read (may be tape & reel); pick per MOQ if BOMs need it.
-            part.price_breaks = variation["StandardPricing"].as_array().into_iter().flatten().filter_map(|b| Some((b["BreakQuantity"].as_u64()?, b["UnitPrice"].as_f64()?))).collect();
-            part.moq = variation["MinimumOrderQuantity"].as_u64();
-            part.packaging = http::text(variation, "/PackageType/Name");
-            part.pack_qty = variation["StandardPackage"].as_u64();
-            part.lead_time_days = p["ManufacturerLeadWeeks"].as_str().and_then(|w| w.trim().parse::<u32>().ok()).map(|w| w * 7);
-            if let Some(b) = variation["StandardPricing"].get(0) {
-                part.unit_price = format!("${} @{}", b["UnitPrice"], b["BreakQuantity"]);
-            } else if let Some(price) = p["UnitPrice"].as_f64() {
-                part.unit_price = format!("${price} @1");
-            }
+            let mut part = all.remove(0);
+            part.variations = all;
             part
         })
         .collect()
+}
+
+fn one_variation(p: &Value, variation: &Value, mut part: Part) -> Part {
+    part.stock = variation["QuantityAvailableforPackageType"].as_u64().or_else(|| p["QuantityAvailable"].as_u64());
+    let id = http::text(variation, "/DigiKeyProductNumber");
+    if !id.is_empty() {
+        part.supplier_ids.push(("DigiKey".into(), id));
+    }
+    part.price_breaks = variation["StandardPricing"].as_array().into_iter().flatten().filter_map(|b| Some((b["BreakQuantity"].as_u64()?, b["UnitPrice"].as_f64()?))).collect();
+    part.moq = variation["MinimumOrderQuantity"].as_u64();
+    part.packaging = http::text(variation, "/PackageType/Name");
+    part.pack_qty = variation["StandardPackage"].as_u64();
+    if let Some(b) = variation["StandardPricing"].get(0) {
+        part.unit_price = format!("${} @{}", b["UnitPrice"], b["BreakQuantity"]);
+    } else if let Some(price) = p["UnitPrice"].as_f64() {
+        part.unit_price = format!("${price} @1");
+    }
+    part
 }
 
 #[cfg(test)]
@@ -205,13 +218,25 @@ mod tests {
         assert_eq!(p.supplier_ids, vec![("DigiKey".to_string(), "311-10.0KHRCT-ND".to_string())]);
     }
 
+    #[test]
+    fn live_reply_keeps_every_packaging() {
+        let parts = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/digikey_search_LM358.json")).unwrap());
+        let p = parts.iter().find(|p| p.mpn == "LM358DT").unwrap();
+        let all: Vec<_> = std::iter::once(p).chain(&p.variations).map(|v| (v.packaging.as_str(), v.moq, v.stock, v.supplier_ids[0].1.as_str())).collect();
+        assert_eq!(all.len(), 3);
+        assert_eq!((all[1].0, all[1].1, all[1].2), ("Cut Tape (CT)", Some(1), Some(76865)));
+        assert_eq!(all[0].2, Some(75000), "stock is per packaging");
+        assert!(all.iter().all(|a| a.3.starts_with("497-")) && all[0].3 != all[1].3);
+        assert_eq!(p.variations[0].price_breaks[0].0, 1);
+    }
+
     // Recorded from the live API (W6.1).
     #[test]
     fn live_keyword_reply_maps_every_field() {
         let parts = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/digikey_search_LM358.json")).unwrap());
         let p = parts.iter().find(|p| p.mpn == "LM358DT").unwrap();
         assert_eq!((p.manufacturer.as_str(), p.package.as_str(), p.packaging.as_str()), ("STMicroelectronics", "8-SOIC (0.154\", 3.90mm Width)", "Tape & Reel (TR)"));
-        assert_eq!((p.stock, p.moq, p.pack_qty, p.lead_time_days), (Some(76865), Some(2500), Some(2500), Some(30 * 7)));
+        assert_eq!((p.stock, p.moq, p.pack_qty, p.lead_time_days), (Some(75000), Some(2500), Some(2500), Some(30 * 7)));
         assert_eq!(p.price_breaks[..2], [(2500, 0.08508), (5000, 0.08225)]);
         assert_eq!(p.supplier_ids, [("DigiKey".to_string(), "497-1591-2-ND".to_string())]);
         assert!(p.datasheet_url.starts_with("https://www.st.com/") && p.image_url.starts_with("https://mm.digikey.com/"));
