@@ -24,6 +24,7 @@ const USAGE: &str = "usage:
   klm-cli health [--json | --csv] [--project <dir>]
   klm-cli cleanup [--project <dir>]... [--remove sym:<lib>|fp:<lib>]... [--fix sym:<lib>=<path>]... [--move sym:<lib>]... [--apply]
   klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
+  klm-cli remove <part> [--category <c>] [--project <dir>] [--yes]   (dry run unless --yes)
   klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]
   --config <dir> (or KLM_CONFIG_DIR) keeps all of KLM's files, KiCad's library tables and API keys in <dir>";
 
@@ -39,6 +40,7 @@ enum Command {
     Cleanup { projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, moves: Vec<String>, apply: bool },
     Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
     Export { zip: PathBuf, parts: Vec<String>, category: Option<String>, project: Option<PathBuf> },
+    Remove { part: String, category: Option<String>, project: Option<PathBuf>, yes: bool },
 }
 
 fn parse_cleanup(args: &[String]) -> Result<Command> {
@@ -63,7 +65,7 @@ fn parse(args: &[String]) -> Result<Command> {
     if name == "cleanup" {
         return parse_cleanup(rest);
     }
-    let (mut csv, mut json, mut deep, mut overwrite, mut dry_run) = (false, false, false, false, false);
+    let (mut csv, mut json, mut deep, mut overwrite, mut dry_run, mut yes) = (false, false, false, false, false, false);
     let (mut project, mut category, mut to, mut zips) = (None, None, None, vec![]);
     let mut it = rest.iter();
     while let Some(a) = it.next() {
@@ -74,6 +76,7 @@ fn parse(args: &[String]) -> Result<Command> {
             "--deep" => deep = true,
             "--overwrite" => overwrite = true,
             "--dry-run" => dry_run = true,
+            "--yes" => yes = true,
             "--project" => project = Some(PathBuf::from(value(a)?)),
             "--category" => category = Some(value(a)?),
             "--to" => to = Some(value(a)?),
@@ -86,7 +89,13 @@ fn parse(args: &[String]) -> Result<Command> {
     if csv {
         only_for(name == "health" && !json, "--csv")?;
     }
+    only_for(!yes || name == "remove", "--yes")?;
     match name.as_str() {
+        "remove" => {
+            only_for(to.is_none() && !overwrite && !json && !deep && !dry_run, "that option")?;
+            let [part]: [PathBuf; 1] = zips.try_into().map_err(|_| anyhow::anyhow!("remove needs exactly one part (MPN or symbol name)"))?;
+            Ok(Command::Remove { part: part.to_string_lossy().into(), category, project, yes })
+        }
         "health" => {
             only_for(zips.is_empty() && category.is_none() && to.is_none() && !overwrite && !deep && !dry_run, "that argument")?;
             Ok(Command::Health { json, csv, project })
@@ -351,6 +360,42 @@ fn standardise(project: Option<&Path>, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
+/// Shows what deleting `part` (MPN or symbol name) would remove and keep; deletes it only with `yes`.
+fn remove(part: &str, category: Option<&str>, project: Option<&Path>, yes: bool) -> Result<()> {
+    let s = settings()?;
+    let mut found = vec![];
+    for root in roots(&s, project)? {
+        for p in root.list_parts() {
+            if (p.name == part || p.mpn == part) && category.is_none_or(|c| c == p.category) {
+                found.push((root.clone(), p));
+            }
+        }
+    }
+    let [(root, p)] = found.as_slice() else {
+        if found.is_empty() {
+            bail!("no part {part} found");
+        }
+        let all: Vec<_> = found.iter().map(|(r, p)| format!("{} / {}", r.dir.display(), p.category)).collect();
+        bail!("{part} is in more than one place ({}); pass --category or --project to pick one", all.join(", "));
+    };
+    let plan = root.plan_remove(&p.category, &p.name)?;
+    println!("{} / {}:", root.nickname(&p.category), p.name);
+    for l in plan.lines() {
+        println!("  {l}");
+    }
+    if !yes {
+        println!("Dry run: nothing was deleted. Pass --yes to delete.");
+        return Ok(());
+    }
+    root.remove_part(&plan)?;
+    match klm_core::store::Store::default_path().ok_or_else(|| anyhow::anyhow!("no config folder")).and_then(|path| klm_core::store::Store::open(&path)) {
+        Ok(store) => store.forget_part(root, &p.category, &p.name, &plan.mpn)?,
+        Err(e) => eprintln!("warning: the parts database was not updated: {e:#}"),
+    }
+    println!("Deleted {}. A snapshot was taken first; see `klm-cli history` to roll back.", p.name);
+    Ok(())
+}
+
 /// Redraws one part's symbol in the house style (after a snapshot), or with `dry_run` only says what would happen.
 fn restyle(category: &str, part: &str, project: Option<&Path>, dry_run: bool) -> Result<()> {
     let s = settings()?;
@@ -497,6 +542,7 @@ fn main() -> ExitCode {
         Command::Rollback { id, project } => rollback(&id, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Standardise { project, dry_run } => standardise(project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
         Command::Restyle { category, part, project, dry_run } => restyle(&category, &part, project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
+        Command::Remove { part, category, project, yes } => remove(&part, category.as_deref(), project.as_deref(), yes).map(|_| ExitCode::SUCCESS),
         Command::Health { json, csv, project } => health(json, csv, project),
         Command::Cleanup { projects, remove, fix, moves, apply } => cleanup_cmd(projects, remove, fix, moves, apply),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
@@ -553,7 +599,8 @@ mod tests {
     #[test]
     fn rejects_bad_arguments() {
         assert_eq!(parse(&args("restyle Resistors RC0603 --dry-run")).unwrap(), Command::Restyle { category: "Resistors".into(), part: "RC0603".into(), project: None, dry_run: true });
-        for bad in ["", "restyle Resistors", "restyle a b c", "restyle a b --json", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "check --dry-run", "relink --dry-run", "standardise a.zip", "standardise --json"] {
+        assert_eq!(parse(&args("remove LM358 --yes")).unwrap(), Command::Remove { part: "LM358".into(), category: None, project: None, yes: true });
+        for bad in ["remove", "remove a b", "remove a --dry-run", "check --yes", "", "restyle Resistors", "restyle a b c", "restyle a b --json", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "check --dry-run", "relink --dry-run", "standardise a.zip", "standardise --json"] {
             assert!(parse(&args(bad)).is_err(), "{bad:?} should fail");
         }
     }

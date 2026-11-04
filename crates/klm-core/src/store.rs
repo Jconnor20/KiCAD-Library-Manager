@@ -265,6 +265,19 @@ impl Store {
         Ok(out)
     }
 
+    /// Forgets a deleted part: its `parts` row, and, unless another library still has a part with that MPN,
+    /// its alternatives (as the part or as someone's alternative), tags and favourite. Logs the deletion.
+    pub fn forget_part(&self, root: &LibraryRoot, category: &str, symbol_name: &str, mpn: &str) -> Result<()> {
+        let root = root.dir.to_string_lossy();
+        self.db.execute("DELETE FROM parts WHERE root = ?1 AND category = ?2 AND symbol_name = ?3", [root.as_ref(), category, symbol_name])?;
+        let still_there: i64 = self.db.query_row("SELECT COUNT(*) FROM parts WHERE mpn = ?1", [mpn], |r| r.get(0))?;
+        if still_there == 0 {
+            self.db.execute("DELETE FROM alternatives WHERE part_mpn = ?1 OR alt_mpn = ?1", [mpn])?;
+            self.db.execute("DELETE FROM tags WHERE part_mpn = ?1", [mpn])?;
+        }
+        self.log("delete", mpn)
+    }
+
     /// Deletes every alternative of `part_mpn`.
     pub fn remove_alternatives(&self, part_mpn: &str) -> Result<()> {
         self.db.execute("DELETE FROM alternatives WHERE part_mpn = ?1", [part_mpn])?;
@@ -338,6 +351,22 @@ mod tests {
         assert_eq!(s.tags("TP-1").unwrap(), ["favourite"]);
         assert_eq!(s.cache_get("LCSC", "tp-1").unwrap().unwrap().0, "{}");
         assert_eq!(s.history().unwrap()[0].1, "import");
+    }
+
+    #[test]
+    fn forgetting_a_part_drops_its_alternatives_and_tags() {
+        let lib = library("store_forget");
+        let mut s = Store::open(&crate::test_dir("store_forget_db").join("parts.db")).unwrap();
+        s.rebuild_from(std::slice::from_ref(&lib)).unwrap();
+        let alt = |mpn: &str| Alternative { mpn: mpn.into(), manufacturer: String::new(), supplier_ids: vec![], role: "substitute".into() };
+        s.set_alternative("TP-1", &alt("TP-2")).unwrap();
+        s.set_alternative("TP-3", &alt("TP-1")).unwrap();
+        s.set_alternative("TP-3", &alt("TP-4")).unwrap();
+        s.add_tag("TP-1", "x").unwrap();
+        s.forget_part(&lib, "ICs", "TP-1", "TP-1").unwrap();
+        assert!(s.parts().unwrap().is_empty() && s.tags("TP-1").unwrap().is_empty() && s.alternatives("TP-1").unwrap().is_empty());
+        assert_eq!(s.alternatives("TP-3").unwrap().iter().map(|a| a.mpn.as_str()).collect::<Vec<_>>(), ["TP-4"]);
+        assert_eq!(s.history().unwrap()[0].1, "delete");
     }
 
     #[test]

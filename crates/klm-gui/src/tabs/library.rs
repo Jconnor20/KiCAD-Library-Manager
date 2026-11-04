@@ -8,7 +8,7 @@ use eframe::egui::{self, RichText, Sense};
 use klm_core::batch::{self, Op};
 use klm_core::checks::{self, Issue, Severity};
 use klm_core::health::{self, Finding};
-use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartEdit, PartStatus, Scope};
+use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartEdit, PartStatus, RemovePlan, Scope};
 use klm_core::standardise;
 use klm_core::symbols::Restyled;
 use std::collections::{HashMap, HashSet};
@@ -50,6 +50,8 @@ enum Action {
     Alternatives(Option<Key>),
     Standardise(LibraryRoot),
     Export(LibraryRoot),
+    /// Show what deleting these parts would remove and keep.
+    Delete(LibraryRoot, Vec<Key>),
     Health,
 }
 
@@ -59,6 +61,7 @@ enum Dry {
     Standardise(standardise::Plan),
     Restyle { root: LibraryRoot, category: String, name: String, result: Result<Restyled, String> },
     Export { root: LibraryRoot, parts: Vec<Key>, path: String },
+    Delete { root: LibraryRoot, plans: Vec<(Key, Result<RemovePlan, String>)> },
     Scanning(mpsc::Receiver<Vec<Finding>>),
     Health(Vec<Finding>),
 }
@@ -342,6 +345,11 @@ impl LibraryTab {
                 let path = klm_core::settings::sandbox_dir().or_else(dirs::document_dir).or_else(dirs::home_dir).unwrap_or_default().join("klm_export.zip");
                 self.dry = Some(Dry::Export { root, parts: sorted(&self.selected), path: path.display().to_string() });
             }
+            Action::Delete(root, targets) => {
+                // shortcut: planned on the UI thread; reads every symbol library per part, so a huge selection may pause the UI.
+                let plans = targets.into_iter().map(|k| (k.clone(), root.plan_remove(&k.0, &k.1).map_err(|e| format!("{e:#}")))).collect();
+                self.dry = Some(Dry::Delete { root, plans });
+            }
             Action::Health => {
                 if let Some(dir) = cx.project.clone() {
                     let (tx, rx) = mpsc::channel();
@@ -598,6 +606,49 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                             });
                             ctx.request_repaint();
                         });
+                    }
+                    Some(false) => self.dry = None,
+                    None => {}
+                }
+            }
+            Some(Dry::Delete { root, plans }) => {
+                let sections: Vec<_> = plans
+                    .iter()
+                    .map(|((c, n), plan)| (format!("{c} / {n}"), plan.as_ref().map_or_else(|e| vec![format!("can't be deleted: {e}")], |p| p.lines())))
+                    .collect();
+                let can = !plans.is_empty() && plans.iter().all(|(_, p)| p.is_ok());
+                let title = format!("Delete {} part(s)", plans.len());
+                let note = "A snapshot is taken first, so History can roll it back. A footprint, 3D model, datasheet or sim model another part still uses is kept; it goes with the last part that uses it.";
+                match batch_dialog::review(&ctx, "dry_delete", &title, &sections, can, |ui| {
+                    ui.add_space(6.0);
+                    ui.colored_label(ui.visuals().warn_fg_color, "Deleted parts are removed from the library, KLM's database and alternatives.");
+                    ui.weak(note);
+                }) {
+                    Some(true) if cx.busy => cx.log(Level::Warn, "Delete: wait for the running import or download to finish, then press Apply again"),
+                    Some(true) => {
+                        let (root, keys): (LibraryRoot, Vec<Key>) = (root.clone(), plans.iter().map(|(k, _)| k.clone()).collect());
+                        self.dry = None;
+                        let store = klm_core::store::Store::default_path().and_then(|p| klm_core::store::Store::open(&p).ok());
+                        let _snapshot = match klm_core::snapshot::guard(&root, &format!("delete {} part(s)", keys.len())) {
+                            Ok(g) => g,
+                            Err(e) => return cx.log(Level::Error, format!("Nothing deleted: the snapshot could not be taken: {e:#}")),
+                        };
+                        for (c, n) in keys {
+                            // Plan again: deleting the part before this one may have freed a file they shared.
+                            let done = root.plan_remove(&c, &n).and_then(|plan| {
+                                root.remove_part(&plan)?;
+                                store.as_ref().map_or(Ok(()), |s| s.forget_part(&root, &c, &n, &plan.mpn))
+                            });
+                            match done {
+                                Ok(()) => cx.log(Level::Ok, format!("Deleted {n} from {c}")),
+                                Err(e) => cx.log(Level::Error, format!("Could not delete {n}: {e:#}")),
+                            }
+                            self.selected.remove(&(c.clone(), n.clone()));
+                            if self.current.as_ref() == Some(&(c, n)) {
+                                self.current = None;
+                            }
+                        }
+                        self.stale = true;
                     }
                     Some(false) => self.dry = None,
                     None => {}
@@ -916,6 +967,11 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             let export = ui.add_enabled(has_selection, egui::Button::new("Export selected…"));
             if export.on_hover_text("Write the ticked parts, with their footprints and 3D models, to one ZIP").on_disabled_hover_text("Tick parts first").clicked() {
                 action = Action::Export(root.clone());
+            }
+            let targets = if has_selection { sorted(&self.selected) } else { self.current.iter().cloned().collect() };
+            let delete = ui.add_enabled(!targets.is_empty(), egui::Button::new("Delete…"));
+            if delete.on_hover_text("Delete the ticked parts (or the clicked one), with the files no other part uses. Shows what goes first.").on_disabled_hover_text("Click or tick a part first").clicked() {
+                action = Action::Delete(root.clone(), targets);
             }
             if ui.button("Standardise…").on_hover_text("Fix symbols and footprints to the rules in Settings → Standards. Shows what changes first.").clicked() {
                 action = Action::Standardise(root.clone());
