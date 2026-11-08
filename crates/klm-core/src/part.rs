@@ -32,6 +32,10 @@ pub struct Part {
     pub pack_qty: Option<u64>,
     /// Packaging ("Cut Tape", "Reel"), when the source says.
     pub packaging: String,
+    /// JLCPCB assembly library class ("basic", "preferred", "extended"); empty when the source doesn't know (only LCSC does).
+    pub jlc_type: String,
+    /// The distributor's lifecycle text ("Active", "Not For New Designs"); empty when the source doesn't say. See `bom::Lifecycle`.
+    pub lifecycle: String,
     /// Days until a part that is out of stock ships from the factory, when the source says.
     pub lead_time_days: Option<u32>,
     /// The source's other packagings of this part (DigiKey lists cut tape, reel...), each priced on its own.
