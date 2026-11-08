@@ -34,11 +34,13 @@ pub struct Profile {
     pub footprint_styles: BTreeMap<String, FootprintStyle>,
     /// Part information per class key (see `fields`); a class left out uses the built-in default.
     pub classes: BTreeMap<String, ClassInfo>,
+    /// The fabs, IPC class and density the footprint and project checks hold parts to (see `fab_data`).
+    pub fab: crate::fab_data::FabChoice,
 }
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { name: BUILT_IN.into(), version: VERSION, rules: Rules::default(), templates: BTreeMap::new(), footprint_styles: BTreeMap::new(), classes: BTreeMap::new() }
+        Self { name: BUILT_IN.into(), version: VERSION, rules: Rules::default(), templates: BTreeMap::new(), footprint_styles: BTreeMap::new(), classes: BTreeMap::new(), fab: Default::default() }
     }
 }
 
