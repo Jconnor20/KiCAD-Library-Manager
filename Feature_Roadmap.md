@@ -353,7 +353,7 @@ The house standard for each component type, so that whatever the source, every p
 - [x] **W9.4 Profile editors** (M)
   - **Owns:** `gui/tabs/settings/pages.rs`, a new class-editor page
   - Add, remove and reorder fields. Required and visible toggles, template editing with a live preview on a real part, the source mapping, and reset to defaults.
-- Status (2026-11-08): all four merged and the version is 0.7.0. A fix round then made Standardise leave Reference and Value where a house template puts them, made the Visible switch write KiCad's hide flag (a field shown for the first time goes below Value), and made renaming a field update its placeholders. Known limits: ICs still get the automatic box, Value is only rebuilt for R/C/L, the Mouser and Nexar parameter mappings are thin or unverified, the editor's preview uses sample values, and `check_against_source` waits for W10.3. Not yet tried by hand in KiCad.
+- Status (2026-11-08): all four merged and the version is 0.7.0. A fix round then made Standardise leave Reference and Value where a house template puts them, made the Visible switch write KiCad's hide flag (a field shown for the first time goes below Value), and made renaming a field update its placeholders. Known limits: ICs still get the automatic box, Value is only rebuilt for R/C/L, the Mouser and Nexar parameter mappings are thin or unverified, the editor's preview uses sample values, and `check_against_source` is still unused (see below). Not yet tried by hand in KiCad.
 
 ## Wave 10: Manufacturer and IPC checks (W10.0 first, then 3 in parallel, ships 0.8.0)
 
@@ -373,6 +373,33 @@ The house standard for each component type, so that whatever the source, every p
   - **Owns:** `core/bom.rs`, `gui/tabs/alternatives`
   - Per BOM line: JLC basic/extended/preferred, stock, lifecycle and obsolescence. "Swap" opens Alternatives filtered to "available at <assembler>" with the same footprint.
   - Done: `Part`/`Quote` carry `jlc_type` (LCSC `componentLibraryType` + `preferredComponentFlag`) and `lifecycle` (DigiKey `ProductStatus.Status`, Mouser `LifecycleStatus`); `bom::assembly` maps them, JLC stock is the LCSC quote's `stockCount`. Unknown stays unknown. BOM tab has a JLCPCB column, a summary line and Swap (Library tab's Alternatives panel with "Available at JLCPCB" and "Same package" ticked and the search started). No extended-part fee is shown (no source for it). Known limits: Swap needs the part in the library; "not at JLC" is only "out of stock at JLC"; Mouser's lifecycle wording is unverified; cache keys bumped to v3/v4 so old entries refetch.
+- Status (2026-11-08): all four merged and the version is 0.8.0. An Opus review of the two Sonnet packages checked the JLCPCB and Aisler numbers against their pages and fixed three things: the fab table is parsed once, Swap opens the library that has the part (and never searches for a different one), and "Inactive" isn't read as active. Not yet tried by hand or on a real project.
+
+## Not added yet (left out of Waves 9 and 10)
+
+What the plan or the work packages called for and the product doesn't do yet, so nothing is lost when the sessions are archived. Ticking one means it was built later.
+
+**Not built at all**
+- [ ] **Built-in fab and IPC profiles.** Only KLC is built in. The plan also listed "JLC prototype" and "IPC Class 3". A fab choice on any profile now covers most of this, so it may not be needed.
+- [ ] **Naming rules in the profile.** Naming stays in `Settings.rules`, so a shared profile doesn't carry it.
+- [ ] **Project check in the app.** `check-project` and `--all-fabs` are CLI only; the GUI has no button or results view for them.
+- [ ] **Source cross-check.** `checks::check_against_source` (a field disagreeing with the source data for its MPN) is written and tested but nothing calls it, so the Library tab never shows it.
+- [ ] **Symbol template preview** on the Part information page. The page edits fields and text templates only.
+- [ ] **Extended-part setup fee** in the BOM summary. No source gives it.
+
+**Built, with gaps**
+- [ ] **ICs have no house template.** They still get the automatic box.
+- [ ] **Value is rebuilt only for resistors, capacitors and inductors.**
+- [ ] **Parameter autofill:** Mouser fills almost nothing and the Nexar mapping is unverified against a real reply.
+- [ ] **Template preview uses sample values,** not a part from the library.
+- [ ] **Fab data gaps:** values not published by the fab are empty (PCBWay via drill and pad, mask web, edge; OSH Park via pad and silk text height; Eurocircuits track, clearance, drill, ring and via, since its table is only an image; Aisler via pad). The IPC-6012 class 3 ring (0.05 mm) and IPC-7351 courtyard excess come from secondary sources, because the standards are paywalled.
+- [ ] **Footprint fab check approximations:** trapezoid and custom pads count as their size rectangle; inner copper layers, drill offsets and silk text stroke width aren't checked; silk circles and arcs are never flagged; only `fp_line` silk is clipped off pads (rectangles and polygons stay flagged); round courtyards aren't grown.
+- [ ] **Project check gaps:** no rule for mask web (KiCad reads it only from board setup) or courtyard excess; the silk width rule covers silk text only (KiCad has no silk line constraint); sub-sheets kept in subfolders aren't copied, so ERC misses them; KiCad 9 labels our violations "board setup constraints".
+- [ ] **BOM assembly status:** "not stocked by JLC at all" can't be told apart from "LCSC not asked or offline", so only "out of stock at JLC" is flagged; Mouser lifecycle wording is matched loosely (no saved reply); Swap needs the part in the library and finds it with a scan on the UI thread.
+
+**Not checked**
+- [ ] **By hand:** none of Waves 9 and 10 has been tried in the app, in KiCad, or on a real project. In particular, KiCad reading the `(hide yes)` flag Standardise writes, and Standardise on an existing library (it will now list "hidden" for every class field that is shown, and fab fixes once a fab is chosen).
+- [ ] **Flaky timing test:** `requests_are_spaced_by_the_interval_but_cache_hits_are_not` failed once at 308 ms against a 290 ms limit while several builds ran at once. It passed in the full runs since.
 
 ## Wave 11: 3D fit and compliance (2 in parallel, ships 0.9.0)
 
