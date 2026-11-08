@@ -403,9 +403,10 @@ What the plan or the work packages called for and the product doesn't do yet, so
 
 ## Wave 11: 3D fit and compliance (2 in parallel, ships 0.9.0)
 
-- [ ] **W11.1 3D fit check** (M)
+- [x] **W11.1 3D fit check** (M)
   - **Owns:** `core/model3d.rs` (new)
   - An approximate STEP/WRL bounding box from the point data (no new dependency), compared with the fab outline and pads after the model's offset, rotate and scale. The fix centres the model and picks the best 90° rotation. This makes W1.2's "model size roughly matches the outline" true; there is no code for it today.
+  - **Done:** `model3d::check` runs in `check_part` (warning) and `model3d::fix` joins the Standardise plan, for the footprint's first model. The STEP box is every `CARTESIAN_POINT` except axis-placement locations, plus the extent of each `CIRCLE`; units from the header (mm, inch, m). The WRL box is the `point [...]` lists at 0.1 inch per unit. The box goes through scale, then rotate (x, y, z), then the offset, with the model's y flipped against the footprint's. The model must be at least the F/B.Fab outline and at most outline plus pads (leads count), each within 25%; without a fab layer, between half the pads and the pads. Centre more than 0.25 mm off, or a size that only fits after a quarter turn, is flagged; the fix sets the offset x/y (and Z rotation +90°) and only runs when the size fits, so a wrong model is warned about but never moved. Known limits: nested STEP transforms and WRL `Transform` nodes aren't followed; `.stpz`/`.wrz` are skipped (no flate2 dependency); only multiples of 90° are exact for X/Y rotation; rotations follow KiCad's `CalcModelMatrix` (angles negated, so +90° is clockwise from above), not yet confirmed on a real model in the 3D viewer; there is no Settings switch for the fix.
 - [ ] **W11.2 Compliance badge** (M)
   - **Owns:** `core/compliance.rs` (new), `gui/tabs/library.rs`
   - A part is compliant when its Standardise plan is empty and its checks and fab check pass for the active profile. Cached by mtime. Badge column, a "Non-compliant" filter, and a JSON/CSV report through `health`.
