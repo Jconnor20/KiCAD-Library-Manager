@@ -83,6 +83,8 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
                 stock: stock(&http::text(p, "/Availability")),
                 price_breaks: p["PriceBreaks"].as_array().into_iter().flatten().filter_map(|b| Some((b["Quantity"].as_u64()?, parse_price(&http::text(b, "/Price"))?))).collect(),
                 price_currency: http::text(b, "/Currency"),
+                // Mouser documents the field but no sample of it was saved, so the wording is matched loosely.
+                lifecycle: http::text(p, "/LifecycleStatus"),
                 moq: http::text(p, "/Min").parse().ok(),
                 pack_qty: http::text(p, "/Mult").parse().ok(),
                 lead_time_days: lead_days(&http::text(p, "/LeadTime")),

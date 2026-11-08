@@ -357,18 +357,22 @@ The house standard for each component type, so that whatever the source, every p
 
 ## Wave 10: Manufacturer and IPC checks (W10.0 first, then 3 in parallel, ships 0.8.0)
 
-- [ ] **W10.0 Fab data (research first)** (S)
-  - **Owns:** `core/fab_profiles.json` (new)
+- [x] **W10.0 Fab data (research first)** (S)
+  - **Done:** `fab_profiles.json` (standard 2-layer process, checked 2026-11-08), `fab_data::{fabs, limits}`, Manufacturer group on Settings › Footprints. Unpublished, left null: PCBWay via drill/pad, mask web, edge; OSH Park via pad, silk text height; Eurocircuits track, clearance, drill, ring, via (class table is only an image); Aisler via pad. IPC-6012 class 3 ring 0.05 mm is from secondary sources (the standard is paywalled).
+  - **Owns:** `core/fab_profiles.json` (new), `core/fab_data.rs` (contract laid first: `FabChoice` in the profile, `FabLimits`, `fabs()`, `limits()`), a Manufacturer group in Settings › Standards
   - JLCPCB, PCBWay, OSH Park, Eurocircuits and Aisler minimums: trace and space, drill, annular ring, via, silk, mask web and edge clearance. Each fab has its source URL and the date checked. Adds IPC-6012 class 1/2/3 and IPC-7351 density A/B/C tables. Choosing several fabs means the strictest value wins.
-- [ ] **W10.1 Library footprint fab check** (M)
+- [x] **W10.1 Library footprint fab check** (M)
   - **Owns:** `core/fab.rs` (new)
   - Checks pad gap, drill, annular ring, silk width and height, silk on pads, and courtyard excess. Safe fixes (silk width, clip silk, grow courtyard) join the Standardise plan; everything else is flagged.
-- [ ] **W10.2 Whole-project check** (M) ⚑
+  - **Done:** `fab::check_footprint` runs in `check_part` (warnings) when the active profile names a fab. Pad gaps are exact for rect, roundrect, circle and oval at any rotation; trapezoid/custom pads count as their size rectangle, inner layers are ignored. Silk-on-pad uses the pad box plus mask web (0.1 mm default) and only straight silk; only `fp_line` is clipped. The courtyard grows by moving its outermost points to the 0.01 mm grid; round courtyards are not grown. Fixes run only with a fab chosen, so default profiles don't rewrite every footprint.
+- [x] **W10.2 Whole-project check** (M) ⚑
   - **Owns:** `core/project_check.rs` (new), `klm-cli check-project`
   - Writes a `.kicad_dru` and board minimums from the profile, then runs `kicad-cli pcb drc` and `sch erc` (JSON) and maps the results into health findings. In "All fabs" mode it lists which fabs pass.
-- [ ] **W10.3 Align parts to the fab** (M)
+  - **Done:** `project_check::{dru, check, check_all}` run KiCad's DRC/ERC on a temp copy (the project's own `.kicad_dru` is kept and the fab rules appended; `${KIPRJMOD}` in its lib tables points back at the real folder). Rule syntax checked with kicad-cli 9.0 and 10.0.7, which silently drop a rules file they can't parse. No rule for the mask web (board setup only) or courtyard excess; sub-sheets in subfolders aren't copied.
+- [x] **W10.3 Align parts to the fab** (M)
   - **Owns:** `core/bom.rs`, `gui/tabs/alternatives`
   - Per BOM line: JLC basic/extended/preferred, stock, lifecycle and obsolescence. "Swap" opens Alternatives filtered to "available at <assembler>" with the same footprint.
+  - Done: `Part`/`Quote` carry `jlc_type` (LCSC `componentLibraryType` + `preferredComponentFlag`) and `lifecycle` (DigiKey `ProductStatus.Status`, Mouser `LifecycleStatus`); `bom::assembly` maps them, JLC stock is the LCSC quote's `stockCount`. Unknown stays unknown. BOM tab has a JLCPCB column, a summary line and Swap (Library tab's Alternatives panel with "Available at JLCPCB" and "Same package" ticked and the search started). No extended-part fee is shown (no source for it). Known limits: Swap needs the part in the library; "not at JLC" is only "out of stock at JLC"; Mouser's lifecycle wording is unverified; cache keys bumped to v3/v4 so old entries refetch.
 
 ## Wave 11: 3D fit and compliance (2 in parallel, ships 0.9.0)
 

@@ -1,0 +1,83 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-11-08T16:20:27",
+    "ignored_checks": [
+        {
+            "description": "Global label only appears once in the schematic",
+            "key": "single_global_label"
+        },
+        {
+            "description": "Four connection points are joined together",
+            "key": "four_way_junction"
+        },
+        {
+            "description": "SPICE model issue",
+            "key": "simulation_model_issue"
+        },
+        {
+            "description": "Assigned footprint doesn't match footprint filters",
+            "key": "footprint_filter"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning",
+        "exclusion"
+    ],
+    "kicad_version": "10.0.7",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/0b1c2d3e-0000-4000-8000-000000000001",
+            "violations": [
+                {
+                    "description": "Label not connected",
+                    "items": [
+                        {
+                            "description": "Label 'DANGLING'",
+                            "pos": {
+                                "x": 50.8,
+                                "y": 50.8
+                            },
+                            "uuid": "0b1c2d3e-0000-4000-8000-000000000003"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "label_dangling"
+                },
+                {
+                    "description": "Unconnected wire endpoint",
+                    "items": [
+                        {
+                            "description": "Horizontal Wire, length 10.16 mm",
+                            "pos": {
+                                "x": 50.8,
+                                "y": 50.8
+                            },
+                            "uuid": "0b1c2d3e-0000-4000-8000-000000000002"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "unconnected_wire_endpoint"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Footprints'",
+                    "items": [
+                        {
+                            "description": "Symbol P3 [CONN_2]",
+                            "pos": {
+                                "x": 41.91,
+                                "y": 53.34
+                            },
+                            "uuid": "00000000-0000-0000-0000-00004549f4a5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                }
+            ]
+        }
+    ],
+    "source": "mini.kicad_sch"
+}

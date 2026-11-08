@@ -23,6 +23,8 @@ pub enum Msg {
     Refresh,
     /// Filter the list to this MPN, so another tab can land on the part.
     Show(String),
+    /// Open Alternatives on this symbol, filtered to what JLCPCB stocks in the same package (the BOM's Swap).
+    Swap(String),
     /// Apply `edit` to each (category, name) in the `scope` library.
     Edit { scope: Scope, targets: Vec<(String, String)>, edit: PartEdit },
     /// Copy a global part into the project library; `overwrite` replaces an existing copy.
@@ -422,6 +424,14 @@ impl LibraryTab {
     pub fn handle(&mut self, msg: Msg, cx: &mut AppCtx) {
         match msg {
             Msg::Refresh => self.stale = true,
+            Msg::Swap(symbol) => {
+                // The BOM matches against both libraries, so open the one that has the symbol.
+                // shortcut: scans on the UI thread, one click; move to the panel's worker if large libraries stall it.
+                let has = |r: &LibraryRoot| klm_core::alternatives::scan(r).iter().any(|p| p.symbol == symbol);
+                if let Some(root) = [cx.project_root(), cx.global_root()].into_iter().flatten().find(has) {
+                    self.alternatives = Some(AlternativesPanel::new(&root, &cx.ctx, Some((String::new(), symbol))).for_swap());
+                }
+            }
             Msg::Show(mpn) => (self.filter, self.category, self.maker, self.status) = (mpn, String::new(), String::new(), Filter::All),
             Msg::DatasheetsDone(results) => {
                 self.downloading = false;

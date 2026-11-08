@@ -123,7 +123,7 @@ fn category_chain(cat: &Value) -> String {
     names.join(" ")
 }
 
-fn parse(v: &Value) -> Vec<Part> {
+pub(crate) fn parse(v: &Value) -> Vec<Part> {
     let Some(products) = v["Products"].as_array() else { return vec![] };
     products
         .iter()
@@ -141,6 +141,7 @@ fn parse(v: &Value) -> Vec<Part> {
                 datasheet_url: http::https(http::text(p, "/DatasheetUrl")),
                 image_url: http::https(http::text(p, "/PhotoUrl")),
                 package: param("Package / Case").or_else(|| param("Supplier Device Package")).unwrap_or_default(),
+                lifecycle: http::text(p, "/ProductStatus/Status"),
                 lead_time_days: p["ManufacturerLeadWeeks"].as_str().and_then(|w| w.trim().parse::<u32>().ok()).map(|w| w * 7),
                 ..Part::default()
             };

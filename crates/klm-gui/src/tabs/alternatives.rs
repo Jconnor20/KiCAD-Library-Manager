@@ -1,6 +1,6 @@
 use eframe::egui;
 use crate::{AppCtx, Msg as AppMsg, new_work_dir};
-use klm_core::alternatives::{self, LibPart, ROLES};
+use klm_core::alternatives::{self, Filters, LibPart, ROLES};
 use klm_core::library::LibraryRoot;
 use klm_core::part::Part;
 use klm_core::sources::combine;
@@ -23,11 +23,14 @@ pub struct AlternativesPanel {
     base: usize,
     /// (category, symbol) to make `base` once the scan arrives.
     open_on: Option<(String, String)>,
-    /// Distributor results for `base` as (source index, part); the search runs on a worker.
+    /// Distributor results for `base` as (source index, part), unfiltered; the search runs on a worker.
     online: Vec<(usize, Part)>,
     searching: Option<Receiver<Vec<(usize, Part)>>>,
     /// Hand-entered alternate: MPN, manufacturer, LCSC, DigiKey, Mouser.
     manual: [String; 5],
+    pub filters: Filters,
+    /// Search as soon as the scan is in (set when opened from the BOM's Swap).
+    auto_search: bool,
 }
 
 impl AlternativesPanel {
@@ -64,7 +67,13 @@ impl AlternativesPanel {
             let _ = tx.send((parts, groups));
             ctx.request_repaint();
         });
-        Self { root: root.clone(), parts: Vec::new(), groups: Vec::new(), rx: Some(rx), base: 0, open_on, online: Vec::new(), searching: None, manual: Default::default() }
+        Self { root: root.clone(), parts: Vec::new(), groups: Vec::new(), rx: Some(rx), base: 0, open_on, online: Vec::new(), searching: None, manual: Default::default(), filters: Filters::default(), auto_search: false }
+    }
+
+    /// For a BOM line that needs another part: online results narrowed to JLCPCB stock and the same package, searched at once.
+    pub fn for_swap(mut self) -> Self {
+        (self.filters, self.auto_search) = (Filters { same_package: true, at_jlcpcb: true }, true);
+        self
     }
 
     /// Equivalents from distributors, and alternates typed in by hand, for one library part.
@@ -85,15 +94,15 @@ impl AlternativesPanel {
         });
         ui.horizontal(|ui| {
             let can = self.searching.is_none() && !cx.sources.is_empty();
-            if ui.add_enabled(can, egui::Button::new("Find equivalents online")).on_disabled_hover_text("Enable a distributor in Settings").clicked() {
+            let auto = can && std::mem::take(&mut self.auto_search);
+            if ui.add_enabled(can, egui::Button::new("Find equivalents online")).on_disabled_hover_text("Enable a distributor in Settings").clicked() || auto {
                 let (tx, rx) = channel();
-                let (sources, ctx, query, base) = (cx.sources.clone(), cx.ctx.clone(), alternatives::search_query(&base), base.clone());
+                let (sources, ctx, query) = (cx.sources.clone(), cx.ctx.clone(), alternatives::search_query(&base));
                 std::thread::spawn(move || {
                     let mut found = vec![];
                     for (i, src) in sources.iter().enumerate() {
                         // A source that fails just contributes nothing.
-                        let hits = src.search(&query).unwrap_or_default();
-                        found.extend(alternatives::equivalents(&base, hits).into_iter().map(|p| (i, p)));
+                        found.extend(src.search(&query).unwrap_or_default().into_iter().map(|p| (i, p)));
                     }
                     let _ = tx.send(found);
                     ctx.request_repaint();
@@ -103,13 +112,25 @@ impl AlternativesPanel {
             if self.searching.is_some() {
                 ui.spinner();
             }
+            ui.checkbox(&mut self.filters.same_package, "Same package").on_hover_text("Only parts whose package matches this part's footprint");
+            ui.checkbox(&mut self.filters.at_jlcpcb, "Available at JLCPCB").on_hover_text("Only parts JLCPCB lists with stock (LCSC's search; needs LCSC enabled), basic ones first");
         });
+        if self.filters.at_jlcpcb && !cx.sources.iter().any(|s| s.name() == "LCSC") {
+            ui.weak("Enable LCSC in Settings: it is the source that knows what JLCPCB stocks.");
+        }
         let mut add = None;
+        let shown: Vec<(usize, Part)> = (0..cx.sources.len())
+            .flat_map(|i| {
+                let hits = self.online.iter().filter(|(s, _)| *s == i).map(|(_, p)| p.clone()).collect();
+                alternatives::equivalents_filtered(&base, hits, &self.filters).into_iter().map(move |p| (i, p))
+            })
+            .collect();
         egui::Grid::new("alt_online").striped(true).show(ui, |ui| {
-            for (n, (src, p)) in self.online.iter().enumerate() {
+            for (n, (src, p)) in shown.iter().enumerate() {
                 ui.label(&p.mpn);
                 ui.label(&p.manufacturer);
                 ui.label(&p.package);
+                ui.label(if p.jlc_type.is_empty() { String::new() } else { format!("JLC {}", p.jlc_type) });
                 ui.label(cx.sources.get(*src).map_or("", |s| s.name()));
                 if ui.button("Add as alternate").clicked() {
                     add = Some((n, false));
@@ -121,7 +142,7 @@ impl AlternativesPanel {
             }
         });
         if let Some((n, cad)) = add {
-            let (src, part) = self.online[n].clone();
+            let (src, part) = shown[n].clone();
             self.add(cx, &base, Alternative::from(&part), Some((src, part)).filter(|_| cad));
         }
         ui.horizontal(|ui| {
@@ -175,7 +196,10 @@ impl AlternativesPanel {
                 match rx.try_recv() {
                     Ok((parts, groups)) => {
                         let wanted = self.open_on.take();
-                        self.base = wanted.and_then(|(c, s)| parts.iter().position(|p| p.category == c && p.symbol == s)).unwrap_or(0);
+                        let found = wanted.and_then(|(c, s)| parts.iter().position(|p| (c.is_empty() || p.category == c) && p.symbol == s));
+                        // Never search straight away for a part other than the one asked for.
+                        self.auto_search &= found.is_some();
+                        self.base = found.unwrap_or(0);
                         (self.parts, self.groups, self.rx) = (parts, groups, None);
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {

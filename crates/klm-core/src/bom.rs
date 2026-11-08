@@ -287,6 +287,9 @@ pub struct Quote {
     pub packaging: String,
     /// Factory lead time; used only when the stock doesn't cover the order.
     pub lead_days: Option<u32>,
+    /// JLCPCB library class and lifecycle as the source reported them (empty = the source doesn't say).
+    pub jlc_type: String,
+    pub lifecycle: String,
     /// From a cache entry older than its lifetime, used because the network failed.
     pub stale: bool,
 }
@@ -321,6 +324,8 @@ pub fn quote_of(source: &str, p: &Part) -> Quote {
         multiple: if source == "Mouser" { p.pack_qty.unwrap_or(1).max(1) } else { 1 },
         packaging: p.packaging.clone(),
         lead_days: p.lead_time_days,
+        jlc_type: p.jlc_type.clone(),
+        lifecycle: p.lifecycle.clone(),
         stale: false,
         breaks,
     }
@@ -400,10 +405,10 @@ pub fn distributors(settings: &crate::settings::Settings, region: &str) -> (Vec<
         let built: Option<(String, Box<dyn Source>)> = if name == "DigiKey" {
             sources::digikey::DigiKey::from_credentials().map(|d| {
                 let (site, cur) = sources::digikey::locale(region);
-                (format!("DigiKey@{site}/{cur}/v3"), Box::new(d.with_region(region)) as Box<dyn Source>)
+                (format!("DigiKey@{site}/{cur}/v4"), Box::new(d.with_region(region)) as Box<dyn Source>)
             })
         } else {
-            sources::build(name).map(|s| (format!("{name}/v2"), s))
+            sources::build(name).map(|s| (format!("{name}/v3"), s))
         };
         match built {
             Some((cache_name, source)) => out.push(Distributor { cache_name, source, interval }),
@@ -479,6 +484,141 @@ pub fn fetch_quotes(lines: &[Line], dist: &[Distributor], store: Option<&Store>,
     (quotes, problems)
 }
 
+// ---- assembly status (JLCPCB) ----
+
+/// JLCPCB's assembly library classes. Preferred parts are extended ones JLC also flags as preferred.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JlcType {
+    Basic,
+    Preferred,
+    Extended,
+}
+
+/// Worst last, so `max` over a line's quotes is the one to warn about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Lifecycle {
+    Active,
+    Nrnd,
+    LastTimeBuy,
+    Obsolete,
+}
+
+impl Lifecycle {
+    /// Reads a distributor's status text. `None` for wording that isn't a manufacturer lifecycle:
+    /// DigiKey's "Discontinued at Digi-Key" only says DigiKey stopped selling it.
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim().to_lowercase();
+        // shortcut: Mouser's exact values were never saved to a fixture, so these are matched by substring; upgrade when a live reply is captured.
+        match s.as_str() {
+            _ if s.contains("digi-key") => None,
+            _ if s.contains("last time") => Some(Self::LastTimeBuy),
+            _ if s.contains("not for new") || s.contains("not recommended") || s.contains("nrnd") => Some(Self::Nrnd),
+            _ if s.contains("obsolete") || s.contains("end of life") || s.contains("discontinued") => Some(Self::Obsolete),
+            _ if s.contains("inactive") => None,
+            _ if s.contains("active") || s.contains("new product") => Some(Self::Active),
+            _ => None,
+        }
+    }
+}
+
+/// What the sources say about building a line at JLCPCB; `None` means unknown, never "no".
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Assembly {
+    pub jlc: Option<JlcType>,
+    /// Parts JLC holds (from the LCSC quote); `Some(0)` is out of stock.
+    pub jlc_stock: Option<u64>,
+    pub lifecycle: Option<Lifecycle>,
+}
+
+impl Assembly {
+    pub fn out_of_stock(&self) -> bool {
+        self.jlc_stock == Some(0)
+    }
+
+    /// Worth a Swap: out of stock at JLC, or past active in its lifecycle.
+    pub fn flagged(&self) -> bool {
+        self.out_of_stock() || self.lifecycle.is_some_and(|l| l != Lifecycle::Active)
+    }
+}
+
+pub fn assembly(quotes: &[Quote]) -> Assembly {
+    let lcsc = || quotes.iter().filter(|q| q.source == "LCSC");
+    let jlc = lcsc().find_map(|q| match q.jlc_type.as_str() {
+        "basic" => Some(JlcType::Basic),
+        "preferred" => Some(JlcType::Preferred),
+        "extended" => Some(JlcType::Extended),
+        _ => None,
+    });
+    Assembly { jlc, jlc_stock: lcsc().filter_map(|q| q.stock).max(), lifecycle: quotes.iter().filter_map(|q| Lifecycle::parse(&q.lifecycle)).max() }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AssemblySummary {
+    pub basic: usize,
+    pub preferred: usize,
+    pub extended: usize,
+    pub out_of_stock: usize,
+    /// Lines with no JLC class: not looked up, or not found at JLC.
+    pub unknown: usize,
+    pub obsolete: usize,
+    pub nrnd: usize,
+}
+
+pub fn assembly_summary(rows: &[Row]) -> AssemblySummary {
+    let mut s = AssemblySummary::default();
+    for a in rows.iter().map(|r| &r.assembly) {
+        match a.jlc {
+            Some(JlcType::Basic) => s.basic += 1,
+            Some(JlcType::Preferred) => s.preferred += 1,
+            Some(JlcType::Extended) => s.extended += 1,
+            None => s.unknown += 1,
+        }
+        s.out_of_stock += a.out_of_stock() as usize;
+        match a.lifecycle {
+            Some(Lifecycle::Obsolete | Lifecycle::LastTimeBuy) => s.obsolete += 1,
+            Some(Lifecycle::Nrnd) => s.nrnd += 1,
+            _ => {}
+        }
+    }
+    s
+}
+
+impl AssemblySummary {
+    /// "12 basic, 3 extended, 1 out of stock at JLC, 1 obsolete"; zero counts are left out. Obsolete
+    /// includes last-time-buy. No setup fee is quoted: JLC's changes and the app has no source for it.
+    pub fn text(&self) -> String {
+        let parts = [
+            (self.basic, "basic"),
+            (self.preferred, "preferred"),
+            (self.extended, "extended"),
+            (self.out_of_stock, "out of stock at JLC"),
+            (self.obsolete, "obsolete or last-time-buy"),
+            (self.nrnd, "NRND"),
+            (self.unknown, "not known at JLC"),
+        ];
+        parts.iter().filter(|p| p.0 > 0).map(|(n, w)| format!("{n} {w}")).collect::<Vec<_>>().join(", ")
+    }
+}
+
+pub fn jlc_label(a: &Assembly) -> &'static str {
+    match a.jlc {
+        Some(JlcType::Basic) => "basic",
+        Some(JlcType::Preferred) => "preferred",
+        Some(JlcType::Extended) => "extended",
+        None => "",
+    }
+}
+
+pub fn lifecycle_label(l: Option<Lifecycle>) -> &'static str {
+    match l {
+        Some(Lifecycle::Active) => "active",
+        Some(Lifecycle::Nrnd) => "NRND",
+        Some(Lifecycle::LastTimeBuy) => "last-time buy",
+        Some(Lifecycle::Obsolete) => "obsolete",
+        None => "",
+    }
+}
+
 // ---- table, totals, CSV ----
 
 #[derive(Clone, Debug)]
@@ -488,6 +628,7 @@ pub struct Row {
     pub alternatives: Vec<Alternative>,
     pub quotes: Vec<Quote>,
     pub best: Option<Best>,
+    pub assembly: Assembly,
 }
 
 pub fn build_rows(lines: Vec<Line>, lib: &[LibPart], store: Option<&Store>, quotes: Vec<Vec<Quote>>, boards: u64, target: &str, rates: Option<&Rates>) -> Vec<Row> {
@@ -503,6 +644,7 @@ pub fn build_rows(lines: Vec<Line>, lib: &[LibPart], store: Option<&Store>, quot
                 .filter(|a| !same_mpn(&a.mpn, &line.mpn))
                 .collect(),
             best: best(&quotes, line.qty() * boards, target, rates),
+            assembly: assembly(&quotes),
             line,
             quotes,
         })
@@ -556,7 +698,7 @@ pub fn library_label(s: &Status) -> String {
 }
 
 pub fn to_csv(rows: &[Row], boards: u64, target: &str) -> String {
-    let mut out = format!("Refs,Qty,Value,Footprint,MPN,Manufacturer,Library,Alternatives,Source,Supplier no.,Stock,Unit price ({target}),Extended ({target}),Quantity bought,Lead time (days)\n");
+    let mut out = format!("Refs,Qty,Value,Footprint,MPN,Manufacturer,Library,Alternatives,Source,Supplier no.,Stock,Unit price ({target}),Extended ({target}),Quantity bought,Lead time (days),JLC class,JLC stock,Lifecycle\n");
     for r in rows {
         let (src, id, stock, unit, ext, bought, lead) = match &r.best {
             Some(b) => {
@@ -590,6 +732,9 @@ pub fn to_csv(rows: &[Row], boards: u64, target: &str) -> String {
             ext,
             bought,
             lead,
+            jlc_label(&r.assembly).into(),
+            r.assembly.jlc_stock.map_or(String::new(), |s| s.to_string()),
+            lifecycle_label(r.assembly.lifecycle).into(),
         ];
         out.push_str(&cells.join(","));
         out.push('\n');
@@ -840,5 +985,65 @@ C1,100n,C_0603,,,,,,\n";
         assert_eq!(p.region("DE"), "DE");
         p.region = "US".into();
         assert_eq!(p.region("DE"), "US");
+    }
+
+    fn parts_of(json: &str, f: fn(&serde_json::Value, &str) -> Vec<Part>, q: &str) -> Vec<Part> {
+        f(&serde_json::from_str(json).unwrap(), q)
+    }
+
+    #[test]
+    fn assembly_from_saved_lcsc_and_digikey_replies() {
+        let lcsc = parts_of(include_str!("../tests/fixtures/live/jlcpcb_search_LM358.json"), |b, q| sources::lcsc::parse_search(b, q), "LM358");
+        let quote_for = |id: &str| quote_of("LCSC", lcsc.iter().find(|p| p.supplier_ids[0].1 == id).unwrap());
+        // C5213: extended with 4 in stock. The same search has a basic part too.
+        let a = assembly(&[quote_for("C5213")]);
+        assert_eq!((a.jlc, a.jlc_stock, a.lifecycle), (Some(JlcType::Extended), Some(4), None));
+        let basic = lcsc.iter().find(|p| p.jlc_type == "basic").expect("the reply has a basic part");
+        assert_eq!(assembly(&[quote_of("LCSC", basic)]).jlc, Some(JlcType::Basic));
+        // Out of stock and preferred come from the same two fields.
+        let mut oos = quote_for("C5213");
+        (oos.stock, oos.jlc_type) = (Some(0), "preferred".into());
+        let a = assembly(&[oos]);
+        assert!(a.out_of_stock() && a.flagged() && a.jlc == Some(JlcType::Preferred));
+
+        let dk = parts_of(include_str!("../tests/fixtures/live/digikey_search_LM358.json"), |b, _| sources::digikey::parse(b), "");
+        assert_eq!(assembly(&[quote_of("DigiKey", &dk[0])]).lifecycle, Some(Lifecycle::Active));
+        // DigiKey's lifecycle text, set the way its reply would for the other states.
+        let status = |s: &str| assembly(&[Quote { source: "DigiKey".into(), lifecycle: s.into(), ..Quote::default() }]).lifecycle;
+        assert_eq!(status("Obsolete"), Some(Lifecycle::Obsolete));
+        assert_eq!(status("Not For New Designs"), Some(Lifecycle::Nrnd));
+        assert_eq!(status("Last Time Buy"), Some(Lifecycle::LastTimeBuy));
+        assert_eq!(status("Discontinued at Digi-Key"), None, "DigiKey dropping it says nothing about the maker");
+        assert_eq!(status(""), None);
+        assert_eq!(status("Inactive"), None, "not read as active");
+        // No source knows: unknown, and not flagged.
+        let none = assembly(&[]);
+        assert_eq!((none.jlc, none.jlc_stock, none.lifecycle, none.flagged()), (None, None, None, false));
+        // The worst lifecycle across sources wins.
+        let q = |s: &str| Quote { lifecycle: s.into(), ..Quote::default() };
+        assert_eq!(assembly(&[q("Active"), q("Obsolete")]).lifecycle, Some(Lifecycle::Obsolete));
+    }
+
+    #[test]
+    fn assembly_summary_counts_and_text() {
+        let row = |jlc, stock, lifecycle| Row {
+            line: Line::default(),
+            status: Status::NoPartNumber,
+            alternatives: vec![],
+            quotes: vec![],
+            best: None,
+            assembly: Assembly { jlc, jlc_stock: stock, lifecycle },
+        };
+        let rows = [
+            row(Some(JlcType::Basic), Some(100), Some(Lifecycle::Active)),
+            row(Some(JlcType::Basic), Some(5), None),
+            row(Some(JlcType::Extended), Some(0), Some(Lifecycle::Obsolete)),
+            row(Some(JlcType::Preferred), Some(9), Some(Lifecycle::Nrnd)),
+            row(None, None, Some(Lifecycle::LastTimeBuy)),
+        ];
+        let s = assembly_summary(&rows);
+        assert_eq!((s.basic, s.preferred, s.extended, s.out_of_stock, s.unknown, s.obsolete, s.nrnd), (2, 1, 1, 1, 1, 2, 1));
+        assert_eq!(s.text(), "2 basic, 1 preferred, 1 extended, 1 out of stock at JLC, 2 obsolete or last-time-buy, 1 NRND, 1 not known at JLC");
+        assert_eq!(assembly_summary(&[]).text(), "");
     }
 }

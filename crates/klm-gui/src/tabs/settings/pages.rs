@@ -229,6 +229,37 @@ impl SettingsTab {
                 if let Some(e) = group(ui, "Standard profile", |ui| standards::profile(ui, d)) {
                     cmd = Some(Cmd::Log(Level::Error, e));
                 }
+                if matches!(self.section, Section::Footprints) {
+                    group(ui, "Manufacturer", |ui| {
+                        let fab = &mut d.standard.fab;
+                        ui.weak("Footprints and boards are held to these. With several fabs ticked the strictest value of each limit applies.");
+                        for f in klm_core::fab_data::fabs() {
+                            let mut on = fab.fabs.contains(&f.id);
+                            if ui.checkbox(&mut on, &f.name).on_hover_text(format!("{}\nchecked {}", f.source, f.checked)).changed() {
+                                fab.fabs.retain(|i| *i != f.id);
+                                if on {
+                                    fab.fabs.push(f.id);
+                                }
+                            }
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label("IPC class");
+                            for c in 1..=3u8 {
+                                ui.selectable_value(&mut fab.ipc_class, c, c.to_string());
+                            }
+                            ui.label("Density");
+                            for c in ['A', 'B', 'C'] {
+                                ui.selectable_value(&mut fab.density, c, c.to_string());
+                            }
+                        });
+                        let l = klm_core::fab_data::limits(fab);
+                        let mm = |v: Option<f64>| v.map_or("-".into(), |v| format!("{v:.3}"));
+                        ui.weak(format!(
+                            "Track {} · gap {} · drill {} · ring {} · via {}/{} · mask web {} · edge {} · courtyard +{} (mm)",
+                            mm(l.min_track), mm(l.min_clearance), mm(l.min_drill), mm(l.min_annular_ring), mm(l.min_via_drill), mm(l.min_via_diameter), mm(l.min_mask_web), mm(l.min_edge_clearance), mm(l.courtyard_excess)
+                        ));
+                    });
+                }
                 let footprints = matches!(self.section, Section::Footprints);
                 group(ui, if footprints { "Footprints" } else { "Symbols" }, |ui| {
                     ui.weak("Fixes that make parts follow the active profile (KiCad Library Conventions by default). Untick a rule to leave that alone. The Library tab runs them.");

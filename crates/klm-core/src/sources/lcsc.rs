@@ -88,6 +88,14 @@ pub(crate) fn parse_search(body: &Value, query: &str) -> Vec<Part> {
                 // `componentImageUrl` is usually empty; the OSS links are signed and expire after 30 minutes.
                 image_url: [s(c, "minImageAccessIdUrl"), s(c, "componentImageUrl")].into_iter().find(|u| !u.is_empty()).unwrap_or_default(),
                 stock: c["stockCount"].as_u64(),
+                // "base" is the free library; "expand" parts carry a setup fee unless JLC also flags them preferred.
+                jlc_type: match (c["componentLibraryType"].as_str(), c["preferredComponentFlag"].as_bool()) {
+                    (Some("base"), _) => "basic",
+                    (Some("expand"), Some(true)) => "preferred",
+                    (Some("expand"), _) => "extended",
+                    _ => "",
+                }
+                .into(),
                 moq: c["minPurchaseNum"].as_u64().filter(|&n| n > 0),
                 pack_qty: c["encapsulationNumber"].as_u64().filter(|&n| n > 0),
                 unit_price: price.unwrap_or_default(),
