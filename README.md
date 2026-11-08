@@ -45,6 +45,7 @@ klm-cli rollback <id> [--project <dir>]               # restore a snapshot (id f
 klm-cli standardise [--project <dir>] [--dry-run]     # apply the Settings standards rules
 klm-cli restyle <category> <part> [--project <dir>] [--dry-run]   # redraw one symbol in house style
 klm-cli health [--json | --csv] [--project <dir>]     # project health report; exit 1 on errors
+klm-cli check-project <dir> [--fab <id>]... [--all-fabs] [--format text|json|csv]   # KiCad DRC + ERC with the fab's minimums; exit 1 on errors
 klm-cli cleanup [--project <dir>]... [--remove sym:<lib>|fp:<lib>]... [--fix sym:<lib>=<path>]... [--move sym:<lib>]... [--apply]
                                                       # scan KiCad's library tables; preview unless --apply
 klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]

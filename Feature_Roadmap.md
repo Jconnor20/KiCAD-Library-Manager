@@ -363,9 +363,10 @@ The house standard for each component type, so that whatever the source, every p
 - [ ] **W10.1 Library footprint fab check** (M)
   - **Owns:** `core/fab.rs` (new)
   - Checks pad gap, drill, annular ring, silk width and height, silk on pads, and courtyard excess. Safe fixes (silk width, clip silk, grow courtyard) join the Standardise plan; everything else is flagged.
-- [ ] **W10.2 Whole-project check** (M) ⚑
+- [x] **W10.2 Whole-project check** (M) ⚑
   - **Owns:** `core/project_check.rs` (new), `klm-cli check-project`
   - Writes a `.kicad_dru` and board minimums from the profile, then runs `kicad-cli pcb drc` and `sch erc` (JSON) and maps the results into health findings. In "All fabs" mode it lists which fabs pass.
+  - **Done:** `project_check::{dru, check, check_all}` run KiCad's DRC/ERC on a temp copy (the project's own `.kicad_dru` is kept and the fab rules appended; `${KIPRJMOD}` in its lib tables points back at the real folder). Rule syntax checked with kicad-cli 9.0 and 10.0.7, which silently drop a rules file they can't parse. No rule for the mask web (board setup only) or courtyard excess; sub-sheets in subfolders aren't copied.
 - [ ] **W10.3 Align parts to the fab** (M)
   - **Owns:** `core/bom.rs`, `gui/tabs/alternatives`
   - Per BOM line: JLC basic/extended/preferred, stock, lifecycle and obsolescence. "Swap" opens Alternatives filtered to "available at <assembler>" with the same footprint.

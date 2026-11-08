@@ -107,7 +107,7 @@ pub fn kicad_cli_version() -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn quiet(program: &Path) -> Command {
+pub(crate) fn quiet(program: &Path) -> Command {
     let mut cmd = Command::new(program);
     // kicad-cli rewrites its own kicad_common.json on every run; keep that inside the sandbox too.
     if let Some(sb) = crate::settings::sandbox_dir() {
