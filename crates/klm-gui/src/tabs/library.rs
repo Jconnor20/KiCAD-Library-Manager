@@ -7,6 +7,7 @@ use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui::{self, RichText, Sense};
 use klm_core::batch::{self, Op};
 use klm_core::checks::{self, Issue, Severity};
+use klm_core::compliance;
 use klm_core::health::{self, Finding};
 use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartEdit, PartStatus, RemovePlan, Scope};
 use klm_core::standardise;
@@ -17,6 +18,7 @@ use std::sync::mpsc;
 
 type Key = (String, String);
 type Checks = HashMap<Key, Vec<Issue>>;
+type Compliances = HashMap<Key, compliance::Compliance>;
 
 pub enum Msg {
     /// Re-read the listing, e.g. after an import.
@@ -94,6 +96,13 @@ pub struct LibraryTab {
     /// Part checks for `parts`; they read every footprint and 3D model, so they arrive after the listing.
     checks: Option<Checks>,
     checks_rx: Option<mpsc::Receiver<Checks>>,
+    /// Compliance for `parts` (Standardise plan plus checks); `None` while it is being worked out. The cache is
+    /// shared with the worker, so an unchanged library isn't re-read on every reload.
+    compliance: Option<Compliances>,
+    compliance_rx: Option<mpsc::Receiver<Compliances>>,
+    compliance_cache: std::sync::Arc<std::sync::Mutex<compliance::Cache>>,
+    /// The profile and naming rules compliance is judged by; a change reloads.
+    standard: (standardise::profile::Profile, klm_core::rules::Rules),
     /// The next frame starts a reload.
     stale: bool,
     /// Bumped whenever `parts` or `checks` change, which rebuilds `view`.
@@ -132,6 +141,10 @@ impl Default for LibraryTab {
             parts_rx: None,
             checks: None,
             checks_rx: None,
+            compliance: None,
+            compliance_rx: None,
+            compliance_cache: Default::default(),
+            standard: Default::default(),
             stale: true,
             generation: 0,
             view: Vec::new(),
@@ -155,10 +168,11 @@ enum Filter {
     Incomplete,
     NoDatasheet,
     NoModel,
+    NonCompliant,
 }
 
 impl Filter {
-    const ALL: [(Filter, &'static str); 4] = [(Filter::All, "Any status"), (Filter::Incomplete, "Incomplete"), (Filter::NoDatasheet, "No datasheet"), (Filter::NoModel, "No 3D model")];
+    const ALL: [(Filter, &'static str); 5] = [(Filter::All, "Any status"), (Filter::Incomplete, "Incomplete"), (Filter::NoDatasheet, "No datasheet"), (Filter::NoModel, "No 3D model"), (Filter::NonCompliant, "Non-compliant")];
 
     fn matches(self, p: &PartStatus) -> bool {
         let no = |c: Check| matches!(c, Check::Missing | Check::Broken);
@@ -167,6 +181,7 @@ impl Filter {
             Filter::Incomplete => incomplete(p),
             Filter::NoDatasheet => no(p.datasheet),
             Filter::NoModel => no(p.model),
+            Filter::NonCompliant => false, // decided in `update_view`, which has the results
         }
     }
 }
@@ -312,6 +327,24 @@ fn issues_cell(ui: &mut egui::Ui, issues: Option<&Vec<Issue>>) {
 static NO_ISSUES: Vec<Issue> = Vec::new();
 
 /// The ticked rows in a stable order.
+fn compliance_cell(ui: &mut egui::Ui, c: Option<&compliance::Compliance>) {
+    let r = match c {
+        None => ui.weak("…").on_hover_text("Working out whether the part follows the house standard"),
+        Some(c) if c.ok => ui.label(RichText::new("OK").color(ui.visuals().text_color())).on_hover_text("Standardise has nothing to change and the checks pass"),
+        Some(c) => {
+            let tip: Vec<_> = c.reasons.iter().map(|r| format!("• {r}")).collect();
+            ui.label(RichText::new("No").color(ui.visuals().warn_fg_color)).on_hover_text(tip.join("
+"))
+        }
+    };
+    let text = match c {
+        None => "Compliance: computing",
+        Some(c) if c.ok => "Compliant",
+        Some(_) => "Not compliant",
+    };
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
+}
+
 fn sorted(selected: &HashSet<Key>) -> Vec<Key> {
     let mut targets: Vec<_> = selected.iter().cloned().collect();
     targets.sort();
@@ -331,6 +364,10 @@ enum Click {
 impl LibraryTab {
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
         let (global, project) = (cx.global_root(), cx.project_root());
+        if self.standard != (cx.settings.standard.clone(), cx.settings.rules.clone()) {
+            self.standard = (cx.settings.standard.clone(), cx.settings.rules.clone());
+            self.stale = true;
+        }
         match self.show(ui, global.as_ref(), project.as_ref()) {
             Action::None => {}
             Action::FindDatasheets(root) => self.find_datasheets(root, cx),
@@ -826,7 +863,15 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             c.request_repaint();
         });
         self.dir = Some(root.dir.clone());
+        let (comp_tx, comp_rx) = mpsc::channel();
+        let (r, c, cache, (profile, naming)) = (root.clone(), ctx.clone(), self.compliance_cache.clone(), self.standard.clone());
+        std::thread::spawn(move || {
+            let done = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&r, &profile, &naming).clone();
+            let _ = comp_tx.send(done);
+            c.request_repaint();
+        });
         (self.parts_rx, self.checks, self.checks_rx) = (Some(rx), None, Some(ctx_rx));
+        (self.compliance, self.compliance_rx) = (None, Some(comp_rx));
         self.generation += 1;
     }
 
@@ -856,6 +901,16 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 Err(_) => self.checks_rx = None,
             }
         }
+        if let Some(rx) = &self.compliance_rx {
+            match rx.try_recv() {
+                Ok(done) => {
+                    (self.compliance, self.compliance_rx) = (Some(done), None);
+                    self.generation += 1;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(_) => self.compliance_rx = None,
+            }
+        }
     }
 
     /// Re-filters and re-sorts when something that decides the rows changed, and drops ticks on rows that are gone.
@@ -871,6 +926,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             .filter(|&i| {
                 let p = &parts[i];
                 self.status.matches(p)
+                    && (self.status != Filter::NonCompliant || self.compliance.as_ref().and_then(|c| c.get(&(p.category.clone(), p.name.clone()))).is_some_and(|c| !c.ok))
                     && (self.category.is_empty() || p.category == self.category)
                     && (self.maker.is_empty() || p.manufacturer == self.maker)
                     && (needle.is_empty() || [&p.mpn, &p.manufacturer, &p.category, &p.description].iter().any(|f| f.to_lowercase().contains(&needle)))
@@ -967,7 +1023,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             Scope::Project => project,
         };
         let Some(root) = root else {
-            (self.parts, self.parts_rx, self.checks_rx, self.dir) = (None, None, None, None);
+            (self.parts, self.parts_rx, self.checks_rx, self.compliance_rx, self.dir) = (None, None, None, None, None);
             ui.label(match self.scope {
                 Scope::Global => "Set up a global library first.",
                 Scope::Project => "Choose a project first.",
@@ -1043,7 +1099,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             ui.weak(format!("Loading parts from {}…", root.dir.display()));
             return action;
         };
-        let loading = self.parts_rx.is_some() || self.checks_rx.is_some();
+        let loading = self.parts_rx.is_some() || self.checks_rx.is_some() || self.compliance_rx.is_some();
         let bad = parts.iter().filter(|p| incomplete(p)).count();
         let mut summary = format!("{} parts in {} · {bad} incomplete", parts.len(), root.dir.display());
         if self.view.len() != parts.len() {
@@ -1083,11 +1139,12 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             Col::new("Datasheet", 72.0),
             Col::new("Sim model", 66.0),
             Col::new("In KiCad", 64.0),
-            Col::rest("Checks"),
+            Col::new("Checks", 52.0),
+            Col::rest("Standard").no_sort(),
         ];
         let (scope, has_project, downloading) = (self.scope, project.is_some(), self.downloading);
         let mut click = None;
-        let (view, selected, checks, current) = (&self.view, &self.selected, &self.checks, &self.current);
+        let (view, selected, checks, current, compliance) = (&self.view, &self.selected, &self.checks, &self.current, &self.compliance);
         let mut sort = self.sort;
         ui.scope(|ui| {
             // A selectable label would swallow the click that selects the row.
@@ -1142,6 +1199,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                     ui_kit::status_cell(ui, if p.in_kicad { Cell::Ok } else { Cell::Missing }, "KiCad library entry");
                 });
                 row.col(|ui| issues_cell(ui, checks.as_ref().map(|c| c.get(&key).unwrap_or(&NO_ISSUES))));
+                row.col(|ui| compliance_cell(ui, compliance.as_ref().and_then(|c| c.get(&key))));
                 let r = row.response();
                 if r.clicked() {
                     click = Some(Click::Row(i, r.ctx.input(|i| i.modifiers)));

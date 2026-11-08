@@ -406,9 +406,10 @@ What the plan or the work packages called for and the product doesn't do yet, so
 - [ ] **W11.1 3D fit check** (M)
   - **Owns:** `core/model3d.rs` (new)
   - An approximate STEP/WRL bounding box from the point data (no new dependency), compared with the fab outline and pads after the model's offset, rotate and scale. The fix centres the model and picks the best 90° rotation. This makes W1.2's "model size roughly matches the outline" true; there is no code for it today.
-- [ ] **W11.2 Compliance badge** (M)
+- [x] **W11.2 Compliance badge** (M)
   - **Owns:** `core/compliance.rs` (new), `gui/tabs/library.rs`
   - A part is compliant when its Standardise plan is empty and its checks and fab check pass for the active profile. Cached by mtime. Badge column, a "Non-compliant" filter, and a JSON/CSV report through `health`.
+  - **Done:** `compliance::{compute, Cache, findings}`: compliant = no plan change for the part (its symbol lines, or its footprint's) and no `check_part` issue of any severity. The Library tab has a Standard column (OK / No, reasons in the tooltip, "…" while computing, on a worker thread) and a "Non-compliant" filter; `health` adds one `compliance` warning per non-compliant part, so the existing `--json`/`--csv` carry it. Known limits: the cache is per library, not per part (the plan and checks run on the whole library, so any changed mtime of a symbol library, footprint, model or the profile redoes all of it); a profile edit in memory counts as a new profile; model mtime is found from the footprint's first `(model "…")` with `${KIPRJMOD}` only; `health` scans the project library only; compliance does not include the W11.1 model-fit check until that is merged (it picks it up through `check_part` and the plan).
 
 ## Wave 12: Editors (decide after Wave 11, ships 1.0.0)
 

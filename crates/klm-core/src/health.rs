@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Finding {
     pub severity: Severity,
-    /// symbol, schematic-symbol, footprint, 3d-model, datasheet, sim-model, part-check, duplicate-mpn, metadata, orphan, library-table or library-reference.
+    /// symbol, schematic-symbol, footprint, 3d-model, datasheet, sim-model, part-check, compliance, duplicate-mpn, metadata, orphan, library-table or library-reference.
     pub kind: &'static str,
     /// Where: `category/part`, a file path or a table entry.
     pub item: String,
