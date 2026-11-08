@@ -366,9 +366,10 @@ The house standard for each component type, so that whatever the source, every p
 - [ ] **W10.2 Whole-project check** (M) ⚑
   - **Owns:** `core/project_check.rs` (new), `klm-cli check-project`
   - Writes a `.kicad_dru` and board minimums from the profile, then runs `kicad-cli pcb drc` and `sch erc` (JSON) and maps the results into health findings. In "All fabs" mode it lists which fabs pass.
-- [ ] **W10.3 Align parts to the fab** (M)
+- [x] **W10.3 Align parts to the fab** (M)
   - **Owns:** `core/bom.rs`, `gui/tabs/alternatives`
   - Per BOM line: JLC basic/extended/preferred, stock, lifecycle and obsolescence. "Swap" opens Alternatives filtered to "available at <assembler>" with the same footprint.
+  - Done: `Part`/`Quote` carry `jlc_type` (LCSC `componentLibraryType` + `preferredComponentFlag`) and `lifecycle` (DigiKey `ProductStatus.Status`, Mouser `LifecycleStatus`); `bom::assembly` maps them, JLC stock is the LCSC quote's `stockCount`. Unknown stays unknown. BOM tab has a JLCPCB column, a summary line and Swap (Library tab's Alternatives panel with "Available at JLCPCB" and "Same package" ticked and the search started). No extended-part fee is shown (no source for it). Known limits: Swap needs the part in the library; "not at JLC" is only "out of stock at JLC"; Mouser's lifecycle wording is unverified; cache keys bumped to v3/v4 so old entries refetch.
 
 ## Wave 11: 3D fit and compliance (2 in parallel, ships 0.9.0)
 

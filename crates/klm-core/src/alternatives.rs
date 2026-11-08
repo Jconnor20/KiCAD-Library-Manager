@@ -199,17 +199,38 @@ pub fn search_query(part: &LibPart) -> String {
 /// The search results that could stand in for `part`: another MPN, the same package where both sides
 /// name one, and the part's value somewhere in the description or MPN when it has one.
 pub fn equivalents(part: &LibPart, found: Vec<Part>) -> Vec<Part> {
+    equivalents_filtered(part, found, &Filters { same_package: true, at_jlcpcb: false })
+}
+
+/// What the Alternatives panel narrows online results by.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Filters {
+    /// Both sides name a package and it is the same (the default; off shows every package).
+    pub same_package: bool,
+    /// An LCSC listing with stock: LCSC's search is JLCPCB's own parts search, so that is "available at JLCPCB".
+    pub at_jlcpcb: bool,
+}
+
+impl Default for Filters {
+    fn default() -> Self {
+        Self { same_package: true, at_jlcpcb: false }
+    }
+}
+
+/// `equivalents` with the panel's filters; with `at_jlcpcb`, basic parts come before preferred before extended.
+pub fn equivalents_filtered(part: &LibPart, found: Vec<Part>, filters: &Filters) -> Vec<Part> {
     let (pkgs, text) = (package_ids(&part.footprint), part.value_text());
     let own_key = key(part.footprint.rsplit_once(':').map_or(part.footprint.as_str(), |(_, n)| n));
     let kind = Kind::of_footprint(&part.footprint);
     let canon = text.as_ref().and_then(|_| value_key(&part.value, kind, false));
     let aliased = |ids: &[String]| ids.iter().any(|i| !i.starts_with("raw:"));
-    found
+    let mut out: Vec<Part> = found
         .into_iter()
         .filter(|f| !same_mpn(&f.mpn, &part.mpn))
+        .filter(|f| !filters.at_jlcpcb || (f.supplier_ids.iter().any(|(s, _)| s == "LCSC") && f.stock.is_some_and(|s| s > 0)))
         .filter(|f| {
             let fids = package_ids(&f.package);
-            if fids.is_empty() || pkgs.is_empty() {
+            if !filters.same_package || fids.is_empty() || pkgs.is_empty() {
                 return true;
             }
             if aliased(&fids) && aliased(&pkgs) {
@@ -223,7 +244,12 @@ pub fn equivalents(part: &LibPart, found: Vec<Part>) -> Vec<Part> {
             let blob = format!("{} {}", f.description, f.mpn);
             key(&blob).replace(['Ω', ' '], "").replace("ohm", "").contains(v.as_str()) || canon.as_ref().is_some_and(|c| mentions_value(&blob, c))
         })
-        .collect()
+        .collect();
+    if filters.at_jlcpcb {
+        // Stable, so the source's own order holds within a class; unknown class last.
+        out.sort_by_key(|f| ["basic", "preferred", "extended"].iter().position(|c| *c == f.jlc_type).unwrap_or(3));
+    }
+    out
 }
 
 /// Whether some token of `text` ("CAP CER 0.1UF 50V", "RES 10K OHM 1%") is the value `canon`. Bare
@@ -586,5 +612,33 @@ mod tests {
         assert_eq!(property(sym, "MPN_Alt1"), Some("CRCW060310K0FKEA"));
         assert_eq!(property(sym, "Manufacturer_Alt1"), Some("Vishay"));
         assert_eq!(property(sym, "Mouser_Alt1"), Some("71-CRCW0603-10K"));
+    }
+
+    #[test]
+    fn jlcpcb_and_package_filters() {
+        let part = lp("a", "CL10B104", "100nF", "KLM:C_0603_1608Metric");
+        let hit = |mpn: &str, pkg: &str, id: Option<&str>, stock: u64, jlc: &str| Part {
+            mpn: mpn.into(),
+            description: "CAP CER 100 nF".into(),
+            package: pkg.into(),
+            supplier_ids: id.map(|i| ("LCSC".to_string(), i.to_string())).into_iter().collect(),
+            stock: Some(stock),
+            jlc_type: jlc.into(),
+            ..Part::default()
+        };
+        let found = || {
+            vec![
+                hit("EXT", "0603", Some("C1"), 10, "extended"),
+                hit("BIG", "0805", Some("C2"), 10, "basic"),
+                hit("NOSTOCK", "0603", Some("C3"), 0, "basic"),
+                hit("DK", "0603", None, 99, ""),
+                hit("BASIC", "0603", Some("C4"), 5, "basic"),
+            ]
+        };
+        let mpns = |f: &Filters| equivalents_filtered(&part, found(), f).into_iter().map(|p| p.mpn).collect::<Vec<_>>();
+        assert_eq!(mpns(&Filters::default()), ["EXT", "NOSTOCK", "DK", "BASIC"], "package only");
+        assert_eq!(mpns(&Filters { same_package: true, at_jlcpcb: true }), ["BASIC", "EXT"], "stocked at LCSC, basic first");
+        assert_eq!(mpns(&Filters { same_package: false, at_jlcpcb: true }), ["BIG", "BASIC", "EXT"]);
+        assert_eq!(mpns(&Filters { same_package: false, at_jlcpcb: false }).len(), 5);
     }
 }

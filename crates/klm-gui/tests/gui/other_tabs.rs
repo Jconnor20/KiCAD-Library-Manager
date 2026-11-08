@@ -17,6 +17,10 @@ fn quote(stock: u64) -> Vec<Quote> {
 /// A BOM tab with three lines: LM358 (in the library, plenty of stock, one alternate), RP2040 (in the library, stock 1
 /// for a need of 2) and a capacitor the library lacks, with no price.
 fn bom(size: (f32, f32)) -> Gui<'static> {
+    bom_with(size, [quote(1000), quote(1), vec![]])
+}
+
+fn bom_with(size: (f32, f32), quotes: [Vec<Quote>; 3]) -> Gui<'static> {
     let mut h = app(size, Tab::Bom);
     let app = h.state_mut();
     let root = app.cx.global_root().unwrap();
@@ -27,7 +31,7 @@ fn bom(size: (f32, f32)) -> Gui<'static> {
     }
     let lines = vec![line(&["U1"], "LM358", "Texas Instruments"), line(&["U2", "U3"], "RP2040", "Raspberry Pi"), line(&["C1", "C2", "C3", "C4", "C5"], "GRM155R71C104KA88D", "Murata")];
     let project = app.cx.project.clone().unwrap();
-    app.bom_tab.seed(&app.cx, project, lines, vec![quote(1000), quote(1), vec![]], lib);
+    app.bom_tab.seed(&app.cx, project, lines, quotes.to_vec(), lib);
     h.run_ok();
     h
 }
@@ -283,4 +287,23 @@ fn x1_nothing_clipped_or_missing() {
         inside(&h, "bom");
         assert!(snap(&mut h, "bom").is_empty());
     }
+}
+
+#[test]
+fn b6_swap_opens_alternatives_filtered_to_jlcpcb() {
+    let _env = setup();
+    let q = |stock, jlc: &str, lifecycle: &str| vec![Quote { jlc_type: jlc.into(), lifecycle: lifecycle.into(), ..quote(stock).remove(0) }];
+    // LM358 is basic and active; RP2040 is extended and out of stock at JLC; the capacitor has no quote at all.
+    let mut h = bom_with(SIZES[1], [q(1000, "basic", "Active"), q(0, "extended", "Obsolete"), vec![]]);
+    assert!(on_page(&h, "JLCPCB: 1 basic, 1 extended, 1 out of stock at JLC, 1 obsolete or last-time-buy, 1 not known at JLC."), "{}", dump(&h));
+    assert!(h.query_by_label("no stock").is_some() && h.query_by_label("obsolete").is_some() && h.query_by_label("basic").is_some());
+    assert_eq!(h.query_all_by_label("Swap").count(), 1, "only the flagged line offers Swap");
+    h.get_by_label("Swap").click();
+    h.run_ok();
+    h.run_ok();
+    assert!(h.state().cx.tab == Tab::Library, "{}", dump(&h));
+    assert!(h.query_by_label("Alternatives and duplicates").is_some(), "{}", dump(&h));
+    h.run_ok();
+    let on = |h: &Gui, label: &str| h.get_by_label(label).accesskit_node().toggled() == Some(eframe::egui::accesskit::Toggled::True);
+    assert!(on(&h, "Available at JLCPCB") && on(&h, "Same package"), "{}", dump(&h));
 }

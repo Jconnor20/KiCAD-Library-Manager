@@ -5,7 +5,7 @@ use super::ui_kit::{self, Col, Level, Section, Sort};
 use crate::{AppCtx, Msg as AppMsg, Tab};
 use eframe::egui;
 use klm_core::alternatives::LibPart;
-use klm_core::bom::{self, Line, ProjectBom, Quote, Row, Status};
+use klm_core::bom::{self, Lifecycle, Line, ProjectBom, Quote, Row, Status};
 use klm_core::cache;
 use klm_core::currency::Rates;
 use klm_core::store::Store;
@@ -64,10 +64,12 @@ fn compare(a: &Row, b: &Row, col: usize, boards: u64) -> std::cmp::Ordering {
         1 => (a.line.qty() * boards).cmp(&(b.line.qty() * boards)),
         2 => mpn_of(a).to_lowercase().cmp(&mpn_of(b).to_lowercase()),
         3 => bom::library_label(&a.status).cmp(&bom::library_label(&b.status)),
-        4 => a.alternatives.len().cmp(&b.alternatives.len()),
-        5 => source(a).cmp(&source(b)),
-        6 => stock(a).cmp(&stock(b)),
-        7 => unit(a).partial_cmp(&unit(b)).unwrap_or(std::cmp::Ordering::Equal),
+        // JLC class, with unknown last.
+        4 => (a.assembly.jlc.map_or(3, |j| j as u8), a.assembly.lifecycle).cmp(&(b.assembly.jlc.map_or(3, |j| j as u8), b.assembly.lifecycle)),
+        5 => a.alternatives.len().cmp(&b.alternatives.len()),
+        6 => source(a).cmp(&source(b)),
+        7 => stock(a).cmp(&stock(b)),
+        8 => unit(a).partial_cmp(&unit(b)).unwrap_or(std::cmp::Ordering::Equal),
         _ => lead(a).cmp(&lead(b)),
     }
 }
@@ -206,6 +208,10 @@ impl BomTab {
             t.unit_cost,
             t.extended_cost,
         ));
+        let summary = bom::assembly_summary(&self.rows).text();
+        if !summary.is_empty() {
+            ui.label(format!("JLCPCB: {summary}.")).on_hover_text("Class and stock come from LCSC's listing, lifecycle from DigiKey and Mouser. \"?\" means no source said, not that the part is missing.");
+        }
         let boards = self.settings.boards;
         ui.horizontal(|ui| {
             ui.label("Filter");
@@ -229,13 +235,14 @@ impl BomTab {
             Col::new("Qty", 32.0),
             Col::new("MPN", 160.0),
             Col::new("Library", 170.0),
+            Col::new("JLCPCB", 190.0),
             Col::rest("Alternatives"),
             Col::new("Source", 52.0),
             Col::new("Stock", 46.0),
             Col::new("Unit / extended", 96.0),
             Col::new("Lead", 46.0),
         ];
-        let (mut search, mut import, mut swap) = (None, false, None);
+        let (mut search, mut import, mut swap, mut swap_jlc) = (None, false, None, None);
         let rows = &self.rows;
         ui_kit::table(ui, "bom", &cols, &mut sort, view.len(), |n, row| {
             let i = view[n];
@@ -258,6 +265,29 @@ impl BomTab {
                             search = Some(mpn_of(r).to_string());
                         }
                         import |= ui.small_button("Import").on_hover_text("Open Import to add a downloaded ZIP or library for it").clicked();
+                    }
+                });
+            });
+            row.col(|ui| {
+                ui.horizontal(|ui| {
+                    let a = &r.assembly;
+                    if a.jlc.is_some() {
+                        ui_kit::badge(ui, bom::jlc_label(a), if a.jlc == Some(bom::JlcType::Basic) { Level::Ok } else { Level::Info });
+                    } else {
+                        ui.weak("?");
+                    }
+                    if a.out_of_stock() {
+                        ui_kit::badge(ui, "no stock", Level::Error);
+                    }
+                    if let Some(l) = a.lifecycle.filter(|l| *l != Lifecycle::Active) {
+                        ui_kit::badge(ui, bom::lifecycle_label(Some(l)), if l == Lifecycle::Nrnd { Level::Warn } else { Level::Error });
+                    }
+                    if a.flagged() {
+                        let found = if let Status::Found { symbol, .. } = &r.status { Some(symbol.clone()) } else { None };
+                        let btn = ui.add_enabled(found.is_some(), egui::Button::new("Swap").small()).on_hover_text("Find a part JLCPCB stocks in the same package").on_disabled_hover_text("Needs the part in your library first");
+                        if btn.clicked() {
+                            swap_jlc = found;
+                        }
                     }
                 });
             });
@@ -309,6 +339,10 @@ impl BomTab {
         }
         if import {
             cx.tab = Tab::Import;
+        }
+        if let Some(symbol) = swap_jlc {
+            cx.send(AppMsg::Library(super::library::Msg::Swap(symbol)));
+            cx.tab = Tab::Library;
         }
         if let Some((i, alt)) = swap {
             self.swap(i, &alt, cx);
