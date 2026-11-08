@@ -420,7 +420,7 @@ thread_local! {
 
 /// Turns the import step on or off from the settings (`house_symbols_on_import`); call when they load or change.
 pub fn configure(s: &Settings) {
-    *CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = s.house_symbols_on_import.then(|| Config { naming: s.rules.clone(), standards: s.standards.clone() });
+    *CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = s.house_symbols_on_import.then(|| Config { naming: s.rules.clone(), standards: s.standard.rules.clone() });
 }
 
 /// Import step: restyles the symbol about to be written to the `category` library, if the setting is on.

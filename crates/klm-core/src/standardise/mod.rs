@@ -7,6 +7,7 @@
 //! symbol names, which may predate the name template, stay as they are.
 
 mod footprint;
+pub mod profile;
 pub(crate) mod symbol;
 
 use crate::convert::easyeda::geom::fmt;

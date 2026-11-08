@@ -1,3 +1,4 @@
+use crate::standardise::profile;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -21,8 +22,14 @@ pub struct Settings {
     pub display_currency: String,
     /// Category and naming rules.
     pub rules: crate::rules::Rules,
-    /// Which standardise rules run, and their values; KLC's when unset.
-    pub standards: crate::standardise::Rules,
+    /// The active standard profile (see `standardise::profile`); the built-in KLC when empty.
+    pub profile: String,
+    /// The active profile: loaded from and saved to its profile file, never to settings.json.
+    #[serde(skip)]
+    pub standard: profile::Profile,
+    /// Rules from before profiles, moved into a profile of their own by `load`.
+    #[serde(rename = "standards", skip_serializing)]
+    legacy_standards: Option<crate::standardise::Rules>,
     /// Redraw imported symbols in the house style of their class (see `symbols`); off unless asked for.
     pub house_symbols_on_import: bool,
     /// How long distributor search results are reused, in minutes; unset is a day, 0 turns the cache off.
@@ -62,6 +69,9 @@ impl Default for History {
     }
 }
 
+/// Name of the profile that customised pre-profile rules are moved into.
+pub const MIGRATED_PROFILE: &str = "Custom";
+
 /// Env var that moves everything KLM keeps (and KiCad's config dir lookup, and credentials) into one folder.
 pub const SANDBOX_ENV: &str = "KLM_CONFIG_DIR";
 
@@ -88,10 +98,30 @@ fn path() -> Option<PathBuf> {
 
 impl Settings {
     pub fn load() -> Self {
-        path()
+        let mut s = path()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|t| Self::parse(&t))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        match s.legacy_standards.take() {
+            // Customised rules from before profiles become a profile of their own, once.
+            Some(old) if s.profile.is_empty() && old != crate::standardise::Rules::default() => {
+                s.profile = MIGRATED_PROFILE.into();
+                s.standard = profile::Profile { name: s.profile.clone(), rules: old, ..Default::default() };
+                // On failure the old key stays in settings.json, so the move is tried again next start.
+                let _ = s.save();
+            }
+            _ => match profile::load(s.profile_name()) {
+                Ok(p) => s.standard = p,
+                // A missing or broken profile file falls back to KLC without touching (or overwriting) the file.
+                Err(_) => s.profile.clear(),
+            },
+        }
+        s
+    }
+
+    /// Name of the active standard profile.
+    pub fn profile_name(&self) -> &str {
+        if self.profile.is_empty() { profile::BUILT_IN } else { &self.profile }
     }
 
     /// Parses a settings file, migrating the old `downloads_dir` into `watch_dirs`.
@@ -108,7 +138,8 @@ impl Settings {
     pub fn save(&self) -> Result<()> {
         let p = path().context("no user config directory")?;
         std::fs::create_dir_all(p.parent().unwrap())?;
-        std::fs::write(&p, serde_json::to_string_pretty(self)?).with_context(|| format!("writing {}", p.display()))
+        std::fs::write(&p, serde_json::to_string_pretty(self)?).with_context(|| format!("writing {}", p.display()))?;
+        profile::save(&profile::Profile { name: self.profile_name().into(), ..self.standard.clone() })
     }
 
     pub fn is_enabled(&self, source: &str) -> bool {

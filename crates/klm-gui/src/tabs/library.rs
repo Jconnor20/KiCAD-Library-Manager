@@ -335,7 +335,7 @@ impl LibraryTab {
             }
             Action::Standardise(root) => {
                 let (tx, rx) = mpsc::channel();
-                let (rules, ctx) = (cx.settings.standards.clone(), cx.ctx.clone());
+                let (rules, ctx) = (cx.settings.standard.rules.clone(), cx.ctx.clone());
                 std::thread::spawn(move || {
                     let _ = tx.send(standardise::plan(&root, &rules));
                     ctx.request_repaint();
@@ -383,7 +383,7 @@ impl LibraryTab {
             Action::Restyle { category, name } => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
-                    let result = klm_core::symbols::restyle_part(root, &category, &name, &cx.settings.rules, &cx.settings.standards, false).map_err(|e| format!("{e:#}"));
+                    let result = klm_core::symbols::restyle_part(root, &category, &name, &cx.settings.rules, &cx.settings.standard.rules, false).map_err(|e| format!("{e:#}"));
                     self.dry = Some(Dry::Restyle { root: root.clone(), category, name, result });
                 }
             }
@@ -579,7 +579,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 }) {
                     Some(true) if cx.busy => cx.log(Level::Warn, "Restyle: wait for the running import or download to finish, then press Apply again"),
                     Some(true) => {
-                        let line = match klm_core::symbols::restyle_part(root, category, name, &cx.settings.rules, &cx.settings.standards, true) {
+                        let line = match klm_core::symbols::restyle_part(root, category, name, &cx.settings.rules, &cx.settings.standard.rules, true) {
                             Ok(done) => (Level::Ok, format!("{name}: {}", done.changes.join(", "))),
                             Err(e) => (Level::Error, format!("Could not restyle {name}: {e:#}")),
                         };
