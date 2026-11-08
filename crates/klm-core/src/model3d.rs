@@ -142,15 +142,14 @@ fn bbox_of(pts: &[(f64, f64)]) -> Option<Rect> {
     fab::bbox(pts)
 }
 
-/// The box after scale, then rotation (x, then y, then z, counter-clockwise seen from the positive axis).
-// shortcut: the sign of KiCad's own z rotation isn't checked against KiCad; it only moves the centre of a
-// model that is turned by a quarter turn, so confirm with a model that isn't symmetric about its origin.
+/// The box after scale, then rotation (x, then y, then z), as KiCad's `CalcModelMatrix` does it: each angle
+/// is negated, so a positive angle turns clockwise seen from the positive axis.
 fn transform(b: Box3, scale: [f64; 3], rot: [f64; 3]) -> Box3 {
     let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
     for i in 0..8 {
         let mut p = [0, 1, 2].map(|k| if i >> k & 1 == 1 { b.1[k] } else { b.0[k] } * scale[k]);
         for (axis, deg) in rot.iter().enumerate() {
-            let (s, c) = deg.to_radians().sin_cos();
+            let (s, c) = (-deg).to_radians().sin_cos();
             let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
             (p[u], p[v]) = (p[u] * c - p[v] * s, p[u] * s + p[v] * c);
         }
@@ -365,6 +364,16 @@ mod tests {
         assert!(fixed.unwrap().contains("turned 90"));
         assert_eq!(xyz(fp.child("model").unwrap(), "rotate", 0.0)[2], 90.0);
         assert_eq!(offset(&fp)[..2], [0.0, 0.0]);
+    }
+
+    #[test]
+    fn turn_direction_matches_kicad() {
+        // 1 x 2 mm with its corner on the origin. KiCad's +90 is clockwise from above: (x, y) -> (y, -x),
+        // so the box becomes x 0..2, y -1..0 and the offset that centres it is (-1, 0.5).
+        let (_, fixed, fp) = run("m.step", &step([0.0, 0.0, 0.0], [1.0, 2.0, 0.6]), "");
+        assert!(fixed.unwrap().contains("turned 90"));
+        let o = offset(&fp);
+        assert!((o[0] + 1.0).abs() < 1e-3 && (o[1] - 0.5).abs() < 1e-3, "{o:?}");
     }
 
     #[test]
