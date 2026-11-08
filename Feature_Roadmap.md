@@ -353,6 +353,7 @@ The house standard for each component type, so that whatever the source, every p
 - [x] **W9.4 Profile editors** (M)
   - **Owns:** `gui/tabs/settings/pages.rs`, a new class-editor page
   - Add, remove and reorder fields. Required and visible toggles, template editing with a live preview on a real part, the source mapping, and reset to defaults.
+- Status (2026-11-08): all four merged and the version is 0.7.0. A fix round then made Standardise leave Reference and Value where a house template puts them, made the Visible switch write KiCad's hide flag (a field shown for the first time goes below Value), and made renaming a field update its placeholders. Known limits: ICs still get the automatic box, Value is only rebuilt for R/C/L, the Mouser and Nexar parameter mappings are thin or unverified, the editor's preview uses sample values, and `check_against_source` waits for W10.3. Not yet tried by hand in KiCad.
 
 ## Wave 10: Manufacturer and IPC checks (W10.0 first, then 3 in parallel, ships 0.8.0)
 

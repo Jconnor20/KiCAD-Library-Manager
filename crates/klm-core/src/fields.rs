@@ -21,7 +21,7 @@ use std::sync::Mutex;
 pub struct FieldDef {
     pub name: String,
     pub required: bool,
-    /// Shown on the schematic. Recorded for the editors; nothing places a new field on the sheet yet.
+    /// Shown on the schematic; Standardise sets KiCad's hide flag to match.
     pub visible: bool,
     /// "F", "Ω", "H", "V", "A", "W" or "%": the value is a number with an SI prefix and is written in one canonical form. None: free text.
     pub unit: Option<String>,
@@ -312,6 +312,14 @@ pub fn fix(sym: &mut Sexpr, category: &str, profile: &Profile, part: Option<&Par
             changes.push(format!("{}: {cur} -> {n}", fd.name));
         }
     }
+    let mut shown = 0;
+    for fd in &info.fields {
+        if field(sym, &fd.name).is_some() && hidden(sym, &fd.name) == fd.visible {
+            shown += usize::from(fd.visible);
+            set_hidden(sym, &fd.name, !fd.visible, shown);
+            changes.push(format!("{}: {}", fd.name, if fd.visible { "shown" } else { "hidden" }));
+        }
+    }
     for (key, new) in rebuilt(sym, &info) {
         if property(sym, key) != Some(new.as_str()) {
             changes.push(format!("{key}: \"{}\" -> \"{new}\"", property(sym, key).unwrap_or_default()));
@@ -319,6 +327,43 @@ pub fn fix(sym: &mut Sexpr, category: &str, profile: &Profile, part: Option<&Par
         }
     }
     changes
+}
+
+fn is_hide(x: &Sexpr) -> bool {
+    matches!(x, Sexpr::Atom(a) if a == "hide") || (x.head() == Some("hide") && x.arg(0) != Some("no"))
+}
+
+fn prop_mut<'a>(sym: &'a mut Sexpr, name: &str) -> Option<&'a mut Sexpr> {
+    sym.items_mut().iter_mut().find(|p| p.head() == Some("property") && p.arg(0) == Some(name))
+}
+
+/// Whether KiCad hides the field: `(hide yes)` on the property (KiCad 9) or `hide` in its effects (older files).
+fn hidden(sym: &Sexpr, name: &str) -> bool {
+    let Some(p) = sym.children("property").find(|p| p.arg(0) == Some(name)) else { return false };
+    p.items().iter().any(is_hide) || p.child("effects").is_some_and(|e| e.items().iter().any(is_hide))
+}
+
+/// Hides or shows the field, written the KiCad 9 way. A field shown for the first time sits at the
+/// origin, inside the body, so it goes below Value instead, `nth` rows down.
+fn set_hidden(sym: &mut Sexpr, name: &str, hide: bool, nth: usize) {
+    let value_at = sym.children("property").find(|p| p.arg(0) == Some("Value")).and_then(|p| p.child("at")).map(|a| (a.arg(0).and_then(|v| v.parse::<f64>().ok()), a.arg(1).and_then(|v| v.parse::<f64>().ok())));
+    let Some(p) = prop_mut(sym, name) else { return };
+    p.items_mut().retain(|c| !is_hide(c));
+    if let Some(e) = p.items_mut().iter_mut().find(|c| c.head() == Some("effects")) {
+        e.items_mut().retain(|c| !is_hide(c));
+    }
+    if hide {
+        let at = p.items().iter().position(|c| c.head() == Some("at")).map_or(p.items().len(), |i| i + 1);
+        p.items_mut().insert(at, Sexpr::list("hide", vec![Sexpr::Atom("yes".into())]));
+        return;
+    }
+    let at = p.items_mut().iter_mut().find(|c| c.head() == Some("at"));
+    if let (Some(at), Some((Some(x), Some(y)))) = (at, value_at) {
+        if at.arg(0).and_then(|v| v.parse::<f64>().ok()) == Some(0.0) && at.arg(1).and_then(|v| v.parse::<f64>().ok()) == Some(0.0) {
+            let y = y - 2.54 * nth as f64;
+            *at = Sexpr::list("at", vec![Sexpr::Atom(crate::convert::easyeda::geom::fmt(x)), Sexpr::Atom(crate::convert::easyeda::geom::fmt(y)), Sexpr::Atom("0".into())]);
+        }
+    }
 }
 
 /// The profile the library features use, and whether imports apply it. Set by `symbols::configure`.
@@ -345,6 +390,22 @@ pub(crate) fn fix_imported(category: &str, symbol: &mut Sexpr, part: &Part) {
 mod tests {
     use super::*;
     use crate::sexpr::parse;
+
+    #[test]
+    fn visible_sets_the_hide_flag() {
+        let mut sym = parse(r#"(symbol "C1" (property "Value" "C1" (at 0 -2.54 0)) (property "Voltage" "16V" (at 0 0 0) (effects (font (size 1.27 1.27)) hide)) (property "Tolerance" "10%" (at 1 1 0)))"#).unwrap();
+        let mut p = Profile::default();
+        let mut info = default_class("Capacitor");
+        info.fields.iter_mut().find(|f| f.name == "Voltage").unwrap().visible = true;
+        p.classes.insert("Capacitor".into(), info);
+        let changes = fix(&mut sym, "Capacitors", &p, None);
+        assert!(changes.contains(&"Voltage: shown".into()) && changes.contains(&"Tolerance: hidden".into()), "{changes:?}");
+        assert!(!hidden(&sym, "Voltage") && hidden(&sym, "Tolerance"));
+        // Shown for the first time at the origin: moved below Value.
+        let at = sym.children("property").find(|p| p.arg(0) == Some("Voltage")).and_then(|p| p.child("at")).unwrap();
+        assert_eq!((at.arg(0), at.arg(1)), (Some("0"), Some("-5.08")));
+        assert!(!fix(&mut sym, "Capacitors", &p, None).iter().any(|c| c.ends_with("shown") || c.ends_with("hidden")));
+    }
 
     #[test]
     fn units_have_one_form() {
