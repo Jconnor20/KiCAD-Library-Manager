@@ -98,6 +98,7 @@ fn check_symbol(root: &LibraryRoot, cat: &str, lib: &Sexpr, sym: &Sexpr, profile
     }
     if let Some(model) = fp.child("model").and_then(|m| m.arg(0)) {
         check_model(root, model, &mut out);
+        out.extend(crate::model3d::check(root, &fp));
     }
     out
 }
