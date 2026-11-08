@@ -339,6 +339,21 @@ fn is_alt_field(name: &str) -> bool {
     })
 }
 
+/// Replaces `sym`'s `_AltN` fields with the members of `group` other than `mpn` that aren't obsolete,
+/// in group order (preferred first).
+pub(crate) fn set_alt_fields(sym: &mut sexpr::Sexpr, group: &[Alternative], mpn: &str) {
+    sym.items_mut().retain(|p| !(p.head() == Some("property") && p.arg(0).is_some_and(is_alt_field)));
+    let alts = group.iter().filter(|a| a.role != "obsolete" && !same_mpn(&a.mpn, mpn));
+    for (n, a) in alts.enumerate() {
+        let n = n + 1;
+        crate::library::set_property(sym, &format!("MPN_Alt{n}"), &a.mpn);
+        crate::library::set_property(sym, &format!("Manufacturer_Alt{n}"), &a.manufacturer);
+        for (supplier, id) in &a.supplier_ids {
+            crate::library::set_property(sym, &format!("{supplier}_Alt{n}"), id);
+        }
+    }
+}
+
 /// Writes `group`'s alternatives into every symbol in `root` whose MPN is in it (after one snapshot):
 /// each symbol lists the other members that aren't obsolete, preferred first, as `MPN_AltN`,
 /// `Manufacturer_AltN` and `<Supplier>_AltN`. Old `_AltN` fields are replaced, and cleared from symbols
@@ -359,17 +374,8 @@ pub fn write_back(root: &LibraryRoot, group: &[Alternative]) -> Result<usize> {
             if !in_group(&mpn) && !lists_member {
                 continue;
             }
-            sym.items_mut().retain(|p| !(p.head() == Some("property") && p.arg(0).is_some_and(is_alt_field)));
             (changed, written) = (true, written + 1);
-            let alts = group.iter().filter(|a| in_group(&mpn) && a.role != "obsolete" && !same_mpn(&a.mpn, &mpn));
-            for (n, a) in alts.enumerate() {
-                let n = n + 1;
-                crate::library::set_property(sym, &format!("MPN_Alt{n}"), &a.mpn);
-                crate::library::set_property(sym, &format!("Manufacturer_Alt{n}"), &a.manufacturer);
-                for (supplier, id) in &a.supplier_ids {
-                    crate::library::set_property(sym, &format!("{supplier}_Alt{n}"), id);
-                }
-            }
+            set_alt_fields(sym, if in_group(&mpn) { group } else { &[] }, &mpn);
         }
         if changed {
             if snapshot.is_none() {

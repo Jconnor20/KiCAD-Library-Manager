@@ -27,6 +27,9 @@ const USAGE: &str = "usage:
   klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
   klm-cli remove <part> [--category <c>] [--project <dir>] [--yes]   (dry run unless --yes)
   klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]
+  klm-cli lookup <mpn>... [--json]   (what every enabled source knows about each MPN)
+  klm-cli stdlib verify [<category>...] [--manifest <dir>] [--offline] [--json]   (checks the standard library's manifest against live sources)
+  klm-cli stdlib build [<category>...] [--manifest <dir>]   (builds KLM_STD_<category> libraries in the global library)
   --config <dir> (or KLM_CONFIG_DIR) keeps all of KLM's files, KiCad's library tables and API keys in <dir>";
 
 #[derive(Debug, PartialEq)]
@@ -43,6 +46,41 @@ enum Command {
     Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
     Export { zip: PathBuf, parts: Vec<String>, category: Option<String>, project: Option<PathBuf> },
     Remove { part: String, category: Option<String>, project: Option<PathBuf>, yes: bool },
+    Lookup { mpns: Vec<String>, json: bool },
+    StdlibVerify { categories: Vec<String>, manifest: Option<PathBuf>, offline: bool, json: bool },
+    StdlibBuild { categories: Vec<String>, manifest: Option<PathBuf> },
+}
+
+fn parse_lookup(args: &[String]) -> Result<Command> {
+    let json = args.iter().any(|a| a == "--json");
+    let mpns: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
+    if let Some(bad) = mpns.iter().find(|a| a.starts_with("--")) {
+        bail!("{bad} is not valid for lookup");
+    }
+    if mpns.is_empty() {
+        bail!("lookup needs at least one MPN");
+    }
+    Ok(Command::Lookup { mpns, json })
+}
+
+fn parse_stdlib(args: &[String]) -> Result<Command> {
+    let (sub, rest) = args.split_first().context("stdlib needs verify or build")?;
+    let (mut categories, mut manifest, mut offline, mut json) = (vec![], None, false, false);
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--manifest" => manifest = Some(PathBuf::from(it.next().context("--manifest needs a folder")?)),
+            "--offline" if sub == "verify" => offline = true,
+            "--json" if sub == "verify" => json = true,
+            _ if a.starts_with("--") => bail!("{a} is not valid for stdlib {sub}"),
+            _ => categories.push(a.clone()),
+        }
+    }
+    match sub.as_str() {
+        "verify" => Ok(Command::StdlibVerify { categories, manifest, offline, json }),
+        "build" => Ok(Command::StdlibBuild { categories, manifest }),
+        _ => bail!("stdlib needs verify or build, not {sub}"),
+    }
 }
 
 fn parse_cleanup(args: &[String]) -> Result<Command> {
@@ -88,6 +126,12 @@ fn parse(args: &[String]) -> Result<Command> {
     }
     if name == "check-project" {
         return parse_check_project(rest);
+    }
+    if name == "lookup" {
+        return parse_lookup(rest);
+    }
+    if name == "stdlib" {
+        return parse_stdlib(rest);
     }
     let (mut csv, mut json, mut deep, mut overwrite, mut dry_run, mut yes) = (false, false, false, false, false, false);
     let (mut project, mut category, mut to, mut zips) = (None, None, None, vec![]);
@@ -609,6 +653,130 @@ fn export(zip: &Path, names: Vec<String>, category: Option<String>, project: Opt
     Ok(())
 }
 
+/// Every enabled source's results for `mpn` that are that exact MPN, plus a message per source that failed.
+fn lookup_one(sources: &[Box<dyn klm_core::sources::Source>], mpn: &str) -> (Vec<klm_core::part::Part>, Vec<String>) {
+    let (mut hits, mut errors) = (vec![], vec![]);
+    for s in sources {
+        match s.search(mpn) {
+            Ok(found) => hits.extend(found.into_iter().filter(|p| klm_core::matching::same_mpn(&p.mpn, mpn)).map(|mut p| {
+                if p.source.is_empty() {
+                    p.source = s.name().into();
+                }
+                p
+            })),
+            Err(e) => errors.push(format!("{}: {e:#}", s.name())),
+        }
+    }
+    (hits, errors)
+}
+
+fn lookup(mpns: &[String], json: bool) -> Result<ExitCode> {
+    let sources = klm_core::sources::all(&settings()?);
+    if sources.is_empty() {
+        bail!("no sources are enabled; turn one on in the GUI's Settings");
+    }
+    let mut out = vec![];
+    let mut missing = false;
+    for mpn in mpns {
+        let (hits, errors) = lookup_one(&sources, mpn);
+        missing |= hits.is_empty();
+        if json {
+            let hits: Vec<_> = hits
+                .iter()
+                .map(|p| json!({
+                    "source": p.source, "mpn": p.mpn, "manufacturer": p.manufacturer, "description": p.description, "package": p.package,
+                    "lifecycle": p.lifecycle, "jlc_type": p.jlc_type, "stock": p.stock, "datasheet_url": p.datasheet_url,
+                    "supplier_ids": p.supplier_ids.iter().map(|(k, v)| json!({ "supplier": k, "id": v })).collect::<Vec<_>>(),
+                }))
+                .collect();
+            out.push(json!({ "query": mpn, "hits": hits, "errors": errors }));
+        } else {
+            println!("{mpn}:{}", if hits.is_empty() { " not found" } else { "" });
+            for p in &hits {
+                let ids: Vec<String> = p.supplier_ids.iter().map(|(k, v)| format!("{k} {v}")).collect();
+                let stock = p.stock.map_or("?".into(), |n| n.to_string());
+                println!("  {}: {} | {} | {} | lifecycle {} | jlc {} | stock {stock} | {}", p.source, p.mpn, p.manufacturer, p.package, p.lifecycle, p.jlc_type, ids.join(", "));
+            }
+            for e in &errors {
+                println!("  error: {e}");
+            }
+        }
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    }
+    Ok(if missing { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+}
+
+/// `--manifest`, else the `stdlib` folder shipped beside the executable, else `./stdlib`.
+fn manifest_dir(given: Option<PathBuf>) -> PathBuf {
+    given.unwrap_or_else(|| {
+        let shipped = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("stdlib"))).filter(|d| d.is_dir());
+        shipped.unwrap_or_else(|| PathBuf::from("stdlib"))
+    })
+}
+
+fn stdlib_verify(categories: &[String], manifest: Option<PathBuf>, offline: bool, json: bool) -> Result<ExitCode> {
+    use klm_core::stdlib;
+    let s = settings()?;
+    let manifests = stdlib::Manifest::load_dir(&manifest_dir(manifest), categories)?;
+    let mut stock = stdlib::Stock::installed();
+    if stock.is_none() {
+        eprintln!("KiCad's stock libraries weren't found, so symbols and footprints aren't checked.");
+    }
+    let mut findings = stdlib::check_offline(&manifests, stock.as_mut());
+    if !offline {
+        let sources = klm_core::sources::all(&s);
+        if sources.is_empty() {
+            bail!("no sources are enabled; turn one on in the GUI's Settings, or pass --offline");
+        }
+        for m in &manifests {
+            for g in m.groups() {
+                let fp = g[0].get("footprint");
+                for r in g {
+                    let (hits, errors) = lookup_one(&sources, r.get("mpn"));
+                    for e in errors {
+                        eprintln!("{}.csv line {}: {e}", m.category, r.line);
+                    }
+                    findings.extend(stdlib::check_found(m, r, fp, &hits));
+                }
+            }
+        }
+    }
+    findings.sort_by(|a, b| (&a.category, a.line).cmp(&(&b.category, b.line)));
+    let errors = findings.iter().filter(|f| f.error).count();
+    if json {
+        let out: Vec<_> = findings
+            .iter()
+            .map(|f| json!({ "category": f.category, "line": f.line, "part_id": f.part_id, "mpn": f.mpn, "severity": if f.error { "error" } else { "warning" }, "message": f.message }))
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    } else {
+        for f in &findings {
+            println!("{}.csv:{} {} {} [{}]: {}", f.category, f.line, if f.error { "error" } else { "warning" }, f.mpn, f.part_id, f.message);
+        }
+        let rows: usize = manifests.iter().map(|m| m.rows.len()).sum();
+        println!("{rows} rows in {} manifests: {errors} errors, {} warnings", manifests.len(), findings.len() - errors);
+    }
+    Ok(if errors > 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+}
+
+fn stdlib_build(categories: &[String], manifest: Option<PathBuf>) -> Result<()> {
+    use klm_core::stdlib;
+    ensure_kicad_closed()?;
+    let root = global_root(&settings()?)?;
+    let manifests = stdlib::Manifest::load_dir(&manifest_dir(manifest), categories)?;
+    let mut stock = stdlib::Stock::installed().context("KiCad's stock libraries weren't found; set kicad-cli in the GUI's Settings")?;
+    let store = klm_core::store::Store::open(&klm_core::store::Store::default_path().context("no app folder for the part store")?)?;
+    let built = stdlib::build(&root, &store, &manifests, &mut stock)?;
+    for f in &built.skipped {
+        println!("skipped {}.csv:{} {} [{}]: {}", f.category, f.line, f.mpn, f.part_id, f.message);
+    }
+    println!("Built {} part(s) into {} KLM_STD library(ies) in {}", built.parts, built.libraries, root.dir.display());
+    note_if_kicad_open();
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = take_config_arg(args).and_then(|args| parse(&args)).and_then(|cmd| match cmd {
@@ -624,6 +792,9 @@ fn main() -> ExitCode {
         Command::Cleanup { projects, remove, fix, moves, apply } => cleanup_cmd(projects, remove, fix, moves, apply),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
         Command::Export { zip, parts, category, project } => export(&zip, parts, category, project.as_deref()).map(|_| ExitCode::SUCCESS),
+        Command::Lookup { mpns, json } => lookup(&mpns, json),
+        Command::StdlibVerify { categories, manifest, offline, json } => stdlib_verify(&categories, manifest, offline, json),
+        Command::StdlibBuild { categories, manifest } => stdlib_build(&categories, manifest).map(|_| ExitCode::SUCCESS),
     });
     result.unwrap_or_else(|e| {
         eprintln!("error: {e:#}\n{USAGE}");
@@ -685,6 +856,14 @@ mod tests {
     fn rejects_bad_arguments() {
         assert_eq!(parse(&args("restyle Resistors RC0603 --dry-run")).unwrap(), Command::Restyle { category: "Resistors".into(), part: "RC0603".into(), project: None, dry_run: true });
         assert_eq!(parse(&args("remove LM358 --yes")).unwrap(), Command::Remove { part: "LM358".into(), category: None, project: None, yes: true });
+        assert_eq!(parse(&args("lookup A B --json")).unwrap(), Command::Lookup { mpns: vec!["A".into(), "B".into()], json: true });
+        assert!(parse(&args("lookup")).is_err());
+        assert_eq!(
+            parse(&args("stdlib verify Resistors --offline --manifest m")).unwrap(),
+            Command::StdlibVerify { categories: vec!["Resistors".into()], manifest: Some("m".into()), offline: true, json: false }
+        );
+        assert_eq!(parse(&args("stdlib build")).unwrap(), Command::StdlibBuild { categories: vec![], manifest: None });
+        assert!(parse(&args("stdlib build --offline")).is_err());
         for bad in ["remove", "remove a b", "remove a --dry-run", "check --yes", "", "restyle Resistors", "restyle a b c", "restyle a b --json", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "check --dry-run", "relink --dry-run", "standardise a.zip", "standardise --json"] {
             assert!(parse(&args(bad)).is_err(), "{bad:?} should fail");
         }

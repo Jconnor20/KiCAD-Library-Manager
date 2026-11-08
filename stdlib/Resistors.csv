@@ -1,0 +1,13 @@
+part_id,value,symbol,footprint,description,datasheet,mpn,manufacturer,lcsc,digikey,mouser,role
+R_0603_1k_1pct,1k,Device:R,Resistor_SMD:R_0603_1608Metric,"Resistor, 1k, 1%, 0.1W, 0603",,0603WAF1001T5E,UNI-ROYAL,C21190,,,preferred
+R_0603_1k_1pct,,,,,,RC0603FR-071KL,YAGEO,C22548,311-1.00KHRTR-ND,,substitute
+R_0603_1k_1pct,,,,,,CRCW06031K00FKEA,Vishay Dale,C844920,541-1.00KHTR-ND,,substitute
+R_0603_4k7_1pct,4k7,Device:R,Resistor_SMD:R_0603_1608Metric,"Resistor, 4.7k, 1%, 0.1W, 0603",,0603WAF4701T5E,UNI-ROYAL,C23162,,,preferred
+R_0603_4k7_1pct,,,,,,RC0603FR-074K7L,YAGEO,C99782,311-4.70KHRTR-ND,,substitute
+R_0603_4k7_1pct,,,,,,CRCW06034K70FKEA,Vishay Dale,C844931,541-4.70KHTR-ND,,substitute
+R_0603_10k_1pct,10k,Device:R,Resistor_SMD:R_0603_1608Metric,"Resistor, 10k, 1%, 0.1W, 0603",,0603WAF1002T5E,UNI-ROYAL,C25804,,,preferred
+R_0603_10k_1pct,,,,,,RC0603FR-0710KL,YAGEO,C98220,311-10.0KHRTR-ND,,substitute
+R_0603_10k_1pct,,,,,,CRCW060310K0FKEA,Vishay Dale,C844918,541-10.0KHTR-ND,,substitute
+R_0603_100k_1pct,100k,Device:R,Resistor_SMD:R_0603_1608Metric,"Resistor, 100k, 1%, 0.1W, 0603",,0603WAF1003T5E,UNI-ROYAL,C25803,,,preferred
+R_0603_100k_1pct,,,,,,RC0603FR-07100KL,YAGEO,C14675,311-100KHRTR-ND,,substitute
+R_0603_100k_1pct,,,,,,CRCW0603100KFKEA,Vishay Dale,C844916,541-100KHTR-ND,,substitute

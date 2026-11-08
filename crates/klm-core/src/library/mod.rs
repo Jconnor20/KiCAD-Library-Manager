@@ -15,6 +15,7 @@ mod status;
 pub use attach::{ATTACH_EXTENSIONS, AttachKind};
 pub use edit::{EDIT_FIELDS, Edited, PartEdit};
 pub use fields::{property, set_property};
+pub(crate) use fields::rename_symbol;
 pub use remove::{Piece, RemovePlan};
 pub use status::{Check, PartStatus};
 

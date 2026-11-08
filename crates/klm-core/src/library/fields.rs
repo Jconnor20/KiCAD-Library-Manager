@@ -53,7 +53,7 @@ pub fn set_property(symbol: &mut Sexpr, key: &str, value: &str) {
 }
 
 /// Renames a symbol and its unit sub-symbols (`OLD_1_1` → `NEW_1_1`).
-pub(super) fn rename_symbol(symbol: &mut Sexpr, new_name: &str) {
+pub(crate) fn rename_symbol(symbol: &mut Sexpr, new_name: &str) {
     let old = symbol.arg(0).unwrap_or_default().to_string();
     symbol.set_arg(0, Sexpr::str(new_name));
     for unit in symbol.items_mut().iter_mut().filter(|c| c.head() == Some("symbol")) {
