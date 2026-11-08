@@ -56,6 +56,23 @@ pub fn profile(ui: &mut egui::Ui, d: &mut Settings) -> Option<String> {
     err
 }
 
+/// The classes with a house template of the user's own, each with a way back to the built-in.
+pub fn house_templates(ui: &mut egui::Ui, p: &mut Profile) {
+    let classes: std::collections::BTreeSet<String> = p.templates.keys().chain(p.footprint_styles.keys()).cloned().collect();
+    if classes.is_empty() {
+        ui.weak("None: every kind of part uses the built-in style. Right-click a part in the Library tab and choose \"Use as house template\" to set one.");
+    }
+    for class in classes {
+        ui.horizontal(|ui| {
+            ui.label(&class);
+            if ui.button("Use built-in").on_hover_text("Forget this house symbol and footprint style").clicked() {
+                p.templates.remove(&class);
+                p.footprint_styles.remove(&class);
+            }
+        });
+    }
+}
+
 /// A rule with a value in mm; unticking it switches it off.
 fn mm_rule(ui: &mut egui::Ui, label: &str, value: &mut Option<f64>, default: Option<f64>) {
     ui.horizontal(|ui| {

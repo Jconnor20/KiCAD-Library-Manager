@@ -3,11 +3,12 @@
 //! Profiles live in `app_dir()/standards/<name>.json`. [`BUILT_IN`] (KLC) needs no file; a file with its
 //! name overrides it. Settings names the active profile and loads its rules (see `settings`).
 
-use super::Rules;
+use super::{FootprintStyle, Rules};
 use crate::library::sanitize;
 use crate::settings::app_dir;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The profile used when none is chosen: the KiCad Library Conventions.
@@ -25,11 +26,16 @@ pub struct Profile {
     pub name: String,
     pub version: u32,
     pub rules: Rules,
+    /// House symbol per class name ("Resistor"), as the s-expression text of the symbol the user drew,
+    /// so a shared profile works without the library it came from.
+    pub templates: BTreeMap<String, String>,
+    /// Footprint text, line and pin-1 style per class name, taken from a reference footprint.
+    pub footprint_styles: BTreeMap<String, FootprintStyle>,
 }
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { name: BUILT_IN.into(), version: VERSION, rules: Rules::default() }
+        Self { name: BUILT_IN.into(), version: VERSION, rules: Rules::default(), templates: BTreeMap::new(), footprint_styles: BTreeMap::new() }
     }
 }
 
@@ -87,7 +93,7 @@ pub fn load(name: &str) -> Result<Profile> {
 /// Writes the profile to its file. An untouched built-in needs no file and gets none.
 pub fn save(p: &Profile) -> Result<()> {
     let path = file(&p.name)?;
-    if p.name == BUILT_IN && p.rules == Rules::default() && !path.exists() {
+    if (Profile { version: VERSION, ..p.clone() }) == Profile::default() && !path.exists() {
         return Ok(());
     }
     export(p, &path)
@@ -123,5 +129,15 @@ mod tests {
         assert!(parse("not json", "x").is_err());
         assert!(file("  ").is_err() && file("..").is_err());
         assert!(file("My standard").unwrap().ends_with("My_standard.json"));
+    }
+
+    #[test]
+    fn templates_round_trip_and_older_files_load_without_them() {
+        let old = parse(r#"{"name":"Old","version":1,"rules":{"silk_width":0.15}}"#, "x").unwrap();
+        assert!(old.templates.is_empty() && old.footprint_styles.is_empty());
+        let mut p = Profile { name: "Acme".into(), ..Profile::default() };
+        p.templates.insert("Resistor".into(), "(symbol \"R\" (property \"Reference\" \"R\"))".into());
+        p.footprint_styles.insert("Resistor".into(), FootprintStyle { widths: [("F.SilkS".to_string(), 0.15)].into(), pin1: Some("(fp_circle)".into()), ..Default::default() });
+        assert_eq!(parse(&serde_json::to_string_pretty(&p).unwrap(), "x").unwrap(), p);
     }
 }

@@ -348,7 +348,7 @@ fn rollback(id: &str, project: Option<&Path>) -> Result<()> {
 fn standardise(project: Option<&Path>, dry_run: bool) -> Result<()> {
     let s = settings()?;
     for root in roots(&s, project)? {
-        let plan = standardise::plan(&root, &s.standard.rules);
+        let plan = standardise::plan(&root, &s.standard, &s.rules);
         print!("{plan}");
         if !dry_run {
             println!("Standardised {} file(s) in {}", standardise::apply(&plan)?, root.dir.display());
@@ -403,7 +403,7 @@ fn restyle(category: &str, part: &str, project: Option<&Path>, dry_run: bool) ->
     if !dry_run {
         ensure_kicad_closed()?;
     }
-    let done = klm_core::symbols::restyle_part(&root, category, part, &s.rules, &s.standard.rules, !dry_run)?;
+    let done = klm_core::symbols::restyle_part(&root, category, part, &s.rules, &s.standard, !dry_run)?;
     println!("{part} in {}: {}{}", root.nickname(category), done.changes.join(", "), if dry_run && done.changed { " (dry run, nothing written)" } else { "" });
     Ok(())
 }

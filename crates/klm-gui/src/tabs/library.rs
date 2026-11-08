@@ -43,6 +43,8 @@ enum Action {
     Preview { category: String, name: String },
     /// Show what redrawing the symbol in the house style of its class would do.
     Restyle { category: String, name: String },
+    /// Make the part the active profile's house template for its class.
+    HouseTemplate { category: String, name: String },
     CopyToProject { category: String, name: String, overwrite: bool },
     FindDatasheets(LibraryRoot),
     /// Show the dry run of these operations.
@@ -250,6 +252,10 @@ fn part_actions(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, has_project: bo
     if btn(ui, "Restyle symbol…", true, "Redraw the symbol in the house style for its kind of part (resistor, capacitor, IC box…). Shows what changes first. Keeps every field; undo it in History. Wires on schematics that already use it may need fixing.", "") {
         *action = Action::Restyle { category: key.0.clone(), name: key.1.clone() };
     }
+    // Detecting the class needs the symbol file, too slow for every frame, so the log names the class.
+    if btn(ui, "Use as house template for its class", true, "Make this symbol (and its footprint's text, line and pin-1 style) the active profile's house style for its kind of part. Restyle and Standardise then follow it. Settings > Symbols puts the built-in back.", "") {
+        *action = Action::HouseTemplate { category: key.0.clone(), name: key.1.clone() };
+    }
     if btn(ui, "Attach…", true, "Add a datasheet (PDF), SPICE model, 3D model (STEP/WRL) or a footprint/3D ZIP without a symbol", "") {
         if let Some(path) = pick_attachment() {
             *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
@@ -335,9 +341,9 @@ impl LibraryTab {
             }
             Action::Standardise(root) => {
                 let (tx, rx) = mpsc::channel();
-                let (rules, ctx) = (cx.settings.standard.rules.clone(), cx.ctx.clone());
+                let (profile, naming, ctx) = (cx.settings.standard.clone(), cx.settings.rules.clone(), cx.ctx.clone());
                 std::thread::spawn(move || {
-                    let _ = tx.send(standardise::plan(&root, &rules));
+                    let _ = tx.send(standardise::plan(&root, &profile, &naming));
                     ctx.request_repaint();
                 });
                 self.dry = Some(Dry::Planning(rx));
@@ -383,8 +389,22 @@ impl LibraryTab {
             Action::Restyle { category, name } => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
-                    let result = klm_core::symbols::restyle_part(root, &category, &name, &cx.settings.rules, &cx.settings.standard.rules, false).map_err(|e| format!("{e:#}"));
+                    let result = klm_core::symbols::restyle_part(root, &category, &name, &cx.settings.rules, &cx.settings.standard, false).map_err(|e| format!("{e:#}"));
                     self.dry = Some(Dry::Restyle { root: root.clone(), category, name, result });
+                }
+            }
+            Action::HouseTemplate { category, name } => {
+                let root = if self.scope == Scope::Global { &global } else { &project };
+                if let Some(root) = root {
+                    let naming = cx.settings.rules.clone();
+                    match klm_core::symbols::set_house_template(&mut cx.settings.standard, root, &category, &name, &naming).and_then(|r| cx.settings.save().map(|_| r)) {
+                        Ok((class, footprint)) => {
+                            klm_core::symbols::configure(&cx.settings);
+                            let fp = if footprint { " and its footprint style" } else { " (no footprint style: its footprint isn't in this library)" };
+                            cx.log(Level::Info, format!("{name}{fp} is now the {class:?} house template of profile {}", cx.settings.profile_name()));
+                        }
+                        Err(e) => cx.log(Level::Error, format!("{e:#}")),
+                    }
                 }
             }
             Action::Attach { scope, category, name, path } => self.attach_dialog = Some(AttachDialog::new(scope, category, name, path)),
@@ -579,7 +599,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 }) {
                     Some(true) if cx.busy => cx.log(Level::Warn, "Restyle: wait for the running import or download to finish, then press Apply again"),
                     Some(true) => {
-                        let line = match klm_core::symbols::restyle_part(root, category, name, &cx.settings.rules, &cx.settings.standard.rules, true) {
+                        let line = match klm_core::symbols::restyle_part(root, category, name, &cx.settings.rules, &cx.settings.standard, true) {
                             Ok(done) => (Level::Ok, format!("{name}: {}", done.changes.join(", "))),
                             Err(e) => (Level::Error, format!("Could not restyle {name}: {e:#}")),
                         };

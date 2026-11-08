@@ -232,6 +232,7 @@ impl SettingsTab {
                     ui.weak("Fixes that make parts follow the active profile (KiCad Library Conventions by default). Untick a rule to leave that alone. The Library tab runs them.");
                     if footprints { standards::footprints(ui, &mut d.standard.rules) } else { standards::symbols(ui, &mut d.standard.rules) }
                 });
+                group(ui, "House templates", |ui| standards::house_templates(ui, &mut d.standard));
             }
             Section::Bom => {
                 group(ui, "Shipping region", |ui| {

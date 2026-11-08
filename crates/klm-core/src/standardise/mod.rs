@@ -8,15 +8,18 @@
 
 mod footprint;
 pub mod profile;
+
+pub use footprint::{FootprintStyle, TextStyle};
 pub(crate) mod symbol;
 
 use crate::convert::easyeda::geom::fmt;
 use crate::kicad_env::write_atomic;
-use crate::library::{LibraryRoot, sanitize};
+use crate::library::{LibraryRoot, property, sanitize};
 use crate::sexpr::{self, Sexpr};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::fmt as stdfmt;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Which fixes run and to what values. `None` (or `false`) switches a rule off. Defaults are KLC's.
@@ -96,8 +99,22 @@ impl stdfmt::Display for Plan {
     }
 }
 
-/// Works out what the rules would change in `root`, reading every symbol library and footprint but writing nothing.
-pub fn plan(root: &LibraryRoot, rules: &Rules) -> Plan {
+/// Works out what the profile's rules (and its per-class footprint styles) would change in `root`, reading
+/// every symbol library and footprint but writing nothing. `naming` tells which class a part is.
+pub fn plan(root: &LibraryRoot, profile: &profile::Profile, naming: &crate::rules::Rules) -> Plan {
+    let rules = &profile.rules;
+    // Footprint name -> the house style of the class of the part that uses it.
+    let mut styles: HashMap<String, &FootprintStyle> = HashMap::new();
+    for cat in root.categories().into_iter().filter(|_| !profile.footprint_styles.is_empty()) {
+        let path = root.dir.join("symbols").join(format!("{}.kicad_sym", sanitize(&cat)));
+        let Ok(lib) = std::fs::read_to_string(path).map_err(anyhow::Error::from).and_then(|t| sexpr::parse(&t)) else { continue };
+        for sym in lib.children("symbol") {
+            let style = crate::symbols::class_of(&cat, sym, naming).ok().and_then(|c| profile.footprint_styles.get(&format!("{c:?}")));
+            if let (Some(fp), Some(style)) = (property(sym, "Footprint"), style) {
+                styles.insert(fp.rsplit(':').next().unwrap_or(fp).to_string(), style);
+            }
+        }
+    }
     let mut plan = Plan { files: vec![], errors: vec![], root: root.clone() };
     let mut consider = |path: PathBuf, label: String, fix: &dyn Fn(&mut Sexpr) -> Vec<String>| {
         let parsed = std::fs::read_to_string(&path).map_err(anyhow::Error::from).and_then(|t| Ok((sexpr::parse(&t)?, t)));
@@ -134,7 +151,7 @@ pub fn plan(root: &LibraryRoot, rules: &Rules) -> Plan {
     for path in footprints {
         let cat = path.parent().and_then(|p| p.file_stem()).unwrap_or_default().to_string_lossy().into_owned();
         let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-        consider(path, format!("footprint {name} in {}", root.nickname(&cat)), &|fp| footprint::fix(fp, rules));
+        consider(path, format!("footprint {name} in {}", root.nickname(&cat)), &|fp| footprint::fix(fp, rules, styles.get(&name).copied()));
     }
     plan
 }
@@ -235,7 +252,7 @@ mod tests {
     fn dry_run_writes_nothing_and_apply_snapshots_then_fixes() {
         let (_base, root) = library("standardise_apply");
         let before = contents(&root);
-        let p = plan(&root, &Rules::default());
+        let p = plan(&root, &profile::Profile::default(), &Default::default());
         assert_eq!(contents(&root), before, "planning must not touch the library");
         assert!(crate::snapshot::list(&root).is_empty());
         assert_eq!(p.files.len(), 2, "{p}");
@@ -245,7 +262,7 @@ mod tests {
         assert_eq!(crate::snapshot::list(&root).len(), 1, "one snapshot before writing");
         assert_ne!(contents(&root), before);
         // The fixed library conforms, so a second run has nothing to do.
-        let again = plan(&root, &Rules::default());
+        let again = plan(&root, &profile::Profile::default(), &Default::default());
         assert!(again.files.is_empty(), "{again}");
     }
 
@@ -264,13 +281,13 @@ mod tests {
             footprint_origin: false,
             pin1_marker: false,
         };
-        assert!(plan(&root, &off).files.is_empty());
+        assert!(plan(&root, &profile::Profile { rules: off, ..Default::default() }, &Default::default()).files.is_empty());
     }
 
     #[test]
     fn apply_refuses_a_file_changed_since_the_plan() {
         let (_base, root) = library("standardise_stale");
-        let p = plan(&root, &Rules::default());
+        let p = plan(&root, &profile::Profile::default(), &Default::default());
         std::fs::write(root.dir.join("symbols/ICs.kicad_sym"), SYMBOLS.replace("U1", "U2")).unwrap();
         assert!(apply(&p).unwrap_err().to_string().contains("changed since the dry run"));
         assert!(crate::snapshot::list(&root).is_empty());

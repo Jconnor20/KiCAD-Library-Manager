@@ -12,17 +12,18 @@ mod class;
 mod template;
 
 pub use class::{Class, detect};
+pub use template::{Slot, Template};
 
 use crate::convert::easyeda::geom::fmt;
 use crate::kicad_env::write_atomic;
 use crate::library::{LibraryRoot, property, sanitize, set_property};
 use crate::sexpr::{self, Sexpr};
+use crate::standardise::profile::Profile;
 use crate::{rules, settings::Settings, standardise};
 use anyhow::{Context, Result, anyhow, bail};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::sync::Mutex;
-use template::Slot;
 
 const PITCH: f64 = 2.54;
 
@@ -149,7 +150,7 @@ fn trivial_name(n: &str) -> bool {
 }
 
 /// Pins in slot order for a fixed template, or why the roles can't be told.
-fn assign(tpl: &template::Template, pins: &[Sexpr]) -> Result<Vec<usize>> {
+fn assign(tpl: &Template, pins: &[Sexpr]) -> Result<Vec<usize>> {
     if pins.len() != tpl.slots.len() {
         bail!("{} pins, the template has {}", pins.len(), tpl.slots.len());
     }
@@ -287,17 +288,17 @@ fn ic_box(pins: &[Sexpr]) -> (Vec<Sexpr>, Vec<Sexpr>) {
     (vec![rect], out)
 }
 
-/// Pins and body graphics for `class`.
-fn layout(class: Class, pins: &[Sexpr]) -> Result<(Vec<Sexpr>, Vec<Sexpr>)> {
-    let Some(tpl) = template::of(class) else { return Ok(ic_box(pins)) };
+/// Pins and body graphics from `tpl`, or an IC box when there is none.
+fn layout(tpl: Option<&Template>, pins: &[Sexpr]) -> Result<(Vec<Sexpr>, Vec<Sexpr>)> {
+    let Some(tpl) = tpl else { return Ok(ic_box(pins)) };
     let order = assign(tpl, pins)?;
-    let placed = order.iter().zip(tpl.slots).map(|(&i, s)| place(&pins[i], Slot(s.0, s.1, s.2, s.3))).collect();
-    let body = sexpr::parse(&format!("(g {})", tpl.body)).expect("template is valid").items()[1..].to_vec();
+    let placed = order.iter().zip(tpl.slots.iter()).map(|(&i, s)| place(&pins[i], Slot(s.0, s.1, s.2, s.3))).collect();
+    let body = sexpr::parse(&format!("(g {})", tpl.body)).context("template graphics are not valid")?.items()[1..].to_vec();
     Ok((body, placed))
 }
 
 /// The symbol rebuilt: same properties and flags, new unit sub-symbols and pin display options.
-fn rebuild(sym: &Sexpr, class: Class, graphics: Vec<Sexpr>, pins: Vec<Sexpr>) -> Sexpr {
+fn rebuild(sym: &Sexpr, tpl: Option<&Template>, graphics: Vec<Sexpr>, pins: Vec<Sexpr>) -> Sexpr {
     let name = sym.arg(0).unwrap_or_default();
     let unit = |suffix: &str, items: Vec<Sexpr>| {
         let mut v = vec![Sexpr::str(&format!("{name}{suffix}"))];
@@ -305,7 +306,6 @@ fn rebuild(sym: &Sexpr, class: Class, graphics: Vec<Sexpr>, pins: Vec<Sexpr>) ->
         Sexpr::list("symbol", v)
     };
     let units = [unit("_0_1", graphics), unit("_1_1", pins)];
-    let tpl = template::of(class);
     let mut head = vec![];
     if tpl.is_some_and(|t| t.hide_numbers) {
         head.push(Sexpr::list("pin_numbers", vec![Sexpr::list("hide", vec![Sexpr::Atom("yes".into())])]));
@@ -353,11 +353,21 @@ fn identity(pins: &[Sexpr]) -> Vec<String> {
     v
 }
 
-/// Redraws `sym` in the house style of `class`. Pure: the refusal says why, and nothing is half-done.
-pub fn restyle(sym: &Sexpr, class: Class, standards: &standardise::Rules) -> Result<Sexpr> {
+/// The profile's house template for `class` (drawn by the user), if it has one.
+fn house_template(profile: &Profile, class: Class) -> Result<Option<Template>> {
+    let Some(text) = profile.templates.get(&format!("{class:?}")) else { return Ok(None) };
+    let t = sexpr::parse(text).and_then(|s| Template::from_symbol(&s, class));
+    t.map(Some).with_context(|| format!("the {class:?} house template of profile {} can't be used", profile.name))
+}
+
+/// Redraws `sym` in the house style of `class`: the profile's template for it, else the built-in one.
+/// Pure: the refusal says why, and nothing is half-done.
+pub fn restyle(sym: &Sexpr, class: Class, profile: &Profile) -> Result<Sexpr> {
     let pins = source_pins(sym)?;
-    let (graphics, placed) = layout(class, &pins)?;
-    let mut new = rebuild(sym, class, graphics, placed);
+    let custom = house_template(profile, class)?;
+    let tpl = custom.as_ref().or(template::of(class));
+    let (graphics, placed) = layout(tpl, &pins)?;
+    let mut new = rebuild(sym, tpl, graphics, placed);
     // Every pin must have come across exactly as it was.
     let after = source_pins(&new).context("the restyled symbol is not valid")?;
     if identity(&after) != identity(&pins) {
@@ -367,8 +377,21 @@ pub fn restyle(sym: &Sexpr, class: Class, standards: &standardise::Rules) -> Res
         set_property(&mut new, "Reference", class.prefix());
     }
     standardise::symbol::field_positions(&mut new);
-    standardise::symbol::fix(&mut new, standards);
+    standardise::symbol::fix(&mut new, &profile.rules);
+    // The house template's field positions win over the generic above/below rule.
+    for (key, (x, y, r)) in ["Reference", "Value"].into_iter().zip(tpl.and_then(|t| t.fields).into_iter().flatten()) {
+        let prop = new.items_mut().iter_mut().find(|p| p.head() == Some("property") && p.arg(0) == Some(key));
+        if let Some(at) = prop.and_then(|p| p.items_mut().iter_mut().find(|c| c.head() == Some("at"))) {
+            *at = Sexpr::list("at", vec![atom(x), atom(y), atom(r)]);
+        }
+    }
     Ok(new)
+}
+
+/// The house-style class of `sym`, a symbol in the `category` library, or why it has none.
+pub fn class_of(category: &str, sym: &Sexpr, naming: &rules::Rules) -> Result<Class> {
+    let pins = source_pins(sym)?;
+    detect(category, sym, pins.len(), naming).map_err(anyhow::Error::msg)
 }
 
 fn lib_path(root: &LibraryRoot, category: &str) -> std::path::PathBuf {
@@ -377,7 +400,7 @@ fn lib_path(root: &LibraryRoot, category: &str) -> std::path::PathBuf {
 
 /// Restyles one part's symbol in place, after a snapshot (so History can undo it). With `write` false it
 /// only works out what would happen. A refusal is an error and leaves the library untouched.
-pub fn restyle_part(root: &LibraryRoot, category: &str, name: &str, naming: &rules::Rules, standards: &standardise::Rules, write: bool) -> Result<Restyled> {
+pub fn restyle_part(root: &LibraryRoot, category: &str, name: &str, naming: &rules::Rules, profile: &Profile, write: bool) -> Result<Restyled> {
     let path = lib_path(root, category);
     let text = std::fs::read_to_string(&path).with_context(|| format!("no library {}", root.nickname(category)))?;
     let mut lib = sexpr::parse(&text)?;
@@ -388,7 +411,7 @@ pub fn restyle_part(root: &LibraryRoot, category: &str, name: &str, naming: &rul
     let sym = lib.items()[idx].clone();
     let count = source_pins(&sym).map_err(|e| anyhow!("{name} not restyled: {e:#}"))?.len();
     let class = detect(category, &sym, count, naming).map_err(|e| anyhow!("{name} not restyled: {e}"))?;
-    let new = restyle(&sym, class, standards).map_err(|e| anyhow!("{name} not restyled: {e:#}"))?;
+    let new = restyle(&sym, class, profile).map_err(|e| anyhow!("{name} not restyled: {e:#}"))?;
     if new == sym {
         return Ok(Restyled { class, changes: vec![format!("already the {class:?} house style")], changed: false });
     }
@@ -407,9 +430,37 @@ pub fn restyle_part(root: &LibraryRoot, category: &str, name: &str, naming: &rul
     Ok(Restyled { class, changes, changed: true })
 }
 
+/// Makes a part the profile's house template for its class: its symbol, and the style of its footprint
+/// when that is in the library. Returns the class and whether a footprint style was taken. The caller saves.
+pub fn set_house_template(profile: &mut Profile, root: &LibraryRoot, category: &str, name: &str, naming: &rules::Rules) -> Result<(Class, bool)> {
+    let lib = sexpr::parse(&std::fs::read_to_string(lib_path(root, category)).with_context(|| format!("no library {}", root.nickname(category)))?)?;
+    let sym = lib.children("symbol").find(|s| s.arg(0) == Some(name)).with_context(|| format!("{name} is not in {}", root.nickname(category)))?;
+    let class = class_of(category, sym, naming).map_err(|e| anyhow!("{name} can't be a house template: {e:#}"))?;
+    let key = format!("{class:?}");
+    // IC boxes are drawn to fit their pins, so an IC only gives its footprint style.
+    if class != Class::Ic {
+        Template::from_symbol(sym, class).map_err(|e| anyhow!("{name} can't be the {class:?} house template: {e:#}"))?;
+        profile.templates.insert(key.clone(), sexpr::to_string(sym));
+    }
+    // The footprint is looked up by name in every footprint library of this root.
+    let fp_name = property(sym, "Footprint").map(|f| f.rsplit(':').next().unwrap_or(f).to_string());
+    let style = fp_name.and_then(|f| {
+        let dirs = std::fs::read_dir(root.dir.join("footprints")).ok()?;
+        let text = dirs.flatten().find_map(|d| std::fs::read_to_string(d.path().join(format!("{f}.kicad_mod"))).ok())?;
+        standardise::FootprintStyle::from_footprint(&sexpr::parse(&text).ok()?).ok()
+    });
+    let took = style.is_some();
+    match style {
+        Some(style) => _ = profile.footprint_styles.insert(key, style),
+        None if class == Class::Ic => bail!("{name} is an IC, whose symbols are drawn to fit their pins, and its footprint isn't in this library"),
+        None => {}
+    }
+    Ok((class, took))
+}
+
 struct Config {
     naming: rules::Rules,
-    standards: standardise::Rules,
+    profile: Profile,
 }
 
 static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
@@ -420,20 +471,18 @@ thread_local! {
 
 /// Turns the import step on or off from the settings (`house_symbols_on_import`); call when they load or change.
 pub fn configure(s: &Settings) {
-    *CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = s.house_symbols_on_import.then(|| Config { naming: s.rules.clone(), standards: s.standard.rules.clone() });
+    *CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = s.house_symbols_on_import.then(|| Config { naming: s.rules.clone(), profile: s.standard.clone() });
 }
 
 /// Import step: restyles the symbol about to be written to the `category` library, if the setting is on.
 /// A refusal keeps the vendor's symbol. Either way [`take_note`] says what happened.
 pub(crate) fn restyle_imported(category: &str, symbol: &mut Sexpr) {
     NOTE.with(|n| *n.borrow_mut() = None);
-    let (naming, standards) = match CONFIG.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        Some(c) => (c.naming.clone(), c.standards.clone()),
+    let (naming, profile) = match CONFIG.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        Some(c) => (c.naming.clone(), c.profile.clone()),
         None => return,
     };
-    let note = match source_pins(symbol)
-        .and_then(|p| detect(category, symbol, p.len(), &naming).map_err(anyhow::Error::msg))
-        .and_then(|class| restyle(symbol, class, &standards).map(|new| (class, new)))
+    let note = match class_of(category, symbol, &naming).and_then(|class| restyle(symbol, class, &profile).map(|new| (class, new)))
     {
         Ok((class, new)) => {
             *symbol = new;
