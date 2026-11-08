@@ -158,7 +158,11 @@ pub fn plan(root: &LibraryRoot, profile: &profile::Profile, naming: &crate::rule
     for path in footprints {
         let cat = path.parent().and_then(|p| p.file_stem()).unwrap_or_default().to_string_lossy().into_owned();
         let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-        consider(path, format!("footprint {name} in {}", root.nickname(&cat)), &|fp| footprint::fix(fp, rules, styles.get(&name).copied(), limits.as_ref()));
+        consider(path, format!("footprint {name} in {}", root.nickname(&cat)), &|fp| {
+            let mut out = footprint::fix(fp, rules, styles.get(&name).copied(), limits.as_ref());
+            out.extend(crate::model3d::fix(root, fp));
+            out
+        });
     }
     plan
 }

@@ -303,7 +303,10 @@ fn check(json: bool, deep: bool, project: Option<&Path>) -> Result<ExitCode> {
 fn health(json: bool, csv: bool, project: Option<PathBuf>) -> Result<ExitCode> {
     let s = settings()?;
     let dir = project.or(s.last_project.clone()).context("no project: pass --project <dir>")?;
-    let findings = klm_core::health::scan(&dir, kicad_config().ok().as_deref());
+    klm_core::symbols::configure(&s); // the part checks read the active profile
+    let mut findings = klm_core::health::scan(&dir, kicad_config().ok().as_deref());
+    let root = klm_core::library::LibraryRoot::project(&dir);
+    findings.extend(klm_core::compliance::findings(&klm_core::compliance::compute(&root, &s.standard, &s.rules)));
     print_findings(&findings, json, csv)
 }
 
