@@ -326,15 +326,14 @@ fn issues_cell(ui: &mut egui::Ui, issues: Option<&Vec<Issue>>) {
 
 static NO_ISSUES: Vec<Issue> = Vec::new();
 
-/// The ticked rows in a stable order.
+/// OK / No / … for the house standard, with the reasons on hover.
 fn compliance_cell(ui: &mut egui::Ui, c: Option<&compliance::Compliance>) {
     let r = match c {
         None => ui.weak("…").on_hover_text("Working out whether the part follows the house standard"),
         Some(c) if c.ok => ui.label(RichText::new("OK").color(ui.visuals().text_color())).on_hover_text("Standardise has nothing to change and the checks pass"),
         Some(c) => {
             let tip: Vec<_> = c.reasons.iter().map(|r| format!("• {r}")).collect();
-            ui.label(RichText::new("No").color(ui.visuals().warn_fg_color)).on_hover_text(tip.join("
-"))
+            ui.label(RichText::new("No").color(ui.visuals().warn_fg_color)).on_hover_text(tip.join("\n"))
         }
     };
     let text = match c {
@@ -345,6 +344,7 @@ fn compliance_cell(ui: &mut egui::Ui, c: Option<&compliance::Compliance>) {
     r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
 }
 
+/// The ticked rows in a stable order.
 fn sorted(selected: &HashSet<Key>) -> Vec<Key> {
     let mut targets: Vec<_> = selected.iter().cloned().collect();
     targets.sort();
@@ -364,7 +364,7 @@ enum Click {
 impl LibraryTab {
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
         let (global, project) = (cx.global_root(), cx.project_root());
-        if self.standard != (cx.settings.standard.clone(), cx.settings.rules.clone()) {
+        if self.standard.0 != cx.settings.standard || self.standard.1 != cx.settings.rules {
             self.standard = (cx.settings.standard.clone(), cx.settings.rules.clone());
             self.stale = true;
         }
