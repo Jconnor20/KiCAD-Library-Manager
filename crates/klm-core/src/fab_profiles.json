@@ -1,0 +1,50 @@
+{
+  "note": "Standard (cheapest) 2-layer process, 1 oz copper, rigid FR4, not the advanced/HDI options. 2-layer values are used because they are the same or looser than the fab's 4-layer ones, so a board that meets them works on either. Millimetres. null = the fab's page does not publish it (not guessed). Unlisted derived values (e.g. via pad = drill + 2 x ring) are left null too.",
+  "fabs": [
+    {
+      "id": "jlcpcb",
+      "name": "JLCPCB",
+      "source": "https://jlcpcb.com/capabilities/Capabilities",
+      "checked": "2026-11-08",
+      "note": "Annular ring is the page's absolute minimum (0.25 recommended). Silk text 1.0 mm. Mask web is for green/red/yellow/blue/purple; black and white need 0.13.",
+      "limits": { "min_track": 0.10, "min_clearance": 0.10, "min_drill": 0.15, "min_annular_ring": 0.18, "min_via_drill": 0.15, "min_via_diameter": 0.25, "min_silk_width": 0.15, "min_silk_height": 1.0, "min_mask_web": 0.10, "min_edge_clearance": 0.2 }
+    },
+    {
+      "id": "pcbway",
+      "name": "PCBWay",
+      "source": "https://www.pcbway.com/capabilities.html",
+      "checked": "2026-11-08",
+      "note": "Standard tier covers 1-14 layers. Annular ring is the page's figure for pads with vias. Via size, mask web and copper-to-edge are not given for the standard tier (only the advanced table).",
+      "limits": { "min_track": 0.10, "min_clearance": 0.10, "min_drill": 0.15, "min_annular_ring": 0.15, "min_via_drill": null, "min_via_diameter": null, "min_silk_width": 0.15, "min_silk_height": 0.8, "min_mask_web": null, "min_edge_clearance": null }
+    },
+    {
+      "id": "oshpark",
+      "name": "OSH Park",
+      "source": "https://docs.oshpark.com/services/two-layer/",
+      "checked": "2026-11-08",
+      "note": "Silk width is the recommended minimum (3 mil for short lines). Via drill is the minimum drill; via pad diameter and silk text height are not published. 4-layer page: 0.127 track/space, 0.1016 ring.",
+      "limits": { "min_track": 0.1524, "min_clearance": 0.1524, "min_drill": 0.254, "min_annular_ring": 0.127, "min_via_drill": 0.254, "min_via_diameter": null, "min_silk_width": 0.127, "min_silk_height": null, "min_mask_web": 0.1016, "min_edge_clearance": 0.381 }
+    },
+    {
+      "id": "eurocircuits",
+      "name": "Eurocircuits",
+      "source": "https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/",
+      "checked": "2026-11-08",
+      "note": "Track, clearance, drill, ring and via limits depend on the pattern/drill class, which the site gives only as an image, so they are null. Mask web is DI mask (0.130 for white). Edge is outer layers, routed (inner 0.40). Silk text 1.0 mm is the page's readability advice.",
+      "limits": { "min_track": null, "min_clearance": null, "min_drill": null, "min_annular_ring": null, "min_via_drill": null, "min_via_diameter": null, "min_silk_width": 0.10, "min_silk_height": 1.0, "min_mask_web": 0.075, "min_edge_clearance": 0.25 }
+    },
+    {
+      "id": "aisler",
+      "name": "Aisler",
+      "source": "https://community.aisler.net/t/2-layer-simple-design-rules/3735",
+      "checked": "2026-11-08",
+      "note": "2 layer, 1.6 mm, 35 um, HASL. Via drill range starts at 0.3 mm (0.25 on the 4-layer ENIG page). Via pad diameter not published. Mask dam is 'required for HASL'.",
+      "limits": { "min_track": 0.20, "min_clearance": 0.15, "min_drill": 0.5, "min_annular_ring": 0.30, "min_via_drill": 0.3, "min_via_diameter": null, "min_silk_width": 0.15, "min_silk_height": 0.8, "min_mask_web": 0.10, "min_edge_clearance": 0.30 }
+    }
+  ],
+  "ipc": {
+    "note": "annular_ring: IPC-6012 minimum external ring for class 1, 2, 3 (class 1 and 2 allow hole breakout, so no ring is required; class 3 has none, 0.05 mm). Secondary sources disagree on class 3 (0.025 to 0.05 mm), 0.05 is the common figure; the standard itself is paywalled and was not read. courtyard_excess: IPC-7351B for density A, B, C (most parts; connectors and BGAs differ).",
+    "annular_ring": [0.0, 0.0, 0.05],
+    "courtyard_excess": [0.5, 0.25, 0.1]
+  }
+}

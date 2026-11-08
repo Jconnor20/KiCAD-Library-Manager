@@ -357,7 +357,8 @@ The house standard for each component type, so that whatever the source, every p
 
 ## Wave 10: Manufacturer and IPC checks (W10.0 first, then 3 in parallel, ships 0.8.0)
 
-- [ ] **W10.0 Fab data (research first)** (S)
+- [x] **W10.0 Fab data (research first)** (S)
+  - **Done:** `fab_profiles.json` (standard 2-layer process, checked 2026-11-08), `fab_data::{fabs, limits}`, Manufacturer group on Settings › Footprints. Unpublished, left null: PCBWay via drill/pad, mask web, edge; OSH Park via pad, silk text height; Eurocircuits track, clearance, drill, ring, via (class table is only an image); Aisler via pad. IPC-6012 class 3 ring 0.05 mm is from secondary sources (the standard is paywalled).
   - **Owns:** `core/fab_profiles.json` (new), `core/fab_data.rs` (contract laid first: `FabChoice` in the profile, `FabLimits`, `fabs()`, `limits()`), a Manufacturer group in Settings › Standards
   - JLCPCB, PCBWay, OSH Park, Eurocircuits and Aisler minimums: trace and space, drill, annular ring, via, silk, mask web and edge clearance. Each fab has its source URL and the date checked. Adds IPC-6012 class 1/2/3 and IPC-7351 density A/B/C tables. Choosing several fabs means the strictest value wins.
 - [ ] **W10.1 Library footprint fab check** (M)
