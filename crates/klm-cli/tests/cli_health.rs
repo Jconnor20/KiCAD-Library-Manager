@@ -151,7 +151,9 @@ fn health_on_a_complete_project_exits_0() {
     .unwrap();
     let out = klm(&sb, &["health", "--project", proj.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0), "stdout:\n{}\nstderr:\n{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
-    assert!(stdout(&out).ends_with("0 findings\n"), "{}", stdout(&out));
+    // The fixture is complete but not in house style, so the only finding is the compliance one.
+    let text = stdout(&out);
+    assert!(text.ends_with("1 findings\n") && text.contains("compliance") && text.contains("Resistors/RC0603-10K"), "{text}");
 }
 
 #[test]
