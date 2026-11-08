@@ -348,7 +348,7 @@ fn rollback(id: &str, project: Option<&Path>) -> Result<()> {
 fn standardise(project: Option<&Path>, dry_run: bool) -> Result<()> {
     let s = settings()?;
     for root in roots(&s, project)? {
-        let plan = standardise::plan(&root, &s.standard.rules);
+        let plan = standardise::plan(&root, &s.standard);
         print!("{plan}");
         if !dry_run {
             println!("Standardised {} file(s) in {}", standardise::apply(&plan)?, root.dir.display());

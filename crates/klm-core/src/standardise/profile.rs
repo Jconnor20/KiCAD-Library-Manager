@@ -4,10 +4,12 @@
 //! name overrides it. Settings names the active profile and loads its rules (see `settings`).
 
 use super::Rules;
+use crate::fields::ClassInfo;
 use crate::library::sanitize;
 use crate::settings::app_dir;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The profile used when none is chosen: the KiCad Library Conventions.
@@ -25,11 +27,13 @@ pub struct Profile {
     pub name: String,
     pub version: u32,
     pub rules: Rules,
+    /// Part information per class key (see `fields`); a class left out uses the built-in default.
+    pub classes: BTreeMap<String, ClassInfo>,
 }
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { name: BUILT_IN.into(), version: VERSION, rules: Rules::default() }
+        Self { name: BUILT_IN.into(), version: VERSION, rules: Rules::default(), classes: BTreeMap::new() }
     }
 }
 
@@ -87,7 +91,7 @@ pub fn load(name: &str) -> Result<Profile> {
 /// Writes the profile to its file. An untouched built-in needs no file and gets none.
 pub fn save(p: &Profile) -> Result<()> {
     let path = file(&p.name)?;
-    if p.name == BUILT_IN && p.rules == Rules::default() && !path.exists() {
+    if p.name == BUILT_IN && p.rules == Rules::default() && p.classes.is_empty() && !path.exists() {
         return Ok(());
     }
     export(p, &path)

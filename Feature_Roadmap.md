@@ -343,7 +343,7 @@ The house standard for each component type, so that whatever the source, every p
 - [ ] **W9.2 Reference-part templates** (L) ⚑
   - **Owns:** `core/symbols/template.rs`, `core/symbols/mod.rs`, `core/standardise/footprint.rs`
   - `Template::from_symbol` takes the body, pin slots and field positions from a symbol you drew in KiCad, with the built-in templates as fallbacks. "Use as house template for <class>" in the Library tab. Footprints copy the style only (text, layers, line widths, fab outline, pin-1 mark).
-- [ ] **W9.3 Part information per class** (L) ⚑
+- [x] **W9.3 Part information per class** (L) ⚑
   - **Owns:** `core/fields.rs` (new), `core/checks.rs`, `core/standardise/mod.rs`
   - Each class has a field schema (e.g. capacitor: Capacitance, Voltage, Tolerance, Dielectric, Package). Every field records whether it is required and visible, its unit and its format.
   - Description (`ki_description`), Value and Keywords (`ki_keywords`) are built from templates.

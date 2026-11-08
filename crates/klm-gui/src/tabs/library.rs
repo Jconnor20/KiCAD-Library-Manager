@@ -335,9 +335,9 @@ impl LibraryTab {
             }
             Action::Standardise(root) => {
                 let (tx, rx) = mpsc::channel();
-                let (rules, ctx) = (cx.settings.standard.rules.clone(), cx.ctx.clone());
+                let (profile, ctx) = (cx.settings.standard.clone(), cx.ctx.clone());
                 std::thread::spawn(move || {
-                    let _ = tx.send(standardise::plan(&root, &rules));
+                    let _ = tx.send(standardise::plan(&root, &profile));
                     ctx.request_repaint();
                 });
                 self.dry = Some(Dry::Planning(rx));

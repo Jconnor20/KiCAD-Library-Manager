@@ -97,7 +97,8 @@ impl stdfmt::Display for Plan {
 }
 
 /// Works out what the rules would change in `root`, reading every symbol library and footprint but writing nothing.
-pub fn plan(root: &LibraryRoot, rules: &Rules) -> Plan {
+pub fn plan(root: &LibraryRoot, profile: &profile::Profile) -> Plan {
+    let rules = &profile.rules;
     let mut plan = Plan { files: vec![], errors: vec![], root: root.clone() };
     let mut consider = |path: PathBuf, label: String, fix: &dyn Fn(&mut Sexpr) -> Vec<String>| {
         let parsed = std::fs::read_to_string(&path).map_err(anyhow::Error::from).and_then(|t| Ok((sexpr::parse(&t)?, t)));
@@ -118,6 +119,7 @@ pub fn plan(root: &LibraryRoot, rules: &Rules) -> Plan {
             for sym in lib.items_mut().iter_mut().filter(|c| c.head() == Some("symbol")) {
                 let name = sym.arg(0).unwrap_or_default().to_string();
                 out.extend(symbol::fix(sym, rules).into_iter().map(|c| format!("{name}: {c}")));
+                out.extend(crate::fields::fix(sym, &cat, profile, None).into_iter().map(|c| format!("{name}: {c}")));
             }
             out
         });
@@ -195,6 +197,7 @@ fn bbox(pts: &[(f64, f64)]) -> Option<(f64, f64, f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use profile::Profile;
 
     const SYMBOLS: &str = r#"(kicad_symbol_lib (version 20241209) (generator "t")
         (symbol "U1"
@@ -235,7 +238,7 @@ mod tests {
     fn dry_run_writes_nothing_and_apply_snapshots_then_fixes() {
         let (_base, root) = library("standardise_apply");
         let before = contents(&root);
-        let p = plan(&root, &Rules::default());
+        let p = plan(&root, &Profile::default());
         assert_eq!(contents(&root), before, "planning must not touch the library");
         assert!(crate::snapshot::list(&root).is_empty());
         assert_eq!(p.files.len(), 2, "{p}");
@@ -245,7 +248,7 @@ mod tests {
         assert_eq!(crate::snapshot::list(&root).len(), 1, "one snapshot before writing");
         assert_ne!(contents(&root), before);
         // The fixed library conforms, so a second run has nothing to do.
-        let again = plan(&root, &Rules::default());
+        let again = plan(&root, &Profile::default());
         assert!(again.files.is_empty(), "{again}");
     }
 
@@ -264,16 +267,33 @@ mod tests {
             footprint_origin: false,
             pin1_marker: false,
         };
-        assert!(plan(&root, &off).files.is_empty());
+        assert!(plan(&root, &Profile { rules: off, ..Profile::default() }).files.is_empty());
     }
 
     #[test]
     fn apply_refuses_a_file_changed_since_the_plan() {
         let (_base, root) = library("standardise_stale");
-        let p = plan(&root, &Rules::default());
+        let p = plan(&root, &Profile::default());
         std::fs::write(root.dir.join("symbols/ICs.kicad_sym"), SYMBOLS.replace("U1", "U2")).unwrap();
         assert!(apply(&p).unwrap_err().to_string().contains("changed since the dry run"));
         assert!(crate::snapshot::list(&root).is_empty());
+    }
+
+    #[test]
+    fn plan_normalises_and_rebuilds_part_information() {
+        let base = crate::test_dir("standardise_fields");
+        let root = LibraryRoot::global(base.join("lib"), base.join("config"));
+        root.ensure_layout().unwrap();
+        std::fs::write(
+            root.dir.join("symbols/Capacitors.kicad_sym"),
+            r#"(kicad_symbol_lib (version 20241209) (generator "t") (symbol "C1" (property "Value" "C1") (property "Capacitance" "0.1uF") (property "Voltage" "16V")))"#,
+        )
+        .unwrap();
+        let p = plan(&root, &Profile::default());
+        let text = p.to_string();
+        assert!(text.contains("C1: Capacitance: 0.1uF -> 100nF") && text.contains("C1: Description: \"\" -> \"Capacitor 100nF 16V\""), "{text}");
+        apply(&p).unwrap();
+        assert!(plan(&root, &Profile::default()).files.is_empty());
     }
 
     #[test]

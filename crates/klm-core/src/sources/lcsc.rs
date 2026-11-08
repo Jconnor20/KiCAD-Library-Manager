@@ -84,6 +84,7 @@ pub(crate) fn parse_search(body: &Value, query: &str) -> Vec<Part> {
                 supplier_ids: vec![("LCSC".into(), s(c, "componentCode"))],
                 datasheet_url: datasheet.unwrap_or_default(),
                 package: s(c, "componentSpecificationEn"),
+                params: c["attributes"].as_array().into_iter().flatten().map(|a| (s(a, "attribute_name_en"), s(a, "attribute_value_name"))).collect(),
                 // `componentImageUrl` is usually empty; the OSS links are signed and expire after 30 minutes.
                 image_url: [s(c, "minImageAccessIdUrl"), s(c, "componentImageUrl")].into_iter().find(|u| !u.is_empty()).unwrap_or_default(),
                 stock: c["stockCount"].as_u64(),
@@ -192,6 +193,16 @@ mod tests {
         assert_eq!(p.datasheet_url, "https://jlcpcb.com/api/file/downloadByFileSystemAccessId/8588905303245541376");
         assert_eq!(p.category_hint, "Operational Amplifier Amplifiers/Comparators");
         assert_eq!(p.lead_time_days, None, "the reply has no lead time");
+    }
+
+    #[test]
+    fn attributes_autofill_an_ic() {
+        let body: Value = serde_json::from_str(include_str!("../../tests/fixtures/live/jlcpcb_search_LM358.json")).unwrap();
+        let parts = parse_search(&body, "LM358");
+        let p = parts.iter().find(|p| p.supplier_ids[0].1 == "C5213").unwrap();
+        let fills = crate::fields::autofill(&crate::fields::default_class("Ic"), p);
+        let get = |n: &str| fills.iter().find(|(f, _)| f == n).map(|(_, v)| v.as_str());
+        assert_eq!((get("Temp range"), get("Manufacturer"), get("Supplier"), get("Supplier PN")), (Some("0℃~+70℃"), Some("Texas Instruments"), Some("LCSC"), Some("C5213")));
     }
 
     #[test]

@@ -88,6 +88,7 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
                 lead_time_days: lead_days(&http::text(p, "/LeadTime")),
                 unit_price: if b.is_null() { String::new() } else { format!("{} @{}", http::text(b, "/Price"), b["Quantity"]) },
                 // The search reply has no package field; ProductAttributes only lists packaging options.
+                params: p["ProductAttributes"].as_array().into_iter().flatten().map(|a| (http::text(a, "/AttributeName"), http::text(a, "/AttributeValue"))).collect(),
                 supplier_ids: if id.is_empty() { vec![] } else { vec![("Mouser".into(), id)] },
                 ..Part::default()
             }

@@ -131,7 +131,9 @@ fn parse(v: &Value) -> Vec<Part> {
             let param = |name: &str| {
                 p["Parameters"].as_array().into_iter().flatten().find(|x| x["ParameterText"] == name).map(|x| http::text(x, "/ValueText"))
             };
+            let params = p["Parameters"].as_array().into_iter().flatten().map(|x| (http::text(x, "/ParameterText"), http::text(x, "/ValueText"))).collect();
             let base = Part {
+                params,
                 mpn: http::text(p, "/ManufacturerProductNumber"),
                 manufacturer: http::text(p, "/Manufacturer/Name"),
                 description: http::text(p, "/Description/ProductDescription"),
@@ -251,6 +253,18 @@ mod tests {
         let parts = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/digikey_search_category.json")).unwrap());
         assert_eq!(parts.len(), 3);
         assert!(parts.iter().all(|p| p.category_hint.starts_with("Resistors")), "{:?}", parts.iter().map(|p| &p.category_hint).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn parameters_autofill_a_resistor() {
+        let parts = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/digikey_search_category.json")).unwrap());
+        let fills = crate::fields::autofill(&crate::fields::default_class("Resistor"), &parts[1]);
+        let get = |n: &str| fills.iter().find(|(f, _)| f == n).map(|(_, v)| v.as_str());
+        assert_eq!((get("Resistance"), get("Tolerance"), get("Power"), get("Package")), (Some("10kΩ"), Some("1%"), Some("100mW"), Some("0402")));
+        assert_eq!(get("Temp coefficient"), Some("±100ppm/°C"), "free text is kept as the source writes it");
+        // A jumper's "Jumper" tolerance and "-" power are not values.
+        let jumper = crate::fields::autofill(&crate::fields::default_class("Resistor"), &parts[0]);
+        assert!(!jumper.iter().any(|(f, _)| f == "Tolerance" || f == "Power"), "{jumper:?}");
     }
 
     #[test]
