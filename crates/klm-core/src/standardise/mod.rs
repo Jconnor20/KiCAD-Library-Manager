@@ -103,6 +103,9 @@ impl stdfmt::Display for Plan {
 /// every symbol library and footprint but writing nothing. `naming` tells which class a part is.
 pub fn plan(root: &LibraryRoot, profile: &profile::Profile, naming: &crate::rules::Rules) -> Plan {
     let rules = &profile.rules;
+    // Fab fixes only once a fab is chosen: the density defaults to B in every profile, so growing courtyards
+    // without one would rewrite every footprint of every library the first time it is standardised.
+    let limits = (!profile.fab.fabs.is_empty()).then(|| crate::fab_data::limits(&profile.fab));
     // Footprint name -> the house style of the class of the part that uses it.
     let mut styles: HashMap<String, &FootprintStyle> = HashMap::new();
     for cat in root.categories().into_iter().filter(|_| !profile.footprint_styles.is_empty()) {
@@ -155,7 +158,7 @@ pub fn plan(root: &LibraryRoot, profile: &profile::Profile, naming: &crate::rule
     for path in footprints {
         let cat = path.parent().and_then(|p| p.file_stem()).unwrap_or_default().to_string_lossy().into_owned();
         let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-        consider(path, format!("footprint {name} in {}", root.nickname(&cat)), &|fp| footprint::fix(fp, rules, styles.get(&name).copied()));
+        consider(path, format!("footprint {name} in {}", root.nickname(&cat)), &|fp| footprint::fix(fp, rules, styles.get(&name).copied(), limits.as_ref()));
     }
     plan
 }

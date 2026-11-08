@@ -361,9 +361,10 @@ The house standard for each component type, so that whatever the source, every p
   - **Done:** `fab_profiles.json` (standard 2-layer process, checked 2026-11-08), `fab_data::{fabs, limits}`, Manufacturer group on Settings › Footprints. Unpublished, left null: PCBWay via drill/pad, mask web, edge; OSH Park via pad, silk text height; Eurocircuits track, clearance, drill, ring, via (class table is only an image); Aisler via pad. IPC-6012 class 3 ring 0.05 mm is from secondary sources (the standard is paywalled).
   - **Owns:** `core/fab_profiles.json` (new), `core/fab_data.rs` (contract laid first: `FabChoice` in the profile, `FabLimits`, `fabs()`, `limits()`), a Manufacturer group in Settings › Standards
   - JLCPCB, PCBWay, OSH Park, Eurocircuits and Aisler minimums: trace and space, drill, annular ring, via, silk, mask web and edge clearance. Each fab has its source URL and the date checked. Adds IPC-6012 class 1/2/3 and IPC-7351 density A/B/C tables. Choosing several fabs means the strictest value wins.
-- [ ] **W10.1 Library footprint fab check** (M)
+- [x] **W10.1 Library footprint fab check** (M)
   - **Owns:** `core/fab.rs` (new)
   - Checks pad gap, drill, annular ring, silk width and height, silk on pads, and courtyard excess. Safe fixes (silk width, clip silk, grow courtyard) join the Standardise plan; everything else is flagged.
+  - **Done:** `fab::check_footprint` runs in `check_part` (warnings) when the active profile names a fab. Pad gaps are exact for rect, roundrect, circle and oval at any rotation; trapezoid/custom pads count as their size rectangle, inner layers are ignored. Silk-on-pad uses the pad box plus mask web (0.1 mm default) and only straight silk; only `fp_line` is clipped. The courtyard grows by moving its outermost points to the 0.01 mm grid; round courtyards are not grown. Fixes run only with a fab chosen, so default profiles don't rewrite every footprint.
 - [ ] **W10.2 Whole-project check** (M) ⚑
   - **Owns:** `core/project_check.rs` (new), `klm-cli check-project`
   - Writes a `.kicad_dru` and board minimums from the profile, then runs `kicad-cli pcb drc` and `sch erc` (JSON) and maps the results into health findings. In "All fabs" mode it lists which fabs pass.

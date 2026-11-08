@@ -12,6 +12,7 @@ pub mod credentials;
 pub mod currency;
 pub mod download;
 pub mod export;
+pub mod fab;
 pub mod fab_data;
 pub mod fields;
 pub mod health;

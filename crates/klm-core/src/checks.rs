@@ -3,6 +3,7 @@
 //! `Library::list_parts` says what a part has; this says whether what it has is right. Every check
 //! only reads files, and skips what it can't see (a footprint or model in another library).
 
+use crate::fab_data::FabLimits;
 use crate::fields;
 use crate::library::{LibraryRoot, property, sanitize};
 use crate::part::Part;
@@ -39,10 +40,11 @@ fn warning(out: &mut Vec<Issue>, message: String) {
 /// read once, so this is the cheap way to check everything.
 pub fn check_library(root: &LibraryRoot) -> HashMap<(String, String), Vec<Issue>> {
     let (mut all, profile) = (HashMap::new(), fields::active());
+    let limits = fab_limits(&profile);
     for cat in root.categories() {
         let Some(lib) = read_symbol_lib(root, &cat) else { continue };
         for sym in lib.children("symbol") {
-            all.insert((cat.clone(), sym.arg(0).unwrap_or_default().to_string()), check_symbol(root, &cat, &lib, sym, &profile));
+            all.insert((cat.clone(), sym.arg(0).unwrap_or_default().to_string()), check_symbol(root, &cat, &lib, sym, &profile, limits.as_ref()));
         }
     }
     all
@@ -53,7 +55,10 @@ pub fn check_part(root: &LibraryRoot, category: &str, symbol_name: &str) -> Vec<
         return vec![Issue { severity: Severity::Error, message: format!("The {category} symbol library can't be read") }];
     };
     match lib.children("symbol").find(|s| s.arg(0) == Some(symbol_name)) {
-        Some(sym) => check_symbol(root, category, &lib, sym, &fields::active()),
+        Some(sym) => {
+            let profile = fields::active();
+            check_symbol(root, category, &lib, sym, &profile, fab_limits(&profile).as_ref())
+        }
         None => vec![Issue { severity: Severity::Error, message: format!("{symbol_name} is not in the {category} symbol library") }],
     }
 }
@@ -63,7 +68,12 @@ fn read_symbol_lib(root: &LibraryRoot, category: &str) -> Option<Sexpr> {
     sexpr::parse(&std::fs::read_to_string(path).ok()?).ok()
 }
 
-fn check_symbol(root: &LibraryRoot, cat: &str, lib: &Sexpr, sym: &Sexpr, profile: &Profile) -> Vec<Issue> {
+/// The active profile's fab limits, or `None` when it names no fab (then no fab checks run).
+fn fab_limits(profile: &Profile) -> Option<FabLimits> {
+    (!profile.fab.fabs.is_empty()).then(|| crate::fab_data::limits(&profile.fab))
+}
+
+fn check_symbol(root: &LibraryRoot, cat: &str, lib: &Sexpr, sym: &Sexpr, profile: &Profile, limits: Option<&FabLimits>) -> Vec<Issue> {
     let mut out = vec![];
     for key in REQUIRED_FIELDS {
         if property(sym, key).is_none_or(|v| v.trim().is_empty()) {
@@ -83,6 +93,9 @@ fn check_symbol(root: &LibraryRoot, cat: &str, lib: &Sexpr, sym: &Sexpr, profile
     };
 
     check_footprint(&pins, &fp, &mut out);
+    if let Some(limits) = limits {
+        out.extend(crate::fab::check_footprint(&fp, limits));
+    }
     if let Some(model) = fp.child("model").and_then(|m| m.arg(0)) {
         check_model(root, model, &mut out);
     }
@@ -252,7 +265,7 @@ fn check_duplicate_pins(pins: &[(u32, u32, String)], out: &mut Vec<Issue>) {
 }
 
 /// Up to 8 numbers in natural order (2 before 10), then a count of the rest.
-fn list<'a>(numbers: impl IntoIterator<Item = &'a str>) -> String {
+pub(crate) fn list<'a>(numbers: impl IntoIterator<Item = &'a str>) -> String {
     let mut v: Vec<_> = numbers.into_iter().collect();
     v.sort_by_key(|n| (n.len(), *n));
     let more = v.len().saturating_sub(8);
@@ -262,13 +275,21 @@ fn list<'a>(numbers: impl IntoIterator<Item = &'a str>) -> String {
 
 pub(crate) struct Pad {
     pub(crate) number: String,
-    shape: String,
+    pub(crate) shape: String,
     pub(crate) at: (f64, f64),
     /// Larger side of the pad.
     pub(crate) size: f64,
+    /// Width and height before rotation, rotation in degrees (counter-clockwise on screen), and the
+    /// roundrect corner ratio.
+    pub(crate) dims: (f64, f64),
+    pub(crate) angle: f64,
+    pub(crate) rratio: f64,
+    /// Drill of a plated hole, (x, y) before rotation; `None` for SMD pads.
+    pub(crate) drill: Option<(f64, f64)>,
+    pub(crate) layers: Vec<String>,
 }
 
-fn xy(n: &Sexpr) -> Option<(f64, f64)> {
+pub(crate) fn xy(n: &Sexpr) -> Option<(f64, f64)> {
     Some((n.arg(0)?.parse().ok()?, n.arg(1)?.parse().ok()?))
 }
 
@@ -279,7 +300,23 @@ pub(crate) fn numbered_pads(fp: &Sexpr) -> Vec<Pad> {
         .filter_map(|p| {
             let number = p.arg(0).filter(|n| !n.is_empty())?.to_string();
             let (w, h) = p.child("size").and_then(xy).unwrap_or_default();
-            Some(Pad { number, shape: p.arg(2).unwrap_or_default().to_string(), at: p.child("at").and_then(xy).unwrap_or_default(), size: w.max(h) })
+            let num = |n: Option<&str>| n.and_then(|v| v.parse::<f64>().ok());
+            // (drill d) or (drill oval x y); a missing y means round.
+            let drill = p.child("drill").filter(|_| p.arg(1) == Some("thru_hole")).and_then(|d| {
+                let v: Vec<f64> = d.items()[1..].iter().filter_map(|i| i.text()?.parse().ok()).collect();
+                Some((*v.first()?, *v.get(1).or(v.first())?))
+            });
+            Some(Pad {
+                number,
+                shape: p.arg(2).unwrap_or_default().to_string(),
+                at: p.child("at").and_then(xy).unwrap_or_default(),
+                size: w.max(h),
+                dims: (w, h),
+                angle: num(p.child("at").and_then(|a| a.arg(2))).unwrap_or(0.0),
+                rratio: num(p.child("roundrect_rratio").and_then(|r| r.arg(0))).unwrap_or(0.25),
+                drill,
+                layers: p.child("layers").map(|l| l.items()[1..].iter().filter_map(|i| i.text().map(String::from)).collect()).unwrap_or_default(),
+            })
         })
         .collect()
 }
