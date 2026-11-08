@@ -135,6 +135,7 @@ pub fn plan(root: &LibraryRoot, profile: &profile::Profile, naming: &crate::rule
             for sym in lib.items_mut().iter_mut().filter(|c| c.head() == Some("symbol")) {
                 let name = sym.arg(0).unwrap_or_default().to_string();
                 out.extend(symbol::fix(sym, rules).into_iter().map(|c| format!("{name}: {c}")));
+                out.extend(crate::fields::fix(sym, &cat, profile, None).into_iter().map(|c| format!("{name}: {c}")));
             }
             out
         });
@@ -212,6 +213,7 @@ fn bbox(pts: &[(f64, f64)]) -> Option<(f64, f64, f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use profile::Profile;
 
     const SYMBOLS: &str = r#"(kicad_symbol_lib (version 20241209) (generator "t")
         (symbol "U1"
@@ -291,6 +293,23 @@ mod tests {
         std::fs::write(root.dir.join("symbols/ICs.kicad_sym"), SYMBOLS.replace("U1", "U2")).unwrap();
         assert!(apply(&p).unwrap_err().to_string().contains("changed since the dry run"));
         assert!(crate::snapshot::list(&root).is_empty());
+    }
+
+    #[test]
+    fn plan_normalises_and_rebuilds_part_information() {
+        let base = crate::test_dir("standardise_fields");
+        let root = LibraryRoot::global(base.join("lib"), base.join("config"));
+        root.ensure_layout().unwrap();
+        std::fs::write(
+            root.dir.join("symbols/Capacitors.kicad_sym"),
+            r#"(kicad_symbol_lib (version 20241209) (generator "t") (symbol "C1" (property "Value" "C1") (property "Capacitance" "0.1uF") (property "Voltage" "16V")))"#,
+        )
+        .unwrap();
+        let p = plan(&root, &Profile::default(), &Default::default());
+        let text = p.to_string();
+        assert!(text.contains("C1: Capacitance: 0.1uF -> 100nF") && text.contains("C1: Description: \"\" -> \"Capacitor 100nF 16V\""), "{text}");
+        apply(&p).unwrap();
+        assert!(plan(&root, &Profile::default(), &Default::default()).files.is_empty());
     }
 
     #[test]

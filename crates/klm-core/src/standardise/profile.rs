@@ -4,6 +4,7 @@
 //! name overrides it. Settings names the active profile and loads its rules (see `settings`).
 
 use super::{FootprintStyle, Rules};
+use crate::fields::ClassInfo;
 use crate::library::sanitize;
 use crate::settings::app_dir;
 use anyhow::{Context, Result, bail};
@@ -31,11 +32,13 @@ pub struct Profile {
     pub templates: BTreeMap<String, String>,
     /// Footprint text, line and pin-1 style per class name, taken from a reference footprint.
     pub footprint_styles: BTreeMap<String, FootprintStyle>,
+    /// Part information per class key (see `fields`); a class left out uses the built-in default.
+    pub classes: BTreeMap<String, ClassInfo>,
 }
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { name: BUILT_IN.into(), version: VERSION, rules: Rules::default(), templates: BTreeMap::new(), footprint_styles: BTreeMap::new() }
+        Self { name: BUILT_IN.into(), version: VERSION, rules: Rules::default(), templates: BTreeMap::new(), footprint_styles: BTreeMap::new(), classes: BTreeMap::new() }
     }
 }
 

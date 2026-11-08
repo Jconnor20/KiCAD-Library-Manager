@@ -138,6 +138,7 @@ impl LibraryRoot {
         }
 
         crate::symbols::restyle_imported(cat, &mut symbol);
+        crate::fields::fix_imported(cat, &mut symbol, part);
         merge_symbol(&self.symbol_lib(cat), &vendor_lib, symbol)
     }
 }

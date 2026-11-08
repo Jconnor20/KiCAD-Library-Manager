@@ -5,6 +5,13 @@ use klm_core::settings::{self, MIGRATED_PROFILE, Settings};
 use klm_core::standardise::profile;
 
 #[test]
+fn profile_files_from_before_part_information_still_load() {
+    let p: profile::Profile = serde_json::from_str(r#"{"name":"Old","version":1,"rules":{"silk_width":0.2}}"#).unwrap();
+    assert!(p.classes.is_empty());
+    assert_eq!(p.class("Capacitor"), klm_core::fields::default_class("Capacitor"));
+}
+
+#[test]
 fn profiles_migrate_save_and_share() {
     let d = std::env::temp_dir().join(format!("klm-sandbox-profiles-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);

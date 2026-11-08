@@ -471,6 +471,7 @@ thread_local! {
 
 /// Turns the import step on or off from the settings (`house_symbols_on_import`); call when they load or change.
 pub fn configure(s: &Settings) {
+    crate::fields::configure(&s.standard, s.house_symbols_on_import);
     *CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = s.house_symbols_on_import.then(|| Config { naming: s.rules.clone(), profile: s.standard.clone() });
 }
 

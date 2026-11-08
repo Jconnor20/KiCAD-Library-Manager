@@ -73,6 +73,15 @@ fn parse(v: &Value) -> Result<Vec<Part>> {
                 datasheet_url: http::https(http::text(p, "/bestDatasheet/url")),
                 package: package.map(|s| http::text(s, "/displayValue")).unwrap_or_default(),
                 stock: p["totalAvail"].as_u64(),
+                params: p["specs"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|s| {
+                        let name = http::text(s, "/attribute/name");
+                        (if name.is_empty() { http::text(s, "/attribute/shortname") } else { name }, http::text(s, "/displayValue"))
+                    })
+                    .collect(),
                 ..Part::default()
             };
             // Lowest-quantity USD price over all sellers, so the column is comparable across rows.
