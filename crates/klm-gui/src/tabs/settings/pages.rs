@@ -1,7 +1,7 @@
 //! One function per Settings page; each edits the popup's copy of `Settings`.
 
 use super::super::ui_kit::{Level, Section, Status, badge, status_cell};
-use super::super::standards;
+use super::super::{part_info, standards};
 use super::{Cmd, KICAD_CLI, SettingsTab};
 use eframe::egui::{self, Ui};
 use klm_core::cache::DEFAULT_TTL_MINUTES;
@@ -24,6 +24,7 @@ pub fn title(s: Section) -> &'static str {
         Section::Import => "Import",
         Section::Standards | Section::Symbols => "Standards › Symbols",
         Section::Footprints => "Standards › Footprints",
+        Section::PartInfo => "Standards › Part information",
         Section::Bom => "BOM",
         Section::History => "History",
     }
@@ -53,8 +54,9 @@ pub fn restore(d: &mut Settings, s: Section) {
         Section::KiCad => d.kicad_cli = None,
         Section::Search => (d.cache_ttl_minutes, d.display_currency) = (def.cache_ttl_minutes, def.display_currency),
         Section::Import => (d.rules, d.house_symbols_on_import) = (def.rules, def.house_symbols_on_import),
-        Section::Symbols => standards::reset_symbols(&mut d.standards),
-        Section::Footprints => standards::reset_footprints(&mut d.standards),
+        Section::Symbols => standards::reset_symbols(&mut d.standard.rules),
+        Section::Footprints => standards::reset_footprints(&mut d.standard.rules),
+        Section::PartInfo => d.standard.classes.clear(),
         Section::Bom => (d.shipping_region, d.bom_fields) = (def.shipping_region, def.bom_fields),
         Section::History => d.history = History::default(),
         s => {
@@ -223,14 +225,18 @@ impl SettingsTab {
                     })
                 },
             ),
-            Section::Standards | Section::Symbols => group(ui, "Symbols", |ui| {
-                ui.weak("Fixes that make parts follow the KiCad Library Conventions. Untick a rule to leave that alone. The Library tab runs them.");
-                standards::symbols(ui, &mut d.standards);
-            }),
-            Section::Footprints => group(ui, "Footprints", |ui| {
-                ui.weak("Fixes that make parts follow the KiCad Library Conventions. Untick a rule to leave that alone. The Library tab runs them.");
-                standards::footprints(ui, &mut d.standards);
-            }),
+            Section::Standards | Section::Symbols | Section::Footprints => {
+                if let Some(e) = group(ui, "Standard profile", |ui| standards::profile(ui, d)) {
+                    cmd = Some(Cmd::Log(Level::Error, e));
+                }
+                let footprints = matches!(self.section, Section::Footprints);
+                group(ui, if footprints { "Footprints" } else { "Symbols" }, |ui| {
+                    ui.weak("Fixes that make parts follow the active profile (KiCad Library Conventions by default). Untick a rule to leave that alone. The Library tab runs them.");
+                    if footprints { standards::footprints(ui, &mut d.standard.rules) } else { standards::symbols(ui, &mut d.standard.rules) }
+                });
+                group(ui, "House templates", |ui| standards::house_templates(ui, &mut d.standard));
+            }
+            Section::PartInfo => part_info::page(ui, &mut d.standard, &mut self.info_class),
             Section::Bom => {
                 group(ui, "Shipping region", |ui| {
                     ui.weak("Country code (US, DE, ...) used for BOM stock and prices; each project can override it. Only DigiKey uses it so far.");

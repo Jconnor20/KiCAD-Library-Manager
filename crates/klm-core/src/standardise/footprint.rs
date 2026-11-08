@@ -2,33 +2,136 @@
 
 use super::{Rules, bbox, child_mut, differs, fmt, move_to, num, set_num};
 use crate::checks::{has_pin1_marker, numbered_pads, on_layer, points};
-use crate::sexpr::Sexpr;
+use crate::sexpr::{self, Sexpr};
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 const GRAPHICS: &[&str] = &["fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve"];
 
-/// Applies the footprint rules and says what changed.
-pub(super) fn fix(fp: &mut Sexpr, r: &Rules) -> Vec<String> {
+/// How a reference footprint looks, without its geometry: line width per layer, Reference/Value text and
+/// where it sits relative to the courtyard, and the shape of the pin-1 marker.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FootprintStyle {
+    /// Line width per layer, e.g. "F.SilkS": 0.12.
+    pub widths: BTreeMap<String, f64>,
+    /// By field: "Reference", "Value".
+    pub texts: BTreeMap<String, TextStyle>,
+    /// The pin-1 marker as drawn, centred on the origin; drawn where a footprint has no marker.
+    pub pin1: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TextStyle {
+    pub layer: String,
+    /// The `(font ...)` s-expression: size, thickness, face.
+    pub font: Option<String>,
+    /// Offset from the courtyard's centre (x) and from its top edge, or its bottom edge when `below` (y).
+    pub dx: f64,
+    pub dy: f64,
+    pub below: bool,
+}
+
+fn is_graphic(c: &Sexpr) -> bool {
+    c.head().is_some_and(|h| GRAPHICS.contains(&h))
+}
+
+/// Reference or Value: (property "Reference" ...) in KiCad 8+, (fp_text reference ...) before.
+fn is_text(c: &Sexpr, key: &str) -> bool {
+    (c.head() == Some("property") && c.arg(0) == Some(key)) || (c.head() == Some("fp_text") && c.arg(0) == Some(key.to_lowercase().as_str()))
+}
+
+fn width(g: &Sexpr) -> Option<f64> {
+    num(g.child("stroke").and_then(|s| s.child("width")).or(g.child("width"))?, 0)
+}
+
+impl FootprintStyle {
+    /// The style of `fp`, a footprint the user chose as the house reference for a class.
+    pub fn from_footprint(fp: &Sexpr) -> Result<Self> {
+        let mut style = Self::default();
+        for g in fp.items().iter().filter(|c| is_graphic(c)) {
+            if let (Some(layer), Some(w)) = (g.child("layer").and_then(|l| l.arg(0)), width(g)) {
+                style.widths.entry(layer.to_string()).or_insert(w);
+            }
+        }
+        let (x0, y0, x1, y1) = outline(fp).context("the footprint has no courtyard or pads")?;
+        let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+        for key in ["Reference", "Value"] {
+            let Some(t) = fp.items().iter().find(|c| is_text(c, key)) else { continue };
+            let Some((x, y)) = t.child("at").and_then(|a| Some((num(a, 0)?, num(a, 1)?))) else { continue };
+            let below = y > cy;
+            style.texts.insert(
+                key.into(),
+                TextStyle {
+                    layer: t.child("layer").and_then(|l| l.arg(0)).unwrap_or("F.SilkS").into(),
+                    font: t.child("effects").and_then(|e| e.child("font")).map(sexpr::to_string),
+                    dx: x - cx,
+                    dy: y - if below { y1 } else { y0 },
+                    below,
+                },
+            );
+        }
+        style.pin1 = pin1_graphic(fp).map(|mut g| {
+            let mut pts = vec![];
+            points(&g, &mut pts);
+            if let Some((a, b, c, d)) = bbox(&pts) {
+                shift(&mut g, (-(a + c) / 2.0, -(b + d) / 2.0));
+            }
+            sexpr::to_string(&g)
+        });
+        Ok(style)
+    }
+}
+
+/// The graphic that marks pin 1 in `fp`, found with the same test as the checks: the one graphic that
+/// alone makes an otherwise bare footprint pass. `None` when the pad's shape is the marker or there is none.
+fn pin1_graphic(fp: &Sexpr) -> Option<Sexpr> {
+    let pads = numbered_pads(fp);
+    let bare = |extra: Option<&Sexpr>| {
+        let mut f = fp.clone();
+        f.items_mut().retain(|c| !is_graphic(c) && !matches!(c.head(), Some("fp_text" | "text")));
+        f.items_mut().extend(extra.cloned());
+        f
+    };
+    if has_pin1_marker(&bare(None), &pads) {
+        return None;
+    }
+    fp.items().iter().filter(|g| is_graphic(g)).find(|g| has_pin1_marker(&bare(Some(g)), &pads)).cloned()
+}
+
+/// Applies the footprint rules, then the house style of the part's class when there is one, and says what
+/// changed. The style's widths and text placement replace the generic rules; its pin-1 marker replaces the
+/// default dot (still only when the pin-1 rule is on).
+pub(super) fn fix(fp: &mut Sexpr, r: &Rules, style: Option<&FootprintStyle>) -> Vec<String> {
     let mut out = vec![];
+    let none = FootprintStyle::default();
+    let style = style.unwrap_or(&none);
     for (width, layer, what) in [(r.silk_width, ".SilkS", "silkscreen"), (r.fab_width, ".Fab", "fab"), (r.courtyard_width, ".CrtYd", "courtyard")] {
-        out.extend(width.and_then(|w| line_width(fp, layer, w, what)));
+        out.extend(width.and_then(|w| line_width(fp, layer, w, what, &style.widths)));
+    }
+    for (layer, w) in &style.widths {
+        out.extend(line_width(fp, layer, *w, layer, &BTreeMap::new()));
     }
     // Origin first: placement and the pin-1 marker are worked out from the moved footprint.
     if r.footprint_origin {
         out.extend(origin(fp));
     }
-    if r.footprint_ref_value {
+    if r.footprint_ref_value && style.texts.is_empty() {
         out.extend(ref_value(fp));
     }
+    out.extend(house_texts(fp, &style.texts));
     if r.pin1_marker {
-        out.extend(pin1_marker(fp, r.silk_width.unwrap_or(0.12)));
+        out.extend(pin1_marker(fp, r.silk_width.unwrap_or(0.12), style.pin1.as_deref()));
     }
     out
 }
 
-fn line_width(fp: &mut Sexpr, layer: &str, width: f64, what: &str) -> Option<String> {
+/// Sets the widths of lines on layers ending in `layer`, except on the layers in `except` (the house style's).
+fn line_width(fp: &mut Sexpr, layer: &str, width: f64, what: &str, except: &BTreeMap<String, f64>) -> Option<String> {
     let mut n = 0;
-    for g in fp.items_mut().iter_mut().filter(|c| c.head().is_some_and(|h| GRAPHICS.contains(&h))) {
-        if !g.child("layer").and_then(|l| l.arg(0)).is_some_and(|l| l.ends_with(layer)) {
+    for g in fp.items_mut().iter_mut().filter(|c| is_graphic(c)) {
+        if !g.child("layer").and_then(|l| l.arg(0)).is_some_and(|l| l.ends_with(layer) && !except.contains_key(l)) {
             continue;
         }
         // KiCad 7+ writes (stroke (width w)), older files a bare (width w).
@@ -105,13 +208,48 @@ fn outline(fp: &Sexpr) -> Option<(f64, f64, f64, f64)> {
     bbox(&pts)
 }
 
+/// Reference and Value on the house style's layer and font, at its place relative to the courtyard.
+fn house_texts(fp: &mut Sexpr, texts: &BTreeMap<String, TextStyle>) -> Option<String> {
+    let (x0, y0, x1, y1) = outline(fp)?;
+    let mut styled = vec![];
+    for (key, t) in texts {
+        let Some(node) = fp.items_mut().iter_mut().find(|c| is_text(c, key)) else { continue };
+        let target = ((x0 + x1) / 2.0 + t.dx, if t.below { y1 } else { y0 } + t.dy);
+        let mut changed = child_mut(node, "at").is_some_and(|at| move_to(at, target));
+        if let Some(l) = child_mut(node, "layer").filter(|l| l.arg(0) != Some(t.layer.as_str())) {
+            l.set_arg(0, Sexpr::str(&t.layer));
+            changed = true;
+        }
+        if let Some(font) = t.font.as_deref().and_then(|f| sexpr::parse(f).ok()) {
+            if child_mut(node, "effects").is_none() {
+                node.items_mut().push(Sexpr::list("effects", vec![]));
+            }
+            let effects = child_mut(node, "effects").unwrap();
+            match child_mut(effects, "font") {
+                Some(old) if *old == font => {}
+                Some(old) => {
+                    *old = font;
+                    changed = true;
+                }
+                None => {
+                    effects.items_mut().push(font);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            styled.push(key.as_str());
+        }
+    }
+    (!styled.is_empty()).then(|| format!("{} placed and styled like the house footprint", styled.join(" and ")))
+}
+
 fn ref_value(fp: &mut Sexpr) -> Option<String> {
     let (x0, y0, x1, y1) = outline(fp)?;
     let cx = (x0 + x1) / 2.0;
     let mut moved = vec![];
-    for (key, old, y) in [("Reference", "reference", y0 - 1.0), ("Value", "value", y1 + 1.0)] {
-        // KiCad 8+ has (property "Reference" ...), older files (fp_text reference ...).
-        let node = fp.items_mut().iter_mut().find(|c| (c.head() == Some("property") && c.arg(0) == Some(key)) || (c.head() == Some("fp_text") && c.arg(0) == Some(old)));
+    for (key, y) in [("Reference", y0 - 1.0), ("Value", y1 + 1.0)] {
+        let node = fp.items_mut().iter_mut().find(|c| is_text(c, key));
         if node.and_then(|n| child_mut(n, "at")).is_some_and(|at| move_to(at, (cx, y))) {
             moved.push(key);
         }
@@ -119,7 +257,7 @@ fn ref_value(fp: &mut Sexpr) -> Option<String> {
     (!moved.is_empty()).then(|| format!("{} moved {}", moved.join(" and "), if moved.len() == 2 { "above and below the courtyard" } else { "next to the courtyard" }))
 }
 
-fn pin1_marker(fp: &mut Sexpr, width: f64) -> Option<String> {
+fn pin1_marker(fp: &mut Sexpr, width: f64, house: Option<&str>) -> Option<String> {
     let pads = numbered_pads(fp);
     if has_pin1_marker(fp, &pads) {
         return None;
@@ -130,7 +268,24 @@ fn pin1_marker(fp: &mut Sexpr, width: f64) -> Option<String> {
     let (dx, dy) = (one.at.0 - centre.0, one.at.1 - centre.1);
     let len = dx.hypot(dy);
     let dir = if len > 1e-6 { (dx / len, dy / len) } else { (-1.0, 0.0) };
+    let house = house.and_then(|h| sexpr::parse(h).ok());
+    let mut pts = vec![];
+    if let Some(h) = &house {
+        points(h, &mut pts);
+    }
+    let extent = bbox(&pts).map_or(0.0, |(a, b, c, d)| (c - a).max(d - b) / 2.0);
     // Away from the centre and clear of the pad's corners (0.71 × its size).
+    let reach = one.size * 0.75 + 0.5 + extent;
+    let (x, y) = (one.at.0 + dir.0 * reach, one.at.1 + dir.1 * reach);
+    if let Some(mut h) = house {
+        shift(&mut h, (x, y));
+        fp.items_mut().push(h);
+        if has_pin1_marker(fp, &pads) {
+            return Some(format!("house pin-1 marker added at ({}, {})", fmt(x), fmt(y)));
+        }
+        // Too large to read as a marker where it landed: the default dot instead.
+        fp.items_mut().pop();
+    }
     let reach = one.size * 0.75 + 0.5;
     let (x, y) = (one.at.0 + dir.0 * reach, one.at.1 + dir.1 * reach);
     let a = |v: f64| Sexpr::Atom(fmt(v));
@@ -171,7 +326,7 @@ mod tests {
 
     fn run(r: Rules) -> (Sexpr, Vec<String>) {
         let mut fp = parse(FP).unwrap();
-        let changes = fix(&mut fp, &r);
+        let changes = fix(&mut fp, &r, None);
         (fp, changes)
     }
 
@@ -197,7 +352,7 @@ mod tests {
         assert!(to_string(&fp).contains("(xyz -1 1 0)"), "3D model follows, with its y axis flipped");
         // Through-hole: pin 1 becomes the origin.
         let mut tht = parse(&FP.replace("(attr smd)", "(attr through_hole)").replace("(at 0 0) (size", "(at 3 4) (size")).unwrap();
-        fix(&mut tht, &Rules { footprint_origin: true, ..only(Rules::default()) });
+        fix(&mut tht, &Rules { footprint_origin: true, ..only(Rules::default()) }, None);
         assert_eq!(at(&tht, "pad", "1"), "(at 0 0)");
     }
 
@@ -219,6 +374,41 @@ mod tests {
         assert!(has_pin1_marker(&fp, &numbered_pads(&fp)));
         // A footprint that already marks pin 1 is left alone.
         let mut again = fp.clone();
-        assert!(fix(&mut again, &r).is_empty());
+        assert!(fix(&mut again, &r, None).is_empty());
+    }
+
+    #[test]
+    fn house_style_copies_widths_text_and_pin1_marker_but_no_geometry() {
+        // Reference: a triangle on silk marks pin 1, text on F.Fab half a mm above the courtyard.
+        let reference = parse(r#"(footprint "REF" (layer "F.Cu")
+            (property "Reference" "REF**" (at 0 -3.5 0) (layer "F.Fab") (effects (font (size 0.7 0.7) (thickness 0.1))))
+            (attr smd)
+            (fp_line (start -2 -2) (end 2 -2) (stroke (width 0.15) (type solid)) (layer "F.SilkS"))
+            (fp_poly (pts (xy -2.5 -1.5) (xy -2.1 -1.5) (xy -2.5 -1.1)) (stroke (width 0.15) (type solid)) (fill solid) (layer "F.SilkS"))
+            (fp_rect (start -3 -3) (end 3 3) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
+            (pad "1" smd rect (at -1.5 -1) (size 0.6 0.6) (layers "F.Cu"))
+            (pad "2" smd rect (at -1.5 1) (size 0.6 0.6) (layers "F.Cu"))
+            (pad "3" smd rect (at 1.5 1) (size 0.6 0.6) (layers "F.Cu"))
+            (pad "4" smd rect (at 1.5 -1) (size 0.6 0.6) (layers "F.Cu")))"#).unwrap();
+        let style = FootprintStyle::from_footprint(&reference).unwrap();
+        assert_eq!(style.widths.get("F.SilkS"), Some(&0.15));
+        let t = &style.texts["Reference"];
+        assert_eq!((t.layer.as_str(), t.dx, t.dy, t.below), ("F.Fab", 0.0, -0.5, false));
+        assert!(style.pin1.as_deref().is_some_and(|p| p.contains("fp_poly")), "{:?}", style.pin1);
+
+        let r = Rules { silk_width: Some(0.12), footprint_ref_value: true, pin1_marker: true, ..only(Rules::default()) };
+        let mut fp = parse(FP).unwrap();
+        let pads_before: Vec<_> = fp.children("pad").cloned().collect();
+        let changes = fix(&mut fp, &r, Some(&style));
+        assert!(changes.iter().any(|c| c == "1 F.SilkS line width(s) set to 0.15 mm"), "{changes:?}");
+        assert!(!changes.iter().any(|c| c.starts_with("1 silkscreen")), "the house width replaces the generic rule: {changes:?}");
+        assert!(changes.iter().any(|c| c.starts_with("house pin-1 marker added")), "{changes:?}");
+        // Courtyard of FP is (-2, -2)..(4, 4): Reference half a mm above it, centred, on F.Fab.
+        assert_eq!(at(&fp, "property", "Reference"), "(at 1 -2.5 0)");
+        assert!(to_string(&fp).contains("(size 0.7 0.7)"));
+        assert_eq!(fp.children("pad").cloned().collect::<Vec<_>>(), pads_before, "pads never move");
+        assert_eq!(fp.children("fp_poly").count(), 1);
+        let mut again = fp.clone();
+        assert!(fix(&mut again, &r, Some(&style)).is_empty(), "a second run changes nothing");
     }
 }

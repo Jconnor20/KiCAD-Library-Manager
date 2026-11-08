@@ -3,7 +3,10 @@
 //! `Library::list_parts` says what a part has; this says whether what it has is right. Every check
 //! only reads files, and skips what it can't see (a footprint or model in another library).
 
+use crate::fields;
 use crate::library::{LibraryRoot, property, sanitize};
+use crate::part::Part;
+use crate::standardise::profile::Profile;
 use crate::sexpr::{self, Sexpr};
 use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Seek, SeekFrom};
@@ -35,11 +38,11 @@ fn warning(out: &mut Vec<Issue>, message: String) {
 /// Issues for every part in the library, keyed by (category, symbol name). Each symbol library is
 /// read once, so this is the cheap way to check everything.
 pub fn check_library(root: &LibraryRoot) -> HashMap<(String, String), Vec<Issue>> {
-    let mut all = HashMap::new();
+    let (mut all, profile) = (HashMap::new(), fields::active());
     for cat in root.categories() {
         let Some(lib) = read_symbol_lib(root, &cat) else { continue };
         for sym in lib.children("symbol") {
-            all.insert((cat.clone(), sym.arg(0).unwrap_or_default().to_string()), check_symbol(root, &cat, &lib, sym));
+            all.insert((cat.clone(), sym.arg(0).unwrap_or_default().to_string()), check_symbol(root, &cat, &lib, sym, &profile));
         }
     }
     all
@@ -50,7 +53,7 @@ pub fn check_part(root: &LibraryRoot, category: &str, symbol_name: &str) -> Vec<
         return vec![Issue { severity: Severity::Error, message: format!("The {category} symbol library can't be read") }];
     };
     match lib.children("symbol").find(|s| s.arg(0) == Some(symbol_name)) {
-        Some(sym) => check_symbol(root, category, &lib, sym),
+        Some(sym) => check_symbol(root, category, &lib, sym, &fields::active()),
         None => vec![Issue { severity: Severity::Error, message: format!("{symbol_name} is not in the {category} symbol library") }],
     }
 }
@@ -60,13 +63,14 @@ fn read_symbol_lib(root: &LibraryRoot, category: &str) -> Option<Sexpr> {
     sexpr::parse(&std::fs::read_to_string(path).ok()?).ok()
 }
 
-fn check_symbol(root: &LibraryRoot, cat: &str, lib: &Sexpr, sym: &Sexpr) -> Vec<Issue> {
+fn check_symbol(root: &LibraryRoot, cat: &str, lib: &Sexpr, sym: &Sexpr, profile: &Profile) -> Vec<Issue> {
     let mut out = vec![];
     for key in REQUIRED_FIELDS {
         if property(sym, key).is_none_or(|v| v.trim().is_empty()) {
             error(&mut out, format!("Required field {key} is missing or empty"));
         }
     }
+    check_part_info(cat, sym, profile, &mut out);
     let pins = symbol_pins(lib, sym);
     check_duplicate_pins(&pins, &mut out);
 
@@ -81,6 +85,54 @@ fn check_symbol(root: &LibraryRoot, cat: &str, lib: &Sexpr, sym: &Sexpr) -> Vec<
     check_footprint(&pins, &fp, &mut out);
     if let Some(model) = fp.child("model").and_then(|m| m.arg(0)) {
         check_model(root, model, &mut out);
+    }
+    out
+}
+
+/// The part information against the profile's schema for its class: required fields, values that don't
+/// parse or aren't allowed, and Description or Value that differ from their templates.
+fn check_part_info(cat: &str, sym: &Sexpr, profile: &Profile, out: &mut Vec<Issue>) {
+    let key = fields::class_key(cat, sym);
+    let info = profile.class(key);
+    for fd in &info.fields {
+        let value = fields::field(sym, &fd.name);
+        let Some(v) = value else {
+            // Reference, Value, MPN and Manufacturer are already checked above.
+            if fd.required && !REQUIRED_FIELDS.contains(&fd.name.as_str()) {
+                warning(out, format!("Required {key} field {} is missing or empty", fd.name));
+            }
+            continue;
+        };
+        if let Some(unit) = &fd.unit {
+            match fields::normalise(unit, &v) {
+                None => warning(out, format!("{} \"{v}\" is not a valid value in {unit}", fd.name)),
+                Some(n) if n != v => warning(out, format!("{} {v} should be written {n}", fd.name)),
+                Some(_) => {}
+            }
+        }
+        if !fd.allowed.is_empty() && !fd.allowed.iter().any(|a| a.eq_ignore_ascii_case(&v)) {
+            warning(out, format!("{} \"{v}\" is not one of: {}", fd.name, fd.allowed.join(", ")));
+        }
+    }
+    for (prop, want) in fields::rebuilt(sym, &info) {
+        if property(sym, prop) != Some(want.as_str()) {
+            warning(out, format!("{prop} should be \"{want}\" (the {key} template)"));
+        }
+    }
+}
+
+/// Fields that disagree with what the source says for this part. Needs the source's data, so it runs
+/// where a fetched `Part` is to hand, not in `check_part`.
+pub fn check_against_source(category: &str, sym: &Sexpr, part: &Part) -> Vec<Issue> {
+    let info = fields::active().class(fields::class_key(category, sym));
+    let mut out = vec![];
+    for (name, theirs) in fields::autofill(&info, part) {
+        if let Some(ours) = fields::field(sym, &name).filter(|o| !o.eq_ignore_ascii_case(&theirs)) {
+            let ours_norm = info.fields.iter().find(|f| f.name == name).and_then(|f| f.unit.as_deref()).and_then(|u| fields::normalise(u, &ours));
+            if ours_norm.as_deref() != Some(theirs.as_str()) {
+                warning(&mut out, format!("{name} is {ours} but the source says {theirs}"));
+            }
+        }
     }
     out
 }
@@ -494,5 +546,36 @@ mod tests {
             assert!(on_layer(&fp, &["F.CrtYd"]), "{f}: courtyard");
             assert!(has_pin1_marker(&fp, &numbered_pads(&fp)), "{f}: pin 1");
         }
+    }
+
+    #[test]
+    fn part_information_is_checked_against_the_class() {
+        let sym = crate::sexpr::parse(
+            r#"(symbol "C1" (property "Value" "C1") (property "Capacitance" "0.1uF") (property "Voltage" "lots") (property "Dielectric" "Y9Z") (property "Description" "cap"))"#,
+        )
+        .unwrap();
+        let mut profile = Profile::default();
+        let mut cap = profile.class("Capacitor");
+        cap.fields.iter_mut().find(|f| f.name == "Dielectric").unwrap().allowed = vec!["X7R".into(), "C0G".into()];
+        cap.fields.iter_mut().find(|f| f.name == "Package").unwrap().required = true;
+        profile.classes.insert("Capacitor".into(), cap);
+        let mut out = vec![];
+        check_part_info("Capacitors", &sym, &profile, &mut out);
+        let text: Vec<_> = out.iter().map(|i| i.message.as_str()).collect();
+        for want in [
+            "Capacitance 0.1uF should be written 100nF",
+            "Voltage \"lots\" is not a valid value in V",
+            "Dielectric \"Y9Z\" is not one of: X7R, C0G",
+            "Required Capacitor field Package is missing or empty",
+            "Value should be \"0.1uF\" (the Capacitor template)",
+        ] {
+            assert!(text.contains(&want), "{want} not in {text:?}");
+        }
+        assert!(!text.iter().any(|t| t.contains("Manufacturer")), "REQUIRED_FIELDS already covers it");
+
+        let part = Part { params: vec![("Capacitance".into(), "220 nF".into())], ..Part::default() };
+        let diff = check_against_source("Capacitors", &sym, &part);
+        assert_eq!(diff.len(), 1, "{diff:?}");
+        assert!(diff[0].message.contains("source says 220nF"));
     }
 }

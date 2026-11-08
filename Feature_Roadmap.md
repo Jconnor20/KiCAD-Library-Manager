@@ -333,6 +333,58 @@ What the original plan or earlier WPs promised that isn't there yet.
   - No footprint name collisions in the merged `.pretty`, and 3D paths checked in KiCad and Fusion.
   - README rewritten for 0.6.0: every tab, every CLI command, and no "developed on other branches". Licence chosen (open question 1) and `LICENSE` added.
 
+## Wave 9: House standard profiles (W9.1 first, then 3 in parallel, ships 0.7.0)
+
+The house standard for each component type, so that whatever the source, every part of a type looks and reads the same. Everything lives in one **Standard profile** file (`config_dir()/standards/<name>.json`): the KLC `Rules`, per-class templates, field schema and Description/Value/Keywords templates, naming, and fab/IPC choice. There are built-in profiles plus company profiles, and you share one by copying the file.
+
+- [x] **W9.1 Profile file (run first, here)** (M)
+  - **Owns:** `core/standardise/profile.rs` (new), `core/settings.rs`, `gui/tabs/standards.rs`
+  - Profile load/save, built-in profiles, a one-time migration from `Settings.standards`, an active-profile picker, and Import/Export.
+- [x] **W9.2 Reference-part templates** (L) ⚑
+  - **Owns:** `core/symbols/template.rs`, `core/symbols/mod.rs`, `core/standardise/footprint.rs`
+  - `Template::from_symbol` takes the body, pin slots and field positions from a symbol you drew in KiCad, with the built-in templates as fallbacks. "Use as house template for <class>" in the Library tab. Footprints copy the style only (text, layers, line widths, fab outline, pin-1 mark).
+  - Done: `Profile.templates` (class -> symbol s-expression text) and `Profile.footprint_styles` (class -> `FootprintStyle`: line width per layer, Reference/Value layer, font and place relative to the courtyard, pin-1 marker shape). Restyle and Standardise use them; Settings > Symbols/Footprints "House templates" puts a class back to the built-in. Not done: IC symbol templates (still auto-boxed), fab outline style, the `${REFERENCE}` fab text.
+- [x] **W9.3 Part information per class** (L) ⚑
+  - **Owns:** `core/fields.rs` (new), `core/checks.rs`, `core/standardise/mod.rs`
+  - Each class has a field schema (e.g. capacitor: Capacitance, Voltage, Tolerance, Dielectric, Package). Every field records whether it is required and visible, its unit and its format.
+  - Description (`ki_description`), Value and Keywords (`ki_keywords`) are built from templates.
+  - Autofill from source parameters (DigiKey, Mouser, Nexar, LCSC) through a name mapping and unit normalisation.
+  - A consistency check flags missing fields, a bad unit, text that doesn't match its template, or a field that disagrees with the source. A Standardise fix fills and rebuilds, with a preview. Applied on import when house style is on.
+- [x] **W9.4 Profile editors** (M)
+  - **Owns:** `gui/tabs/settings/pages.rs`, a new class-editor page
+  - Add, remove and reorder fields. Required and visible toggles, template editing with a live preview on a real part, the source mapping, and reset to defaults.
+
+## Wave 10: Manufacturer and IPC checks (W10.0 first, then 3 in parallel, ships 0.8.0)
+
+- [ ] **W10.0 Fab data (research first)** (S)
+  - **Owns:** `core/fab_profiles.json` (new)
+  - JLCPCB, PCBWay, OSH Park, Eurocircuits and Aisler minimums: trace and space, drill, annular ring, via, silk, mask web and edge clearance. Each fab has its source URL and the date checked. Adds IPC-6012 class 1/2/3 and IPC-7351 density A/B/C tables. Choosing several fabs means the strictest value wins.
+- [ ] **W10.1 Library footprint fab check** (M)
+  - **Owns:** `core/fab.rs` (new)
+  - Checks pad gap, drill, annular ring, silk width and height, silk on pads, and courtyard excess. Safe fixes (silk width, clip silk, grow courtyard) join the Standardise plan; everything else is flagged.
+- [ ] **W10.2 Whole-project check** (M) ⚑
+  - **Owns:** `core/project_check.rs` (new), `klm-cli check-project`
+  - Writes a `.kicad_dru` and board minimums from the profile, then runs `kicad-cli pcb drc` and `sch erc` (JSON) and maps the results into health findings. In "All fabs" mode it lists which fabs pass.
+- [ ] **W10.3 Align parts to the fab** (M)
+  - **Owns:** `core/bom.rs`, `gui/tabs/alternatives`
+  - Per BOM line: JLC basic/extended/preferred, stock, lifecycle and obsolescence. "Swap" opens Alternatives filtered to "available at <assembler>" with the same footprint.
+
+## Wave 11: 3D fit and compliance (2 in parallel, ships 0.9.0)
+
+- [ ] **W11.1 3D fit check** (M)
+  - **Owns:** `core/model3d.rs` (new)
+  - An approximate STEP/WRL bounding box from the point data (no new dependency), compared with the fab outline and pads after the model's offset, rotate and scale. The fix centres the model and picks the best 90° rotation. This makes W1.2's "model size roughly matches the outline" true; there is no code for it today.
+- [ ] **W11.2 Compliance badge** (M)
+  - **Owns:** `core/compliance.rs` (new), `gui/tabs/library.rs`
+  - A part is compliant when its Standardise plan is empty and its checks and fab check pass for the active profile. Cached by mtime. Badge column, a "Non-compliant" filter, and a JSON/CSV report through `health`.
+
+## Wave 12: Editors (decide after Wave 11, ships 1.0.0)
+
+- [ ] **W12.1 Edit in KiCad round trip** (S): open the part in KiCad's symbol or footprint editor, watch the file, and re-check and re-badge when it is saved.
+- [ ] **W12.2 IPC-7351 footprint generator** (L): chip, SOD, SOT, SOIC, QFN, QFP and BGA from datasheet dimensions and the profile's density.
+- [ ] **W12.3 In-app symbol editor** (L): only if W12.1 isn't enough.
+- 3D CAD editing is not planned (it needs a CAD kernel). W11.1 covers positioning, and the model can be opened in FreeCAD.
+
 ## Later
 
 - [ ] **Team / shared libraries (Rev):** a shared folder or git repository, conflict detection, locking, rules for merging metadata.

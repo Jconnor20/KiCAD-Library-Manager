@@ -43,7 +43,7 @@ const TREE: &[(&str, &[(Section, &str)])] = &[
     ("Sources", &[(Section::Lcsc, "LCSC"), (Section::DigiKey, "DigiKey"), (Section::Mouser, "Mouser"), (Section::Nexar, "Nexar"), (Section::SnapMagic, "SnapMagic")]),
     ("Search", &[(Section::Search, "Search")]),
     ("Import", &[(Section::Import, "Import")]),
-    ("Standards", &[(Section::Symbols, "Symbols"), (Section::Footprints, "Footprints")]),
+    ("Standards", &[(Section::Symbols, "Symbols"), (Section::Footprints, "Footprints"), (Section::PartInfo, "Part information")]),
     ("BOM", &[(Section::Bom, "BOM")]),
     ("History", &[(Section::History, "History")]),
 ];
@@ -64,6 +64,8 @@ pub struct SettingsTab {
     /// The copy being edited; `None` while the popup is closed.
     draft: Option<Settings>,
     section: Section,
+    /// The class shown on the Part information page (an index into `part_info::CLASSES`).
+    info_class: usize,
     query: String,
     /// Tests running, and the last result of each, shown on the page.
     testing: HashSet<&'static str>,

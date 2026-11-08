@@ -5,8 +5,8 @@ fn rules() -> rules::Rules {
     rules::Rules::default()
 }
 
-fn std_rules() -> standardise::Rules {
-    standardise::Rules::default()
+fn std_rules() -> Profile {
+    Profile::default()
 }
 
 /// A vendor-style symbol: odd geometry, hidden fields, a footprint link and a few custom fields.
@@ -311,4 +311,95 @@ fn exclusions_beat_led_and_match_plurals() {
     assert!(detect("Capacitors", &s("Supercapacitors 5.5V 1F"), 2, &r).is_err());
     assert!(detect("Resistors", &s("Varistors 14V"), 2, &r).is_err());
     assert!(detect("Inductors", &s("EMI suppression beads"), 2, &r).is_err());
+}
+
+/// A diode the user drew: vertical, cathode up, filled triangle, fields to the right.
+const HOUSE_D: &str = r#"(symbol "D_HOUSE" (pin_numbers (hide yes)) (pin_names (offset 0) (hide yes)) (exclude_from_sim no) (in_bom yes) (on_board yes)
+    (property "Reference" "D" (at 2.54 1.27 0) (effects (font (size 1.27 1.27))))
+    (property "Value" "D_HOUSE" (at 2.54 -1.27 0) (effects (font (size 1.27 1.27))))
+    (property "Footprint" "Vendor:FP_HOUSE" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (symbol "D_HOUSE_0_1"
+        (polyline (pts (xy -1.27 1.27) (xy 1.27 1.27)) (stroke (width 0.254) (type default)) (fill (type none)))
+        (polyline (pts (xy -1.27 -1.27) (xy 1.27 -1.27) (xy 0 1.27) (xy -1.27 -1.27)) (stroke (width 0.254) (type default)) (fill (type outline))))
+    (symbol "D_HOUSE_1_1"
+        (pin passive line (at 0 3.81 270) (length 2.54) (name "K" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+        (pin passive line (at 0 -3.81 90) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))))"#;
+
+#[test]
+fn a_house_template_drawn_by_the_user_restyles_vendor_parts() {
+    let tpl = Template::from_symbol(&parse(HOUSE_D).unwrap(), Class::Diode).unwrap();
+    assert_eq!(tpl.slots.to_vec(), [Slot(0.0, 3.81, 270.0, 2.54), Slot(0.0, -3.81, 90.0, 2.54)], "cathode slot first, as the roles say");
+    assert_eq!(tpl.fields, Some([(2.54, 1.27, 0.0), (2.54, -1.27, 0.0)]));
+    assert!(tpl.hide_numbers && tpl.body.contains("outline"));
+    // Wrong pin count, roles that can't be told, and IC boxes are refused.
+    assert!(Template::from_symbol(&parse(HOUSE_D).unwrap(), Class::Npn).unwrap_err().to_string().contains("doesn't fit"));
+    assert!(Template::from_symbol(&parse(&HOUSE_D.replace("(name \"K\"", "(name \"X\"")).unwrap(), Class::Diode).is_err());
+    assert!(Template::from_symbol(&parse(HOUSE_D).unwrap(), Class::Ic).is_err());
+
+    let mut profile = Profile::default();
+    profile.templates.insert("Diode".into(), HOUSE_D.into());
+    // The vendor numbers the anode 1 and the cathode 2, the reverse of the house symbol.
+    let sym = parse(&vendor("1N4148", "D", "Switching diode", &[("passive", "1", "A", false), ("passive", "2", "K", false)])).unwrap();
+    let new = restyle(&sym, Class::Diode, &profile).unwrap();
+    assert_kept(&sym, &new);
+    assert_eq!(pin_summary(&sym), pin_summary(&new));
+    assert_eq!(pin_at(&new, "2"), "(at 0 3.81 270)", "the cathode goes where the house cathode is");
+    assert_eq!(pin_at(&new, "1"), "(at 0 -3.81 90)");
+    let field_at = |k: &str| to_string(new.children("property").find(|p| p.arg(0) == Some(k)).unwrap().child("at").unwrap()).trim().to_string();
+    assert_eq!((field_at("Reference"), field_at("Value")), ("(at 2.54 1.27 0)".into(), "(at 2.54 -1.27 0)".into()));
+    assert!(to_string(&new).contains("(type outline)"), "the house body, not the built-in one");
+    assert_eq!(restyle(&new, Class::Diode, &profile).unwrap(), new, "stable");
+    // Other classes keep the built-in template; a broken stored template is refused, not ignored.
+    assert!(restyle(&sym, Class::Led, &profile).is_ok());
+    profile.templates.insert("Diode".into(), "(symbol".into());
+    assert!(restyle(&sym, Class::Diode, &profile).unwrap_err().to_string().contains("house template"));
+}
+
+#[test]
+fn set_house_template_takes_the_symbol_and_footprint_style_used_by_restyle_and_standardise() {
+    let house = HOUSE_D.replace("D_HOUSE", "R_HOUSE").replace("\"K\"", "\"~\"").replace("\"A\"", "\"~\"").replace("\"Reference\" \"D\"", "\"Reference\" \"R\"");
+    let vendor_r = vendor("RC0603", "U", "Chip resistor", &[("passive", "1", "1", false), ("passive", "2", "2", false)]);
+    let (_b, root) = library("symbols_house", "Resistors", &[vendor_r, house]);
+    let pretty = root.dir.join("footprints/Resistors.pretty");
+    std::fs::create_dir_all(&pretty).unwrap();
+    // House footprint: text on F.Fab, 1 mm outside the courtyard, 0.15 mm silkscreen.
+    std::fs::write(pretty.join("FP_HOUSE.kicad_mod"), r#"(footprint "FP_HOUSE" (layer "F.Cu")
+        (property "Reference" "REF**" (at 0 -2 0) (layer "F.Fab") (effects (font (size 0.8 0.8) (thickness 0.12))))
+        (property "Value" "FP_HOUSE" (at 0 2 0) (layer "F.Fab") (effects (font (size 0.8 0.8) (thickness 0.12))))
+        (attr smd)
+        (fp_line (start -0.5 -0.8) (end 0.5 -0.8) (stroke (width 0.15) (type solid)) (layer "F.SilkS"))
+        (fp_rect (start -1.5 -1) (end 1.5 1) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
+        (pad "1" smd rect (at -0.8 0) (size 0.6 0.8) (layers "F.Cu"))
+        (pad "2" smd rect (at 0.8 0) (size 0.6 0.8) (layers "F.Cu")))"#).unwrap();
+    std::fs::write(pretty.join("FP_RC0603.kicad_mod"), r#"(footprint "FP_RC0603" (layer "F.Cu")
+        (property "Reference" "REF**" (at 0 0 0) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))
+        (property "Value" "FP_RC0603" (at 0 0 0) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+        (attr smd)
+        (fp_line (start -1 -2) (end 1 -2) (stroke (width 0.2) (type solid)) (layer "F.SilkS"))
+        (fp_rect (start -3 -3) (end 3 3) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
+        (pad "1" smd rect (at -1 0) (size 1 1) (layers "F.Cu"))
+        (pad "2" smd rect (at 1 0) (size 1 1) (layers "F.Cu")))"#).unwrap();
+
+    let mut profile = Profile::default();
+    assert_eq!(set_house_template(&mut profile, &root, "Resistors", "R_HOUSE", &rules()).unwrap(), (Class::Resistor, true));
+    assert!(profile.templates.contains_key("Resistor") && profile.footprint_styles.contains_key("Resistor"));
+
+    restyle_part(&root, "Resistors", "RC0603", &rules(), &profile, true).unwrap();
+    let lib = parse(&std::fs::read_to_string(lib_path(&root, "Resistors")).unwrap()).unwrap();
+    let r = lib.children("symbol").find(|s| s.arg(0) == Some("RC0603")).unwrap();
+    assert_eq!((pin_at(r, "1"), pin_at(r, "2")), ("(at 0 3.81 270)".into(), "(at 0 -3.81 90)".into()));
+
+    let plan = standardise::plan(&root, &profile, &rules());
+    let text = plan.to_string();
+    assert!(text.contains("1 F.SilkS line width(s) set to 0.15 mm") && text.contains("Reference and Value placed and styled like the house footprint"), "{text}");
+    standardise::apply(&plan).unwrap();
+    let fp = parse(&std::fs::read_to_string(pretty.join("FP_RC0603.kicad_mod")).unwrap()).unwrap();
+    let flat = |x: &Sexpr| to_string(x).split_whitespace().collect::<Vec<_>>().join(" ").replace("( ", "(").replace(" )", ")");
+    let field = |k: &str| flat(fp.children("property").find(|p| p.arg(0) == Some(k)).unwrap());
+    for (k, at) in [("Reference", "(at 0 -4 0)"), ("Value", "(at 0 4 0)")] {
+        let f = field(k);
+        assert!(f.contains(at) && f.contains("(layer \"F.Fab\")") && f.contains("(size 0.8 0.8)"), "1 mm outside its own courtyard, house font and layer: {f}");
+    }
+    assert!(flat(&fp).contains("(start -3 -3) (end 3 3)") && flat(&fp).contains("(at -1 0)"), "geometry untouched");
+    assert!(standardise::plan(&root, &profile, &rules()).files.is_empty(), "a second run has nothing to do");
 }

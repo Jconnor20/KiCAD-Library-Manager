@@ -18,6 +18,8 @@ pub struct Part {
     pub image_url: String,
     /// Search-result details for display; not written to the library.
     pub package: String,
+    /// The source's parametric data as (name, value), e.g. ("Voltage - Rated", "16V"); feeds `fields::autofill`.
+    pub params: Vec<(String, String)>,
     pub stock: Option<u64>,
     /// Display text, e.g. "$0.0123 @100".
     pub unit_price: String,
