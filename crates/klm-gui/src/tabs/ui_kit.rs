@@ -53,6 +53,7 @@ pub enum Section {
     Standards,
     Symbols,
     Footprints,
+    PartInfo,
     Bom,
     History,
 }

@@ -8,7 +8,7 @@ use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{NodeT, Queryable};
 
 /// (tree label, text only that page has, page name for the snapshot)
-const PAGES: [(&str, &str, &str); 14] = [
+const PAGES: [(&str, &str, &str); 15] = [
     ("Libraries", "Global library", "libraries"),
     ("Watch folders", "Add folder…", "watch-folders"),
     ("KiCad", "Browse…", "kicad"),
@@ -21,6 +21,7 @@ const PAGES: [(&str, &str, &str); 14] = [
     ("Import", "Add category rule", "import"),
     ("Symbols", "Text size", "symbols"),
     ("Footprints", "Silkscreen line width", "footprints"),
+    ("Part information", "Add field", "part-info"),
     ("BOM", "Shipping region", "bom"),
     ("History", "Keep the last", "history"),
 ];
@@ -30,6 +31,9 @@ fn open(h: &mut Gui) {
 }
 
 fn tree(h: &mut Gui, label: &str) {
+    let b = h.get_all_by_role_and_label(Role::Button, label).last().unwrap();
+    b.scroll_to_me();
+    h.run_ok();
     h.get_all_by_role_and_label(Role::Button, label).last().unwrap().click();
     h.run_ok();
 }
@@ -347,4 +351,41 @@ fn s16_apply_keeps_a_moved_library() {
     click(&mut h, "OK");
     assert_eq!(h.state().cx.settings.global_root.as_ref(), Some(&moved));
     assert_eq!(saved(&env)["global_root"], serde_json::json!(moved));
+}
+
+#[test]
+fn s17_part_information_edits_save_with_the_profile() {
+    let _env = setup();
+    let mut h = app(SIZES[1], Tab::Library);
+    open(&mut h);
+    tree(&mut h, "Part information");
+    assert!(has(&h, "Built-in default") && has(&h, "Preview: Resistor 10kΩ 5% 100mW Temp coefficient 0603"));
+    // The button is below the fold of the field list.
+    h.get_by_role_and_label(Role::Button, "Add field").scroll_to_me();
+    h.run_ok();
+    h.get_by_role_and_label(Role::Button, "Add field").click();
+    h.run_ok();
+    h.run_ok();
+    assert!(has(&h, "Customised in this profile"));
+    // The Description template box is the first one after the field rows' boxes.
+    let desc = boxes(&h).into_iter().find(|n| n.value().is_some_and(|v| v.starts_with("Resistor {Resistance}"))).expect("description box");
+    desc.scroll_to_me();
+    h.run_ok();
+    let desc = boxes(&h).into_iter().find(|n| n.value().is_some_and(|v| v.starts_with("Resistor {Resistance}"))).unwrap();
+    desc.click();
+    h.run_ok();
+    h.key_press(egui::Key::End);
+    h.run_ok();
+    boxes(&h).into_iter().find(|n| n.value().is_some_and(|v| v.starts_with("Resistor {Resistance}"))).unwrap().type_text(" {New field}");
+    h.run_ok();
+    assert!(has(&h, "Preview: Resistor 10kΩ 5% 100mW Temp coefficient 0603 New field"));
+    click(&mut h, "OK");
+    let p = klm_core::standardise::profile::load(klm_core::standardise::profile::BUILT_IN).unwrap();
+    let r = &p.classes["Resistor"];
+    assert!(r.fields.iter().any(|f| f.name == "New field") && r.description.ends_with("{New field}"));
+    assert!(!p.classes.contains_key("Capacitor"), "only the edited class is customised");
+    open(&mut h);
+    tree(&mut h, "Part information");
+    click(&mut h, "Restore defaults");
+    assert!(has(&h, "Built-in default"));
 }

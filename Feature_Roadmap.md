@@ -350,7 +350,7 @@ The house standard for each component type, so that whatever the source, every p
   - Description (`ki_description`), Value and Keywords (`ki_keywords`) are built from templates.
   - Autofill from source parameters (DigiKey, Mouser, Nexar, LCSC) through a name mapping and unit normalisation.
   - A consistency check flags missing fields, a bad unit, text that doesn't match its template, or a field that disagrees with the source. A Standardise fix fills and rebuilds, with a preview. Applied on import when house style is on.
-- [ ] **W9.4 Profile editors** (M)
+- [x] **W9.4 Profile editors** (M)
   - **Owns:** `gui/tabs/settings/pages.rs`, a new class-editor page
   - Add, remove and reorder fields. Required and visible toggles, template editing with a live preview on a real part, the source mapping, and reset to defaults.
 
