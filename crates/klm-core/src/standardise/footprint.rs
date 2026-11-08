@@ -1,7 +1,9 @@
 //! Footprint rules. Footprint coordinates have y pointing down.
 
 use super::{Rules, bbox, child_mut, differs, fmt, move_to, num, set_num};
-use crate::checks::{has_pin1_marker, numbered_pads, on_layer, points};
+use crate::checks::{has_pin1_marker, list, numbered_pads, on_layer, points, xy};
+use crate::fab;
+use crate::fab_data::FabLimits;
 use crate::sexpr::{self, Sexpr};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -102,20 +104,32 @@ fn pin1_graphic(fp: &Sexpr) -> Option<Sexpr> {
 
 /// Applies the footprint rules, then the house style of the part's class when there is one, and says what
 /// changed. The style's widths and text placement replace the generic rules; its pin-1 marker replaces the
-/// default dot (still only when the pin-1 rule is on).
-pub(super) fn fix(fp: &mut Sexpr, r: &Rules, style: Option<&FootprintStyle>) -> Vec<String> {
+/// default dot (still only when the pin-1 rule is on). With fab `limits`, silkscreen is kept at least the
+/// fab's minimum width and clipped off the pads, and the courtyard grown to the density's excess.
+pub(super) fn fix(fp: &mut Sexpr, r: &Rules, style: Option<&FootprintStyle>, limits: Option<&FabLimits>) -> Vec<String> {
     let mut out = vec![];
     let none = FootprintStyle::default();
     let style = style.unwrap_or(&none);
+    let min_silk = limits.and_then(|l| l.min_silk_width).unwrap_or(0.0);
+    // Never narrower than the fab allows, or the next run would undo the fab fix.
+    let at_least = |layer: &str, w: f64| if layer.ends_with(".SilkS") { w.max(min_silk) } else { w };
     for (width, layer, what) in [(r.silk_width, ".SilkS", "silkscreen"), (r.fab_width, ".Fab", "fab"), (r.courtyard_width, ".CrtYd", "courtyard")] {
-        out.extend(width.and_then(|w| line_width(fp, layer, w, what, &style.widths)));
+        out.extend(width.and_then(|w| line_width(fp, layer, at_least(layer, w), what, &style.widths)));
     }
     for (layer, w) in &style.widths {
-        out.extend(line_width(fp, layer, *w, layer, &BTreeMap::new()));
+        out.extend(line_width(fp, layer, at_least(layer, *w), layer, &BTreeMap::new()));
+    }
+    if min_silk > 0.0 {
+        out.extend(raise_silk(fp, min_silk));
     }
     // Origin first: placement and the pin-1 marker are worked out from the moved footprint.
     if r.footprint_origin {
         out.extend(origin(fp));
+    }
+    // Courtyard before the text, which is placed against it; clipping after the widths it depends on.
+    if let Some(l) = limits {
+        out.extend(l.courtyard_excess.and_then(|e| grow_courtyard(fp, e)));
+        out.extend(l.min_silk_width.and_then(|_| clip_silk(fp, l)));
     }
     if r.footprint_ref_value && style.texts.is_empty() {
         out.extend(ref_value(fp));
@@ -134,14 +148,110 @@ fn line_width(fp: &mut Sexpr, layer: &str, width: f64, what: &str, except: &BTre
         if !g.child("layer").and_then(|l| l.arg(0)).is_some_and(|l| l.ends_with(layer) && !except.contains_key(l)) {
             continue;
         }
-        // KiCad 7+ writes (stroke (width w)), older files a bare (width w).
-        let w = if g.child("stroke").is_some() { child_mut(g, "stroke").and_then(|s| child_mut(s, "width")) } else { child_mut(g, "width") };
-        if let Some(w) = w.filter(|w| num(w, 0).is_some_and(|v| differs(v, width))) {
+        if let Some(w) = width_mut(g).filter(|w| num(w, 0).is_some_and(|v| differs(v, width))) {
             set_num(w, 0, width);
             n += 1;
         }
     }
     (n > 0).then(|| format!("{n} {what} line width(s) set to {} mm", fmt(width)))
+}
+
+/// KiCad 7+ writes (stroke (width w)), older files a bare (width w).
+fn width_mut(g: &mut Sexpr) -> Option<&mut Sexpr> {
+    if g.child("stroke").is_some() { child_mut(g, "stroke").and_then(|s| child_mut(s, "width")) } else { child_mut(g, "width") }
+}
+
+/// Widens silkscreen lines thinner than the fab's minimum; wider ones are left alone.
+fn raise_silk(fp: &mut Sexpr, min: f64) -> Option<String> {
+    let mut n = 0;
+    for g in fp.items_mut().iter_mut().filter(|g| fab::is_graphic(g) && fab::silk_side(g).is_some() && fab::thin_line(g, min)) {
+        if let Some(w) = width_mut(g) {
+            set_num(w, 0, min);
+            n += 1;
+        }
+    }
+    (n > 0).then(|| format!("{n} silkscreen line width(s) raised to the fab minimum {} mm", fmt(min)))
+}
+
+/// Cuts the parts of silkscreen lines that run over a pad (its box plus the mask web) out of them.
+// shortcut: only fp_line is clipped; silk rectangles and polygons over pads stay flagged for hand editing.
+fn clip_silk(fp: &mut Sexpr, limits: &FabLimits) -> Option<String> {
+    let keep = fab::keepouts(fp, limits);
+    let (mut pads, mut lines) = (std::collections::BTreeSet::new(), 0);
+    for g in std::mem::take(fp.items_mut()) {
+        let ends = (g.child("start").and_then(xy), g.child("end").and_then(xy));
+        let (Some("fp_line"), Some(side), (Some(a), Some(b))) = (g.head(), fab::silk_side(&g), ends) else {
+            fp.items_mut().push(g);
+            continue;
+        };
+        let w = fab::stroke_width(&g).unwrap_or(0.0);
+        let mut cut: Vec<(f64, f64)> = vec![];
+        for k in keep.iter().filter(|k| k.1 == side) {
+            if let Some(t) = fab::inside(a, b, fab::grow(k.2, w / 2.0)) {
+                cut.push(t);
+                pads.insert(k.0.clone());
+            }
+        }
+        if cut.is_empty() {
+            fp.items_mut().push(g);
+            continue;
+        }
+        lines += 1;
+        cut.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let (len, mut from) = ((b.0 - a.0).hypot(b.1 - a.1), 0.0);
+        let at = |t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+        for (t0, t1) in cut.into_iter().chain([(1.0, 1.0)]) {
+            // A stub shorter than the line is wide isn't worth keeping.
+            if (t0 - from) * len > w.max(0.05) {
+                let mut piece = g.clone();
+                if let Some(s) = child_mut(&mut piece, "start") {
+                    move_to(s, at(from));
+                }
+                if let Some(e) = child_mut(&mut piece, "end") {
+                    move_to(e, at(t0));
+                }
+                fp.items_mut().push(piece);
+            }
+            from = f64::max(from, t1);
+        }
+    }
+    (lines > 0).then(|| format!("{lines} silkscreen line(s) clipped clear of pad(s) {}", list(pads.iter().map(String::as_str))))
+}
+
+/// Moves the courtyard's outermost edges out to the pads and fab outline plus `excess`, on the 0.01 mm grid.
+// shortcut: only the extreme points move, which keeps rectangles rectangular; circles and arcs are not grown.
+fn grow_courtyard(fp: &mut Sexpr, excess: f64) -> Option<String> {
+    let mut grown = vec![];
+    for (side, c, b) in fab::courtyards(fp) {
+        let lo = |v: f64| (v * 100.0 + 1e-6).floor() / 100.0;
+        let hi = |v: f64| (v * 100.0 - 1e-6).ceil() / 100.0;
+        let t = (lo(b.0 - excess).min(c.0), lo(b.1 - excess).min(c.1), hi(b.2 + excess).max(c.2), hi(b.3 + excess).max(c.3));
+        let edge = |v: f64, old: (f64, f64), new: (f64, f64)| if !differs(v, old.0) { new.0 } else if !differs(v, old.1) { new.1 } else { v };
+        let map = |(x, y): (f64, f64)| (edge(x, (c.0, c.2), (t.0, t.2)), edge(y, (c.1, c.3), (t.1, t.3)));
+        let layer = format!("{side}.CrtYd");
+        let mut moved = false;
+        for g in fp.items_mut().iter_mut().filter(|g| matches!(g.head(), Some("fp_line" | "fp_rect" | "fp_poly")) && on_layer(g, &[&layer])) {
+            moved |= move_points(g, &map);
+        }
+        if moved {
+            grown.push(layer);
+        }
+    }
+    (!grown.is_empty()).then(|| format!("{} grown to {} mm around the pads and fab outline", grown.join(" and "), fmt(excess)))
+}
+
+/// Applies `map` to every start, end and xy point under `x`; says whether any moved.
+fn move_points(x: &mut Sexpr, map: &dyn Fn((f64, f64)) -> (f64, f64)) -> bool {
+    if matches!(x.head(), Some("start" | "end" | "xy")) {
+        return match (num(x, 0), num(x, 1)) {
+            (Some(a), Some(b)) => move_to(x, map((a, b))),
+            _ => false,
+        };
+    }
+    match x {
+        Sexpr::List(v) => v.iter_mut().fold(false, |m, c| move_points(c, map) | m),
+        _ => false,
+    }
 }
 
 /// Moves everything in the footprint by `d`.
@@ -326,7 +436,7 @@ mod tests {
 
     fn run(r: Rules) -> (Sexpr, Vec<String>) {
         let mut fp = parse(FP).unwrap();
-        let changes = fix(&mut fp, &r, None);
+        let changes = fix(&mut fp, &r, None, None);
         (fp, changes)
     }
 
@@ -352,7 +462,7 @@ mod tests {
         assert!(to_string(&fp).contains("(xyz -1 1 0)"), "3D model follows, with its y axis flipped");
         // Through-hole: pin 1 becomes the origin.
         let mut tht = parse(&FP.replace("(attr smd)", "(attr through_hole)").replace("(at 0 0) (size", "(at 3 4) (size")).unwrap();
-        fix(&mut tht, &Rules { footprint_origin: true, ..only(Rules::default()) }, None);
+        fix(&mut tht, &Rules { footprint_origin: true, ..only(Rules::default()) }, None, None);
         assert_eq!(at(&tht, "pad", "1"), "(at 0 0)");
     }
 
@@ -374,7 +484,7 @@ mod tests {
         assert!(has_pin1_marker(&fp, &numbered_pads(&fp)));
         // A footprint that already marks pin 1 is left alone.
         let mut again = fp.clone();
-        assert!(fix(&mut again, &r, None).is_empty());
+        assert!(fix(&mut again, &r, None, None).is_empty());
     }
 
     #[test]
@@ -399,7 +509,7 @@ mod tests {
         let r = Rules { silk_width: Some(0.12), footprint_ref_value: true, pin1_marker: true, ..only(Rules::default()) };
         let mut fp = parse(FP).unwrap();
         let pads_before: Vec<_> = fp.children("pad").cloned().collect();
-        let changes = fix(&mut fp, &r, Some(&style));
+        let changes = fix(&mut fp, &r, Some(&style), None);
         assert!(changes.iter().any(|c| c == "1 F.SilkS line width(s) set to 0.15 mm"), "{changes:?}");
         assert!(!changes.iter().any(|c| c.starts_with("1 silkscreen")), "the house width replaces the generic rule: {changes:?}");
         assert!(changes.iter().any(|c| c.starts_with("house pin-1 marker added")), "{changes:?}");
@@ -409,6 +519,35 @@ mod tests {
         assert_eq!(fp.children("pad").cloned().collect::<Vec<_>>(), pads_before, "pads never move");
         assert_eq!(fp.children("fp_poly").count(), 1);
         let mut again = fp.clone();
-        assert!(fix(&mut again, &r, Some(&style)).is_empty(), "a second run changes nothing");
+        assert!(fix(&mut again, &r, Some(&style), None).is_empty(), "a second run changes nothing");
+    }
+
+    #[test]
+    fn fab_fixes_widen_and_clip_silk_and_grow_the_courtyard() {
+        // A 0.1 mm silk line across both pads, and a courtyard only 0.1 mm out on three sides.
+        let src = r#"(footprint "C" (layer "F.Cu")
+            (fp_line (start -1.5 -0.5) (end 1.5 -0.5) (stroke (width 0.1) (type solid)) (layer "F.SilkS"))
+            (fp_rect (start -1.6 -0.7) (end 2 0.7) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
+            (pad "1" smd roundrect (at -1 0) (size 1 1.2) (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.25))
+            (pad "2" smd roundrect (at 1 0) (size 1 1.2) (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.25)))"#;
+        let limits = FabLimits { min_silk_width: Some(0.153), min_mask_web: Some(0.1), courtyard_excess: Some(0.25), ..Default::default() };
+        let mut fp = parse(src).unwrap();
+        assert_eq!(fab::check_footprint(&fp, &limits).len(), 3);
+        let r = only(Rules::default());
+        let changes = fix(&mut fp, &r, None, Some(&limits));
+        assert_eq!(
+            changes,
+            ["1 silkscreen line width(s) raised to the fab minimum 0.153 mm", "F.CrtYd grown to 0.25 mm around the pads and fab outline", "1 silkscreen line(s) clipped clear of pad(s) 1, 2"]
+        );
+        let ends = |head: &str| {
+            let g = fp.child(head).unwrap();
+            ["start", "end"].map(|h| to_string(g.child(h).unwrap()).trim().to_string())
+        };
+        assert_eq!(ends("fp_rect"), ["(start -1.75 -0.85)", "(end 2 0.85)"]);
+        assert_eq!(ends("fp_line"), ["(start -0.3235 -0.5)", "(end 0.3235 -0.5)"], "only the stretch between the pads is left");
+        assert!(fab::check_footprint(&fp, &limits).is_empty(), "{:?}", fab::check_footprint(&fp, &limits));
+        assert!(fix(&mut fp, &r, None, Some(&limits)).is_empty(), "a second run changes nothing");
+        // The generic 0.12 mm silk rule doesn't undo the fab minimum.
+        assert!(fix(&mut fp, &Rules { silk_width: Some(0.12), ..r }, None, Some(&limits)).is_empty());
     }
 }
