@@ -75,11 +75,13 @@ pub struct ProjectBom {
     pub boards: u64,
     /// This project's field names; the Settings ones when unset.
     pub fields: Option<BomFields>,
+    /// Who builds the board: decides which alternate `align` picks.
+    pub assembler: Assembler,
 }
 
 impl Default for ProjectBom {
     fn default() -> Self {
-        Self { region: String::new(), boards: 1, fields: None }
+        Self { region: String::new(), boards: 1, fields: None, assembler: Assembler::default() }
     }
 }
 
@@ -619,6 +621,69 @@ pub fn lifecycle_label(l: Option<Lifecycle>) -> &'static str {
     }
 }
 
+// ---- picking an alternate per assembler ----
+
+/// Who assembles the board. JLCPCB buys from LCSC; PCBWay and other fabs take parts bought at DigiKey or Mouser.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Assembler {
+    #[default]
+    Jlc,
+    Distributor,
+}
+
+impl Assembler {
+    pub const ALL: [Self; 2] = [Self::Jlc, Self::Distributor];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Jlc => "JLCPCB",
+            Self::Distributor => "DigiKey / Mouser",
+        }
+    }
+
+    /// Lower is better. JLC: basic, preferred, extended (each in stock at JLC), then in stock anywhere.
+    /// Distributor: active and in stock at DigiKey, then at Mouser.
+    pub fn rank(self, quotes: &[Quote]) -> u8 {
+        let stocked = |src: &str| quotes.iter().any(|q| q.stock.is_some_and(|s| s > 0) && (src.is_empty() || q.source == src));
+        let a = assembly(quotes);
+        match self {
+            Self::Jlc if a.jlc_stock.is_some_and(|s| s > 0) => match a.jlc {
+                Some(JlcType::Basic) => 0,
+                Some(JlcType::Preferred) => 1,
+                _ => 2,
+            },
+            Self::Jlc => if stocked("") { 3 } else { 4 },
+            // shortcut: an unknown lifecycle counts as active, since not every reply carries one; upgrade if that picks dead parts.
+            Self::Distributor if a.lifecycle.is_some_and(|l| l != Lifecycle::Active) => 2,
+            Self::Distributor => if stocked("DigiKey") { 0 } else if stocked("Mouser") { 1 } else { 2 },
+        }
+    }
+}
+
+/// Every line's alternates as lines of their own, each once, so `fetch_quotes` can price them with the lines.
+pub fn alternate_lines(lines: &[Line], store: Option<&Store>) -> Vec<Line> {
+    let mut out: Vec<Line> = vec![];
+    for line in lines {
+        for a in store.and_then(|s| alternatives::alternatives_of(s, &line.mpn).ok()).unwrap_or_default() {
+            if !same_mpn(&a.mpn, &line.mpn) && !out.iter().any(|l| same_mpn(&l.mpn, &a.mpn)) {
+                out.push(Line { mpn: a.mpn, manufacturer: a.manufacturer, supplier_ids: a.supplier_ids, ..Line::default() });
+            }
+        }
+    }
+    out
+}
+
+/// Sets each row's `pick` to the alternate that ranks strictly better than the line's own part for `who`;
+/// on a tie the earlier candidate (the line's own part, then alternates in role order) stays.
+pub fn align(rows: &mut [Row], who: Assembler, alt_quotes: &[(String, Vec<Quote>)]) {
+    for r in rows {
+        let quotes_of = |mpn: &str| alt_quotes.iter().find(|(m, _)| same_mpn(m, mpn)).map_or(&[][..], |(_, q)| q.as_slice());
+        let ranks: Vec<u8> = std::iter::once(who.rank(&r.quotes)).chain(r.alternatives.iter().map(|a| who.rank(quotes_of(&a.mpn)))).collect();
+        let best = (0..ranks.len()).min_by_key(|&i| ranks[i]).unwrap_or(0);
+        r.pick = best.checked_sub(1);
+    }
+}
+
 // ---- table, totals, CSV ----
 
 #[derive(Clone, Debug)]
@@ -629,6 +694,8 @@ pub struct Row {
     pub quotes: Vec<Quote>,
     pub best: Option<Best>,
     pub assembly: Assembly,
+    /// Index into `alternatives` of the one to order instead, set by `align`.
+    pub pick: Option<usize>,
 }
 
 pub fn build_rows(lines: Vec<Line>, lib: &[LibPart], store: Option<&Store>, quotes: Vec<Vec<Quote>>, boards: u64, target: &str, rates: Option<&Rates>) -> Vec<Row> {
@@ -645,6 +712,7 @@ pub fn build_rows(lines: Vec<Line>, lib: &[LibPart], store: Option<&Store>, quot
                 .collect(),
             best: best(&quotes, line.qty() * boards, target, rates),
             assembly: assembly(&quotes),
+            pick: None,
             line,
             quotes,
         })
@@ -1033,6 +1101,7 @@ C1,100n,C_0603,,,,,,\n";
             quotes: vec![],
             best: None,
             assembly: Assembly { jlc, jlc_stock: stock, lifecycle },
+            pick: None,
         };
         let rows = [
             row(Some(JlcType::Basic), Some(100), Some(Lifecycle::Active)),
@@ -1045,5 +1114,36 @@ C1,100n,C_0603,,,,,,\n";
         assert_eq!((s.basic, s.preferred, s.extended, s.out_of_stock, s.unknown, s.obsolete, s.nrnd), (2, 1, 1, 1, 1, 2, 1));
         assert_eq!(s.text(), "2 basic, 1 preferred, 1 extended, 1 out of stock at JLC, 2 obsolete or last-time-buy, 1 NRND, 1 not known at JLC");
         assert_eq!(assembly_summary(&[]).text(), "");
+    }
+
+    #[test]
+    fn align_picks_per_assembler() {
+        let q = |src: &str, stock: u64, jlc: &str, life: &str| Quote { source: src.into(), stock: Some(stock), jlc_type: jlc.into(), lifecycle: life.into(), ..Quote::default() };
+        let alt = |mpn: &str| Alternative { mpn: mpn.into(), manufacturer: String::new(), supplier_ids: vec![], role: "substitute".into() };
+        // Own part: extended at JLC, obsolete. A: basic at JLC but none in stock there. B: basic in stock. C: active at Mouser. D: active at DigiKey.
+        let own = vec![q("LCSC", 50, "extended", ""), q("DigiKey", 10, "", "Obsolete")];
+        let alt_quotes = vec![
+            ("A".to_string(), vec![q("LCSC", 0, "basic", "")]),
+            ("B".to_string(), vec![q("LCSC", 9, "basic", "")]),
+            ("C".to_string(), vec![q("Mouser", 5, "", "Active")]),
+            ("D".to_string(), vec![q("DigiKey", 5, "", "Active"), q("Mouser", 0, "", "Active")]),
+        ];
+        let mut rows = vec![Row {
+            line: Line { mpn: "OWN".into(), ..Line::default() },
+            status: Status::NoPartNumber,
+            alternatives: ["A", "B", "C", "D"].map(alt).to_vec(),
+            assembly: assembly(&own),
+            quotes: own,
+            best: None,
+            pick: None,
+        }];
+        align(&mut rows, Assembler::Jlc, &alt_quotes);
+        assert_eq!(rows[0].pick, Some(1), "JLC: basic in stock (B) beats the own extended part and out-of-stock A");
+        align(&mut rows, Assembler::Distributor, &alt_quotes);
+        assert_eq!(rows[0].pick, Some(3), "Distributor: active at DigiKey (D) beats Mouser (C) and the obsolete own part");
+        // A tie keeps the line's own part.
+        rows[0].quotes = vec![q("LCSC", 9, "basic", "")];
+        align(&mut rows, Assembler::Jlc, &alt_quotes);
+        assert_eq!(rows[0].pick, None);
     }
 }

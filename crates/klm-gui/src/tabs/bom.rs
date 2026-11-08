@@ -19,6 +19,8 @@ pub struct Loaded {
     project: std::path::PathBuf,
     lines: Vec<Line>,
     quotes: Vec<Vec<Quote>>,
+    /// Quotes for the lines' alternates, by MPN.
+    alt_quotes: Vec<(String, Vec<Quote>)>,
     lib: Vec<LibPart>,
     rates: Option<Rates>,
     notes: Vec<String>,
@@ -94,18 +96,21 @@ impl BomTab {
     pub fn seed(&mut self, cx: &AppCtx, project: std::path::PathBuf, lines: Vec<Line>, quotes: Vec<Vec<Quote>>, lib: Vec<LibPart>) {
         self.settings = ProjectBom::load(&project);
         self.project = Some(project.clone());
-        self.loaded = Some(Loaded { project, lines, quotes, lib, rates: None, notes: vec![] });
+        self.loaded = Some(Loaded { project, lines, quotes, alt_quotes: vec![], lib, rates: None, notes: vec![] });
         self.reprice(cx);
     }
 
-    /// Prices the alternate `alt` of line `i` in place of the line's own part. The quotes were for the old part, so the
-    /// line shows no price until the BOM is read again, which also puts the schematic's part back.
+    /// Prices the alternate `alt` of line `i` in place of the line's own part, from the alternates' quotes (none when
+    /// they weren't read). Reading the BOM again puts the schematic's part back.
     fn swap(&mut self, i: usize, alt: &klm_core::store::Alternative, cx: &mut AppCtx) {
         let Some(l) = &mut self.loaded else { return };
         let line = &mut l.lines[i];
         cx.log(Level::Info, format!("BOM: showing {} in place of {} for {}; the schematic is unchanged", alt.mpn, line.mpn, line.refs.join(" ")));
+        // Keep the old part's quotes so it can be swapped back.
+        let old = std::mem::take(&mut l.quotes[i]);
+        l.alt_quotes.push((line.mpn.clone(), old));
         (line.mpn, line.manufacturer, line.supplier_ids) = (alt.mpn.clone(), alt.manufacturer.clone(), alt.supplier_ids.clone());
-        l.quotes[i].clear();
+        l.quotes[i] = l.alt_quotes.iter().rev().find(|(m, _)| klm_core::matching::same_mpn(m, &alt.mpn)).map(|(_, q)| q.clone()).unwrap_or_default();
         self.reprice(cx);
     }
 
@@ -118,6 +123,7 @@ impl BomTab {
         let store = Store::default_path().and_then(|p| Store::open(&p).ok());
         self.priced_in = Self::target(cx);
         self.rows = bom::build_rows(l.lines.clone(), &l.lib, store.as_ref(), l.quotes.clone(), self.settings.boards, &self.priced_in, l.rates.as_ref());
+        bom::align(&mut self.rows, self.settings.assembler, &l.alt_quotes);
     }
 
     fn load(&mut self, cx: &mut AppCtx, project: std::path::PathBuf) {
@@ -131,12 +137,16 @@ impl BomTab {
                 let store = Store::default_path().and_then(|p| Store::open(&p).ok());
                 let (dist, mut notes) = bom::distributors(&settings, &region);
                 let ttl = settings.cache_ttl_minutes.unwrap_or(cache::DEFAULT_TTL_MINUTES) as i64 * 60;
-                let (quotes, problems) = bom::fetch_quotes(&lines, &dist, store.as_ref(), ttl);
+                // The alternates go through the same lookup in one pass, so an offline source times out once.
+                let alts = bom::alternate_lines(&lines, store.as_ref());
+                let all: Vec<Line> = lines.iter().chain(&alts).cloned().collect();
+                let (mut quotes, problems) = bom::fetch_quotes(&all, &dist, store.as_ref(), ttl);
+                let alt_quotes = alts.into_iter().map(|a| a.mpn).zip(quotes.split_off(lines.len())).collect();
                 notes.extend(problems);
                 if !region.is_empty() {
                     notes.push(format!("Shipping region {region}: used by DigiKey (site and currency). LCSC and Mouser prices do not change with it."));
                 }
-                Ok(Loaded { project: project.clone(), lines, quotes, lib: bom::lib_parts(&roots), rates: Rates::load().ok(), notes })
+                Ok(Loaded { project: project.clone(), lines, quotes, alt_quotes, lib: bom::lib_parts(&roots), rates: Rates::load().ok(), notes })
             })()
             .map_err(|e| format!("{e:#}"));
             let _ = tx.send(AppMsg::Bom(Msg::Loaded(res)));
@@ -170,6 +180,15 @@ impl BomTab {
                 .add(egui::TextEdit::singleline(&mut self.settings.region).hint_text(hint).desired_width(90.0))
                 .on_hover_text("Country code (US, DE, ...) for this project; empty uses the Settings default. Where you are, or where the board is made.")
                 .lost_focus();
+            ui.label("Assembler");
+            let before = self.settings.assembler;
+            egui::ComboBox::from_id_salt("bom-assembler").selected_text(before.label()).show_ui(ui, |ui| {
+                for a in bom::Assembler::ALL {
+                    ui.selectable_value(&mut self.settings.assembler, a, a.label());
+                }
+            });
+            let changed = self.settings.assembler != before;
+            (reprice, save) = (reprice || changed, save || changed);
             if self.settings.region.is_empty() && cx.settings.shipping_region.is_empty() && ui.link("Set in Settings…").on_hover_text("No region anywhere: DigiKey prices use its default site").clicked() {
                 cx.open_settings(Section::Bom);
             }
@@ -216,6 +235,16 @@ impl BomTab {
         ui.horizontal(|ui| {
             ui.label("Filter");
             ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("refs, MPN, maker…").desired_width(160.0));
+            let picks: Vec<(usize, klm_core::store::Alternative)> = self.rows.iter().enumerate().filter_map(|(i, r)| Some((i, r.alternatives[r.pick?].clone()))).collect();
+            let hint = format!("Show the alternate that suits {} best on each line: {}", self.settings.assembler.label(), match self.settings.assembler {
+                bom::Assembler::Jlc => "JLC basic, then preferred, then extended (in stock at JLC), then in stock anywhere",
+                bom::Assembler::Distributor => "active and in stock at DigiKey, then at Mouser",
+            });
+            if !picks.is_empty() && ui.button(format!("Use best alternates ({})", picks.len())).on_hover_text(hint).clicked() {
+                for (i, alt) in picks {
+                    self.swap(i, &alt, cx);
+                }
+            }
             ui.checkbox(&mut self.shortfalls, "Shortfalls only").on_hover_text("Lines missing from the library, without a price, or with less stock than the boards need");
         });
         let needle = self.filter.trim().to_lowercase();
@@ -296,10 +325,15 @@ impl BomTab {
                 if alts.is_empty() {
                     return;
                 }
-                let text = if let [a] = alts { a.mpn.clone() } else { format!("{} alternates", alts.len()) };
+                let text = match r.pick {
+                    Some(k) => format!("better: {}", alts[k].mpn),
+                    None if alts.len() == 1 => alts[0].mpn.clone(),
+                    None => format!("{} alternates", alts.len()),
+                };
                 ui.menu_button(format!("{text} ▾"), |ui| {
-                    for a in alts {
-                        if ui.button(format!("{} ({})", a.mpn, a.role)).on_hover_text("Show this part in place of the line's own").clicked() {
+                    for (k, a) in alts.iter().enumerate() {
+                        let best = if r.pick == Some(k) { ", best for the assembler" } else { "" };
+                        if ui.button(format!("{} ({}{best})", a.mpn, a.role)).on_hover_text("Show this part in place of the line's own").clicked() {
                             swap = Some((i, a.clone()));
                             ui.close();
                         }
