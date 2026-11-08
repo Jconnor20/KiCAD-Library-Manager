@@ -22,6 +22,7 @@ const USAGE: &str = "usage:
   klm-cli standardise [--project <dir>] [--dry-run]
   klm-cli restyle <category> <part> [--project <dir>] [--dry-run]
   klm-cli health [--json | --csv] [--project <dir>]
+  klm-cli check-project <dir> [--fab <id>]... [--all-fabs] [--format text|json|csv]   (KiCad's DRC and ERC with the fab's minimums; the profile's fabs when no --fab)
   klm-cli cleanup [--project <dir>]... [--remove sym:<lib>|fp:<lib>]... [--fix sym:<lib>=<path>]... [--move sym:<lib>]... [--apply]
   klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
   klm-cli remove <part> [--category <c>] [--project <dir>] [--yes]   (dry run unless --yes)
@@ -37,6 +38,7 @@ enum Command {
     Standardise { project: Option<PathBuf>, dry_run: bool },
     Restyle { category: String, part: String, project: Option<PathBuf>, dry_run: bool },
     Health { json: bool, csv: bool, project: Option<PathBuf> },
+    CheckProject { dir: PathBuf, fabs: Vec<String>, all_fabs: bool, format: String },
     Cleanup { projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, moves: Vec<String>, apply: bool },
     Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
     Export { zip: PathBuf, parts: Vec<String>, category: Option<String>, project: Option<PathBuf> },
@@ -60,10 +62,32 @@ fn parse_cleanup(args: &[String]) -> Result<Command> {
     Ok(Command::Cleanup { projects, remove, fix, moves, apply })
 }
 
+fn parse_check_project(args: &[String]) -> Result<Command> {
+    let (mut dir, mut fabs, mut all_fabs, mut format) = (None, vec![], false, "text".to_string());
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut value = || it.next().cloned().with_context(|| format!("{a} needs a value"));
+        match a.as_str() {
+            "--fab" => fabs.push(value()?),
+            "--all-fabs" => all_fabs = true,
+            "--format" => format = value()?,
+            _ if a.starts_with("--") || dir.is_some() => bail!("{a} is not valid for check-project"),
+            _ => dir = Some(PathBuf::from(a)),
+        }
+    }
+    if !matches!(format.as_str(), "text" | "json" | "csv") {
+        bail!("--format must be text, json or csv, not {format}");
+    }
+    Ok(Command::CheckProject { dir: dir.context("check-project needs the project folder")?, fabs, all_fabs, format })
+}
+
 fn parse(args: &[String]) -> Result<Command> {
     let (name, rest) = args.split_first().context("missing command")?;
     if name == "cleanup" {
         return parse_cleanup(rest);
+    }
+    if name == "check-project" {
+        return parse_check_project(rest);
     }
     let (mut csv, mut json, mut deep, mut overwrite, mut dry_run, mut yes) = (false, false, false, false, false, false);
     let (mut project, mut category, mut to, mut zips) = (None, None, None, vec![]);
@@ -280,17 +304,66 @@ fn health(json: bool, csv: bool, project: Option<PathBuf>) -> Result<ExitCode> {
     let s = settings()?;
     let dir = project.or(s.last_project.clone()).context("no project: pass --project <dir>")?;
     let findings = klm_core::health::scan(&dir, kicad_config().ok().as_deref());
+    print_findings(&findings, json, csv)
+}
+
+/// Prints findings as text, JSON or CSV; the exit code fails when one is an error.
+fn print_findings(findings: &[klm_core::health::Finding], json: bool, csv: bool) -> Result<ExitCode> {
     if json {
-        println!("{}", klm_core::health::to_json(&findings));
+        println!("{}", klm_core::health::to_json(findings));
     } else if csv {
-        print!("{}", klm_core::health::to_csv(&findings));
+        print!("{}", klm_core::health::to_csv(findings));
     } else {
-        for f in &findings {
+        for f in findings {
             println!("{:<8} {:<17} {}: {}", if f.severity == Severity::Error { "error" } else { "warning" }, f.kind, f.item, f.message);
         }
         println!("{} findings", findings.len());
     }
-    Ok(if klm_core::health::has_errors(&findings) { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+    Ok(if klm_core::health::has_errors(findings) { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+}
+
+/// KiCad's DRC and ERC on the project, with the minimums of `fabs` (the active profile's when empty) as extra rules.
+/// With `all_fabs`, DRC once per fab (every known one, or just `fabs`) and a pass/fail line each; fails when none pass.
+fn check_project(dir: &Path, fabs: Vec<String>, all_fabs: bool, format: &str) -> Result<ExitCode> {
+    use klm_core::{fab_data, project_check};
+    let s = settings()?;
+    if !dir.is_dir() {
+        bail!("{} is not a folder", dir.display());
+    }
+    let cli = kicad_env::kicad_cli()?;
+    let picked = !fabs.is_empty();
+    let choice = fab_data::FabChoice { fabs: if picked { fabs } else { s.standard.fab.fabs.clone() }, ..s.standard.fab.clone() };
+    let known = if picked || all_fabs { fab_data::fabs() } else { vec![] };
+    if let Some(bad) = choice.fabs.iter().find(|id| picked && !known.iter().any(|f| &f.id == *id)) {
+        bail!("unknown fab {bad}; known: {}", known.iter().map(|f| f.id.as_str()).collect::<Vec<_>>().join(", "));
+    }
+    if !all_fabs {
+        let findings = project_check::check(dir, &cli, &fab_data::limits(&choice))?;
+        if format == "text" {
+            let fabs = if choice.fabs.is_empty() { "no fab".to_string() } else { choice.fabs.join(" + ") };
+            println!("Checked against {fabs}, IPC class {}, density {}", choice.ipc_class, choice.density);
+        }
+        return print_findings(&findings, format == "json", format == "csv");
+    }
+    let fabs: Vec<_> = known.into_iter().filter(|f| !picked || choice.fabs.contains(&f.id)).collect();
+    let results = project_check::check_all(dir, &cli, &fabs, &choice)?;
+    match format {
+        "json" => {
+            let rows: Vec<_> = results.iter().map(|r| json!({ "fab": r.fab, "name": r.name, "pass": r.passes(), "errors": r.errors, "warnings": r.warnings })).collect();
+            println!("{}", serde_json::to_string_pretty(&rows)?);
+        }
+        "csv" => {
+            println!("fab,name,pass,errors,warnings");
+            results.iter().for_each(|r| println!("{},\"{}\",{},{},{}", r.fab, r.name.replace('"', "\"\""), r.passes(), r.errors, r.warnings));
+        }
+        _ => {
+            for r in &results {
+                println!("{:<4} {:<12} {}: {} errors, {} warnings", if r.passes() { "pass" } else { "FAIL" }, r.fab, r.name, r.errors, r.warnings);
+            }
+            println!("{} of {} fabs pass", results.iter().filter(|r| r.passes()).count(), results.len());
+        }
+    }
+    Ok(if results.iter().any(|r| r.passes()) { ExitCode::SUCCESS } else { ExitCode::FAILURE })
 }
 
 fn relink(project: Option<&Path>) -> Result<()> {
@@ -544,6 +617,7 @@ fn main() -> ExitCode {
         Command::Restyle { category, part, project, dry_run } => restyle(&category, &part, project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
         Command::Remove { part, category, project, yes } => remove(&part, category.as_deref(), project.as_deref(), yes).map(|_| ExitCode::SUCCESS),
         Command::Health { json, csv, project } => health(json, csv, project),
+        Command::CheckProject { dir, fabs, all_fabs, format } => check_project(&dir, fabs, all_fabs, &format),
         Command::Cleanup { projects, remove, fix, moves, apply } => cleanup_cmd(projects, remove, fix, moves, apply),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
         Command::Export { zip, parts, category, project } => export(&zip, parts, category, project.as_deref()).map(|_| ExitCode::SUCCESS),
@@ -572,6 +646,14 @@ mod tests {
         assert_eq!(parse(&args("relink --project D:/p")).unwrap(), Command::Relink { project: Some("D:/p".into()) });
         assert_eq!(parse(&args("health --csv --project D:/p")).unwrap(), Command::Health { json: false, csv: true, project: Some("D:/p".into()) });
         assert!(parse(&args("health --csv --json")).is_err() && parse(&args("check --csv")).is_err());
+        assert_eq!(
+            parse(&args("check-project D:/p --fab jlcpcb --fab pcbway --all-fabs --format csv")).unwrap(),
+            Command::CheckProject { dir: "D:/p".into(), fabs: vec!["jlcpcb".into(), "pcbway".into()], all_fabs: true, format: "csv".into() }
+        );
+        assert_eq!(parse(&args("check-project D:/p")).unwrap(), Command::CheckProject { dir: "D:/p".into(), fabs: vec![], all_fabs: false, format: "text".into() });
+        for bad in ["check-project", "check-project a b", "check-project a --fab", "check-project a --format xml", "check-project a --json"] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?} should fail");
+        }
         assert_eq!(parse(&args("history")).unwrap(), Command::History { json: false, project: None });
         assert_eq!(parse(&args("history --json")).unwrap(), Command::History { json: true, project: None });
         assert!(parse(&args("rollback 0001 --json")).is_err());

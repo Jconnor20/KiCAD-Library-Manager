@@ -18,6 +18,7 @@ pub mod fields;
 pub mod health;
 pub mod kicad_env;
 pub mod library;
+pub mod project_check;
 pub mod matching;
 pub mod part;
 pub mod preview;

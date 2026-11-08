@@ -98,6 +98,7 @@ Do this one last, and on a copy if you're nervous. History can roll it back.
 - [ ] **`klm-cli import a.zip b.zip --dry-run`** prints the plan and changes nothing.
 - [ ] **`klm-cli history`**, then **`klm-cli rollback <id>`**, restores that snapshot.
 - [ ] **`klm-cli health --project <dir>`** on a real project. Expect a readable report, exit code 1 only when there are errors, and the same findings with `--json` and `--csv`.
+- [ ] **`klm-cli check-project <dir>`** on a real project, once with the profile's fab and once with `--all-fabs`. Expect KiCad's DRC/ERC findings with references, fab-limit violations naming a `klm_` rule, and the project folder unchanged (no `.kicad_dru` written).
 - [ ] **`klm-cli export out.zip <part>...`**, then unzip it and add the `sym-lib-table`/`fp-lib-table` entries to a fresh KiCad project. Expect the symbols to place with their footprints and 3D models showing.
 - [ ] **Export into Altium or Fusion.** Import the same ZIP with their KiCad importer. Expect symbols and footprints to come through.
 

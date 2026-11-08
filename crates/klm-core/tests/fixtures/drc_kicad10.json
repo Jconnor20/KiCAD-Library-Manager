@@ -1,0 +1,145 @@
+{
+    "$schema": "https://schemas.kicad.org/drc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-11-08T16:18:35",
+    "ignored_checks": [
+        {
+            "description": "Track endpoint not centered on via",
+            "key": "track_not_centered_on_via"
+        },
+        {
+            "description": "Tuning profile track geometries",
+            "key": "tuning_profile_track_geometries"
+        },
+        {
+            "description": "Footprint doesn't match symbol's footprint filters",
+            "key": "footprint_filters_mismatch"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning",
+        "exclusion"
+    ],
+    "kicad_version": "10.0.7",
+    "schematic_parity": [],
+    "source": "board.kicad_pcb",
+    "unconnected_items": [
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "PTH pad 1 [GND] of R2",
+                    "pos": {
+                        "x": 140.97,
+                        "y": 115.57
+                    },
+                    "uuid": "00000000-0000-0000-0000-000000000002"
+                },
+                {
+                    "description": "PTH pad 2 [GND] of R3",
+                    "pos": {
+                        "x": 148.59,
+                        "y": 115.57
+                    },
+                    "uuid": "00000000-0000-0000-0000-000000000003"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        }
+    ],
+    "violations": [
+        {
+            "description": "Annular width (rule 'klm_min_annular_ring' min annular width 0.5000 mm; actual 0.4000 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 1 [Net-(P2-P1)] of C2",
+                    "pos": {
+                        "x": 137.16,
+                        "y": 125.095
+                    },
+                    "uuid": "87622d23-7d7a-471d-bcd4-c13eacfb9e91"
+                }
+            ],
+            "severity": "error",
+            "type": "annular_width"
+        },
+        {
+            "description": "Clearance violation (rule 'klm_min_clearance' clearance 0.5000 mm; actual 0.4510 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 2 [Net-(U1A-K)] of C2",
+                    "pos": {
+                        "x": 137.16,
+                        "y": 120.095
+                    },
+                    "uuid": "434f4a07-999c-4c64-a829-a4342b3a5aca"
+                },
+                {
+                    "description": "Track [Net-(U1A-G)] on bottom_cu, length 3.3020 mm",
+                    "pos": {
+                        "x": 135.509,
+                        "y": 117.729
+                    },
+                    "uuid": "5c81feef-8ec5-4bc1-ae1b-5599c38f7110"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Board edge clearance violation (rule 'klm_min_edge_clearance' clearance 2.0000 mm; actual 1.2700 mm)",
+            "items": [
+                {
+                    "description": "Segment on Edge.Cuts",
+                    "pos": {
+                        "x": 173.355,
+                        "y": 90.17
+                    },
+                    "uuid": "00000000-0000-0000-0000-00005a3345b3"
+                },
+                {
+                    "description": "Zone [GND] on bottom_cu, priority 0",
+                    "pos": {
+                        "x": 172.085,
+                        "y": 135.89
+                    },
+                    "uuid": "00000000-0000-0000-0000-00004eed97a2"
+                }
+            ],
+            "severity": "error",
+            "type": "copper_edge_clearance"
+        },
+        {
+            "description": "The footprint library 'Footprints' is not enabled in the current configuration",
+            "items": [
+                {
+                    "description": "Footprint C1",
+                    "pos": {
+                        "x": 141.605,
+                        "y": 99.695
+                    },
+                    "uuid": "00000000-0000-0000-0000-000054a581e5"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_issues"
+        },
+        {
+            "description": "Track has unconnected end",
+            "items": [
+                {
+                    "description": "Track [<no net>] on F.Cu, length 10.0000 mm",
+                    "pos": {
+                        "x": 5.0,
+                        "y": 5.0
+                    },
+                    "uuid": "00000000-0000-0000-0000-000000000001"
+                }
+            ],
+            "severity": "exclusion",
+            "type": "track_dangling"
+        }
+    ]
+}
