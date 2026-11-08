@@ -425,8 +425,10 @@ impl LibraryTab {
         match msg {
             Msg::Refresh => self.stale = true,
             Msg::Swap(symbol) => {
-                // A BOM line may match a part in either library; the panel falls back to the first part when it isn't in this one.
-                if let Some(root) = cx.global_root().or_else(|| cx.project_root()) {
+                // The BOM matches against both libraries, so open the one that has the symbol.
+                // shortcut: scans on the UI thread, one click; move to the panel's worker if large libraries stall it.
+                let has = |r: &LibraryRoot| klm_core::alternatives::scan(r).iter().any(|p| p.symbol == symbol);
+                if let Some(root) = [cx.project_root(), cx.global_root()].into_iter().flatten().find(has) {
                     self.alternatives = Some(AlternativesPanel::new(&root, &cx.ctx, Some((String::new(), symbol))).for_swap());
                 }
             }

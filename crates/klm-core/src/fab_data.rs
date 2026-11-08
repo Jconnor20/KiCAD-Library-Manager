@@ -70,14 +70,15 @@ struct Ipc {
     courtyard_excess: [f64; 3],
 }
 
-// shortcut: parsed on every call (a few KB), cache in a OnceLock if a check ever calls this per footprint.
-fn tables() -> Tables {
-    serde_json::from_str(include_str!("fab_profiles.json")).expect("fab_profiles.json is valid")
+/// Parsed once: `check_part` asks per footprint and the Settings page asks every frame.
+fn tables() -> &'static Tables {
+    static T: std::sync::OnceLock<Tables> = std::sync::OnceLock::new();
+    T.get_or_init(|| serde_json::from_str(include_str!("fab_profiles.json")).expect("fab_profiles.json is valid"))
 }
 
 /// Every fab known, in the JSON's order.
 pub fn fabs() -> Vec<Fab> {
-    tables().fabs
+    tables().fabs.clone()
 }
 
 /// The larger of two optional minimums; `None` only when neither is known.

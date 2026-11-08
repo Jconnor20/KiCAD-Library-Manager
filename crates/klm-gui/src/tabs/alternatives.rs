@@ -196,7 +196,10 @@ impl AlternativesPanel {
                 match rx.try_recv() {
                     Ok((parts, groups)) => {
                         let wanted = self.open_on.take();
-                        self.base = wanted.and_then(|(c, s)| parts.iter().position(|p| (c.is_empty() || p.category == c) && p.symbol == s)).unwrap_or(0);
+                        let found = wanted.and_then(|(c, s)| parts.iter().position(|p| (c.is_empty() || p.category == c) && p.symbol == s));
+                        // Never search straight away for a part other than the one asked for.
+                        self.auto_search &= found.is_some();
+                        self.base = found.unwrap_or(0);
                         (self.parts, self.groups, self.rx) = (parts, groups, None);
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {

@@ -514,6 +514,7 @@ impl Lifecycle {
             _ if s.contains("last time") => Some(Self::LastTimeBuy),
             _ if s.contains("not for new") || s.contains("not recommended") || s.contains("nrnd") => Some(Self::Nrnd),
             _ if s.contains("obsolete") || s.contains("end of life") || s.contains("discontinued") => Some(Self::Obsolete),
+            _ if s.contains("inactive") => None,
             _ if s.contains("active") || s.contains("new product") => Some(Self::Active),
             _ => None,
         }
@@ -1014,6 +1015,7 @@ C1,100n,C_0603,,,,,,\n";
         assert_eq!(status("Last Time Buy"), Some(Lifecycle::LastTimeBuy));
         assert_eq!(status("Discontinued at Digi-Key"), None, "DigiKey dropping it says nothing about the maker");
         assert_eq!(status(""), None);
+        assert_eq!(status("Inactive"), None, "not read as active");
         // No source knows: unknown, and not flagged.
         let none = assembly(&[]);
         assert_eq!((none.jlc, none.jlc_stock, none.lifecycle, none.flagged()), (None, None, None, false));
