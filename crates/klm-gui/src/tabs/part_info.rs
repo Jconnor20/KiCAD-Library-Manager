@@ -98,12 +98,15 @@ pub fn page(ui: &mut Ui, p: &mut Profile, class: &mut usize) {
 
 fn fields(ui: &mut Ui, key: &str, info: &mut ClassInfo) {
     ui.weak("Aliases are the names a source uses for the field's parameter (\"Voltage - Rated\"); they fill the field on import. Allowed values: leave empty for any.");
-    let (mut remove, mut up, mut down) = (None, None, None);
+    let (mut remove, mut up, mut down, mut renamed) = (None, None, None, None);
     let n = info.fields.len();
     for (i, fd) in info.fields.iter_mut().enumerate() {
         ui.push_id((key, i), |ui| {
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut fd.name).hint_text("name").desired_width(110.0));
+                let was = fd.name.clone();
+                if ui.add(egui::TextEdit::singleline(&mut fd.name).hint_text("name").desired_width(110.0)).changed() {
+                    renamed = Some((was, fd.name.clone()));
+                }
                 ui.checkbox(&mut fd.required, "required");
                 ui.checkbox(&mut fd.visible, "visible");
                 egui::ComboBox::from_id_salt("unit").width(50.0).selected_text(fd.unit.as_deref().unwrap_or("text")).show_ui(ui, |ui| {
@@ -132,6 +135,9 @@ fn fields(ui: &mut Ui, key: &str, info: &mut ClassInfo) {
             });
         });
     }
+    if let Some((was, now)) = renamed {
+        rename_placeholder(info, &was, &now);
+    }
     if let Some(i) = up {
         shift(&mut info.fields, i, -1);
     } else if let Some(i) = down {
@@ -141,6 +147,18 @@ fn fields(ui: &mut Ui, key: &str, info: &mut ClassInfo) {
     }
     if ui.button("Add field").clicked() {
         info.fields.push(FieldDef { name: "New field".into(), ..Default::default() });
+    }
+}
+
+/// Keeps the templates pointing at a renamed field. Left alone while another field still has the old
+/// name, so typing through a name another field uses doesn't take over its placeholders.
+fn rename_placeholder(info: &mut ClassInfo, was: &str, now: &str) {
+    if info.fields.iter().any(|f| f.name == was) {
+        return;
+    }
+    let (was, now) = (format!("{{{was}}}"), format!("{{{now}}}"));
+    for t in [&mut info.description, &mut info.value, &mut info.keywords] {
+        *t = t.replace(&was, &now);
     }
 }
 
@@ -172,6 +190,16 @@ mod tests {
         let mut v: Vec<FieldDef> = ["A", "B", "C"].map(|n| FieldDef { name: n.into(), ..Default::default() }).into();
         assert!(shift(&mut v, 0, 1) && !shift(&mut v, 0, -1) && !shift(&mut v, 2, 1));
         assert_eq!(v.iter().map(|f| f.name.as_str()).collect::<String>(), "BAC");
+    }
+
+    #[test]
+    fn renaming_a_field_follows_into_templates() {
+        let mut info = ClassInfo { description: "Cap {Voltage} {V}".into(), fields: vec![FieldDef { name: "Volts".into(), ..Default::default() }, FieldDef { name: "V".into(), ..Default::default() }], ..Default::default() };
+        rename_placeholder(&mut info, "Voltage", "Volts");
+        assert_eq!(info.description, "Cap {Volts} {V}");
+        // "V" is still another field's name, so its placeholder stays.
+        rename_placeholder(&mut info, "V", "Vx");
+        assert_eq!(info.description, "Cap {Volts} {V}");
     }
 
     #[test]

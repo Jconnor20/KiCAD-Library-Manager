@@ -134,7 +134,10 @@ pub fn plan(root: &LibraryRoot, profile: &profile::Profile, naming: &crate::rule
             let mut out = vec![];
             for sym in lib.items_mut().iter_mut().filter(|c| c.head() == Some("symbol")) {
                 let name = sym.arg(0).unwrap_or_default().to_string();
-                out.extend(symbol::fix(sym, rules).into_iter().map(|c| format!("{name}: {c}")));
+                // A house template places Reference and Value itself, so the generic above/below rule leaves them.
+                let templated = crate::symbols::class_of(&cat, sym, naming).is_ok_and(|c| profile.templates.contains_key(&format!("{c:?}")));
+                let rules = Rules { symbol_field_positions: rules.symbol_field_positions && !templated, ..rules.clone() };
+                out.extend(symbol::fix(sym, &rules).into_iter().map(|c| format!("{name}: {c}")));
                 out.extend(crate::fields::fix(sym, &cat, profile, None).into_iter().map(|c| format!("{name}: {c}")));
             }
             out
@@ -310,6 +313,20 @@ mod tests {
         assert!(text.contains("C1: Capacitance: 0.1uF -> 100nF") && text.contains("C1: Description: \"\" -> \"Capacitor 100nF 16V\""), "{text}");
         apply(&p).unwrap();
         assert!(plan(&root, &Profile::default(), &Default::default()).files.is_empty());
+    }
+
+    #[test]
+    fn house_template_keeps_its_field_positions() {
+        let base = crate::test_dir("standardise_templated");
+        let root = LibraryRoot::global(base.join("lib"), base.join("config"));
+        root.ensure_layout().unwrap();
+        let sym = r#"(symbol "R1" (property "Reference" "R" (at 5 5 0)) (property "Value" "R1" (at 5 -5 0)) (symbol "R1_1_1" (rectangle (start -1 2.5) (end 1 -2.5)) (pin passive line (at 0 3.81 270) (length 1.27) (name "~") (number "1")) (pin passive line (at 0 -3.81 90) (length 1.27) (name "~") (number "2"))))"#;
+        std::fs::write(root.dir.join("symbols/Resistors.kicad_sym"), format!(r#"(kicad_symbol_lib (version 20241209) (generator "t") {sym})"#)).unwrap();
+        let moves = |p: &Profile| plan(&root, p, &Default::default()).to_string().contains("Reference");
+        assert!(moves(&Profile::default()));
+        let mut p = Profile::default();
+        p.templates.insert("Resistor".into(), sym.into());
+        assert!(!moves(&p), "{}", plan(&root, &p, &Default::default()));
     }
 
     #[test]
