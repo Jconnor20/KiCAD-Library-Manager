@@ -3,6 +3,7 @@
 pub mod alternatives;
 pub mod batch;
 pub mod bom;
+pub mod bom_import;
 pub mod cache;
 pub mod categories;
 pub mod checks;
