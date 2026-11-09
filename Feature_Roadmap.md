@@ -417,7 +417,9 @@ What the plan or the work packages called for and the product doesn't do yet, so
 
 - [ ] **W12.1 Edit in KiCad round trip** (S): open the part in KiCad's symbol or footprint editor, watch the file, and re-check and re-badge when it is saved.
 - [ ] **W12.2 IPC-7351 footprint generator** (L): chip, SOD, SOT, SOIC, QFN, QFP and BGA from datasheet dimensions and the profile's density.
-- [ ] **W12.3 In-app symbol editor** (L): only if W12.1 isn't enough.
+- [x] **W12.3 In-app symbol editor** (L): only if W12.1 isn't enough.
+  - **Done:** `symbols::edit` (`pins`/`set_pin`/`add_pin`/`remove_pin`, `body`/`set_body`, `text_at`/`set_text_at`, `load`/`save`) edits one symbol's s-expression and leaves everything else as it was; positions snap to 1.27 mm. `save` takes a snapshot (History undoes it) and refuses if the file changed since `load`. The Library tab's "Edit symbol…" opens `tabs/symbol_editor.rs`: preview, pin table (number, name, type, side, x, y, length, add/remove), body rectangle, Reference/Value text positions, "Apply house style" (reuses `symbols::restyle`, applied to the form until Save). Save reloads the Library tab, so checks and the compliance badge refresh. Test: add/move/remove pin, resize body and move text round-trip through the file.
+  - **Known limits:** single-unit symbols with a rectangle body only (no drawing of lines/arcs; first rectangle is the body); the preview is KiCad's render of the saved file, so it updates on Save, not while dragging; renumbering pins as a swap (1<->2) is refused (rename through a spare number); not checked by hand in the GUI.
 - 3D CAD editing is not planned (it needs a CAD kernel). W11.1 covers positioning, and the model can be opened in FreeCAD.
 
 ## Later

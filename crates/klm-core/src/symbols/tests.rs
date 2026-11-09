@@ -403,3 +403,36 @@ fn set_house_template_takes_the_symbol_and_footprint_style_used_by_restyle_and_s
     assert!(flat(&fp).contains("(start -3 -3) (end 3 3)") && flat(&fp).contains("(at -1 0)"), "geometry untouched");
     assert!(standardise::plan(&root, &profile, &rules()).files.is_empty(), "a second run has nothing to do");
 }
+
+fn pin_row(number: &str) -> edit::PinRow {
+    edit::PinRow { number: number.into(), name: "X".into(), etype: "output".into(), x: 1.3, y: -2.5, rot: 180.0, length: 3.0 }
+}
+
+#[test]
+fn symbol_editor_ops_round_trip_through_the_file_and_keep_everything_else() {
+    use edit::*;
+    let sym = vendor("U1", "U", "an IC", &[("input", "1", "IN", false), ("output", "2", "OUT", true)]);
+    let (_base, root) = library("edit_ops", "ICs", &[sym]);
+    let was = load(&root, "ICs", "U1").unwrap();
+    let mut s = was.clone();
+    add_pin(&mut s, pin_row("3")).unwrap();
+    set_pin(&mut s, "1", PinRow { name: "VIN".into(), x: 0.7, ..pin_row("1") }).unwrap();
+    remove_pin(&mut s, "2").unwrap();
+    set_body(&mut s, [-4.0, 4.0, 4.0, -4.0]).unwrap();
+    set_text_at(&mut s, "Reference", [3.0, 5.0, 0.0]).unwrap();
+    assert!(add_pin(&mut s, pin_row("3")).is_err() && set_pin(&mut s, "1", pin_row("3")).is_err() && remove_pin(&mut s, "9").is_err());
+    save(&root, "ICs", "U1", &was, s.clone()).unwrap();
+    // A save from a stale copy is refused.
+    assert!(save(&root, "ICs", "U1", &was, s).is_err());
+
+    let back = load(&root, "ICs", "U1").unwrap();
+    let p = pins(&back);
+    assert_eq!(p.iter().map(|p| p.number.as_str()).collect::<Vec<_>>(), ["1", "3"]);
+    // Snapped to 1.27 mm; type, name and length changed.
+    assert_eq!(p[0], PinRow { number: "1".into(), name: "VIN".into(), etype: "output".into(), x: 1.27, y: -2.54, rot: 180.0, length: 2.54 });
+    assert_eq!(body(&back), Some([-3.81, 3.81, 3.81, -3.81]));
+    assert_eq!(text_at(&back, "Reference"), Some([2.54, 5.08, 0.0]));
+    assert_eq!(property(&back, "Datasheet"), property(&was, "Datasheet"));
+    assert_eq!(property(&back, "Alternates"), property(&was, "Alternates"));
+    assert!(back.children("symbol").flat_map(|u| u.children("pin")).all(|p| p.child("alternate").is_some() || pin_number(p) == "3"));
+}

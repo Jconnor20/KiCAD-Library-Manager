@@ -8,6 +8,7 @@
 //!
 //! Restyling moves pin positions: a schematic that already uses the symbol may need its wires fixed.
 
+pub mod edit;
 mod class;
 mod template;
 
