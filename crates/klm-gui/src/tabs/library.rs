@@ -2,6 +2,7 @@ use super::alternatives::AlternativesPanel;
 use super::batch_dialog::{self, BatchDialog, Progress};
 use super::edit_dialog::{EditAction, EditDialog};
 use super::preview::PreviewPanel;
+use super::symbol_editor::{Outcome, SymbolEditor};
 use super::ui_kit::{self, Col, Level, Sort, Status as Cell};
 use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui::{self, RichText, Sense};
@@ -48,6 +49,8 @@ enum Action {
     Preview { category: String, name: String },
     /// Open the part's symbol library or footprint in KiCad's editor and re-check when it is saved.
     EditInKicad { editor: Editor, category: String, name: String },
+    /// Open the in-app symbol editor.
+    EditSymbol { category: String, name: String },
     /// Show what redrawing the symbol in the house style of its class would do.
     Restyle { category: String, name: String },
     /// Make the part the active profile's house template for its class.
@@ -127,6 +130,7 @@ pub struct LibraryTab {
     dry: Option<Dry>,
     /// The open preview window and its title.
     preview: Option<(String, PreviewPanel)>,
+    symbol_editor: Option<SymbolEditor>,
     alternatives: Option<AlternativesPanel>,
 }
 
@@ -163,6 +167,7 @@ impl Default for LibraryTab {
             batch: None,
             dry: None,
             preview: None,
+            symbol_editor: None,
             alternatives: None,
         }
     }
@@ -277,6 +282,9 @@ fn part_actions(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, has_project: bo
     }
     if btn(ui, "Edit footprint in KiCad", true, "Open this part's footprint in KiCad. Saving there re-checks the part here.", "") {
         *action = Action::EditInKicad { editor: Editor::Footprint, category: key.0.clone(), name: key.1.clone() };
+    }
+    if btn(ui, "Edit symbol…", true, "Edit pins, body and text positions of the symbol in the app (graphical editing: use KiCad)", "") {
+        *action = Action::EditSymbol { category: key.0.clone(), name: key.1.clone() };
     }
     if btn(ui, "Restyle symbol…", true, "Redraw the symbol in the house style for its kind of part (resistor, capacitor, IC box…). Shows what changes first. Keeps every field; undo it in History. Wires on schematics that already use it may need fixing.", "") {
         *action = Action::Restyle { category: key.0.clone(), name: key.1.clone() };
@@ -455,6 +463,15 @@ impl LibraryTab {
                     self.preview = Some((format!("Preview: {name}"), PreviewPanel::for_library(&cx.ctx, root, &category, &name)));
                 }
             }
+            Action::EditSymbol { category, name } => {
+                let root = if self.scope == Scope::Global { &global } else { &project };
+                if let Some(root) = root {
+                    match SymbolEditor::new(&cx.ctx, root, &category, &name) {
+                        Ok(e) => self.symbol_editor = Some(e),
+                        Err(e) => cx.log(Level::Error, format!("Can't edit {name}: {e:#}")),
+                    }
+                }
+            }
             Action::Restyle { category, name } => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
@@ -550,6 +567,13 @@ impl LibraryTab {
         if let Some((title, panel)) = &mut self.preview {
             if !panel.window(&cx.ctx, title) {
                 self.preview = None;
+            }
+        }
+        if let Some(editor) = &mut self.symbol_editor {
+            match editor.show(&cx.ctx, &cx.settings.rules, &cx.settings.standard) {
+                Outcome::None => {}
+                Outcome::Close => self.symbol_editor = None,
+                Outcome::Saved => self.stale = true,
             }
         }
         if let Some(dialog) = &mut self.edit_dialog {
