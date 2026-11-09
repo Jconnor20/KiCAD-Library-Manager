@@ -106,7 +106,7 @@ fn pin1_graphic(fp: &Sexpr) -> Option<Sexpr> {
 /// changed. The style's widths and text placement replace the generic rules; its pin-1 marker replaces the
 /// default dot (still only when the pin-1 rule is on). With fab `limits`, silkscreen is kept at least the
 /// fab's minimum width and clipped off the pads, and the courtyard grown to the density's excess.
-pub(super) fn fix(fp: &mut Sexpr, r: &Rules, style: Option<&FootprintStyle>, limits: Option<&FabLimits>) -> Vec<String> {
+pub(crate) fn fix(fp: &mut Sexpr, r: &Rules, style: Option<&FootprintStyle>, limits: Option<&FabLimits>) -> Vec<String> {
     let mut out = vec![];
     let none = FootprintStyle::default();
     let style = style.unwrap_or(&none);
@@ -136,7 +136,7 @@ pub(super) fn fix(fp: &mut Sexpr, r: &Rules, style: Option<&FootprintStyle>, lim
     }
     out.extend(house_texts(fp, &style.texts));
     if r.pin1_marker {
-        out.extend(pin1_marker(fp, r.silk_width.unwrap_or(0.12), style.pin1.as_deref()));
+        out.extend(pin1_marker(fp, at_least(".SilkS", r.silk_width.unwrap_or(0.12)), style.pin1.as_deref()));
     }
     out
 }

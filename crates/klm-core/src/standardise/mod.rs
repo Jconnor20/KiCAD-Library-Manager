@@ -10,6 +10,7 @@ mod footprint;
 pub mod profile;
 
 pub use footprint::{FootprintStyle, TextStyle};
+pub(crate) use footprint::fix as fix_footprint;
 pub(crate) mod symbol;
 
 use crate::convert::easyeda::geom::fmt;

@@ -23,6 +23,7 @@ const USAGE: &str = "usage:
   klm-cli restyle <category> <part> [--project <dir>] [--dry-run]
   klm-cli health [--json | --csv] [--project <dir>]
   klm-cli check-project <dir> [--fab <id>]... [--all-fabs] [--format text|json|csv]   (KiCad's DRC and ERC with the fab's minimums; the profile's fabs when no --fab)
+  klm-cli footprint-gen <chip|sod|sot|soic|qfn|qfp|bga> --category <c> --height <h> [--pins <n>] [--pitch <p>] [--span <min-max>] [--span-y <min-max>] [--lead-len <min-max>] [--lead-w <min-max>] [--body <XxY>] [--rows <n> --cols <n> --ball <d>] [--thermal <XxY>] [--density A|B|C] [--project <dir>] [--overwrite] [--dry-run]   (IPC-7351B land pattern in mm)
   klm-cli cleanup [--project <dir>]... [--remove sym:<lib>|fp:<lib>]... [--fix sym:<lib>=<path>]... [--move sym:<lib>]... [--apply]
   klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
   klm-cli remove <part> [--category <c>] [--project <dir>] [--yes]   (dry run unless --yes)
@@ -39,6 +40,7 @@ enum Command {
     Restyle { category: String, part: String, project: Option<PathBuf>, dry_run: bool },
     Health { json: bool, csv: bool, project: Option<PathBuf> },
     CheckProject { dir: PathBuf, fabs: Vec<String>, all_fabs: bool, format: String },
+    FootprintGen { family: String, category: String, dims: Box<klm_core::footprint_gen::Dims>, density: Option<char>, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
     Cleanup { projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, moves: Vec<String>, apply: bool },
     Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
     Export { zip: PathBuf, parts: Vec<String>, category: Option<String>, project: Option<PathBuf> },
@@ -60,6 +62,58 @@ fn parse_cleanup(args: &[String]) -> Result<Command> {
         }
     }
     Ok(Command::Cleanup { projects, remove, fix, moves, apply })
+}
+
+fn parse_footprint_gen(args: &[String]) -> Result<Command> {
+    use klm_core::footprint_gen::Range;
+    let (mut family, mut category, mut density, mut project, mut overwrite, mut dry_run) = (None, None, None, None, false, false);
+    let mut d = klm_core::footprint_gen::Dims::default();
+    let pair = |s: &str| -> Result<(f64, f64)> {
+        let (a, b) = s.split_once(['x', 'X']).with_context(|| format!("\"{s}\" is not a size like 4x4"))?;
+        Ok((a.parse()?, b.parse()?))
+    };
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut value = || it.next().cloned().with_context(|| format!("{a} needs a value"));
+        match a.as_str() {
+            "--category" => category = Some(value()?),
+            "--project" => project = Some(PathBuf::from(value()?)),
+            "--density" => density = value()?.chars().next(),
+            "--pins" => d.pins = value()?.parse()?,
+            "--rows" => d.rows = value()?.parse()?,
+            "--cols" => d.cols = value()?.parse()?,
+            "--pitch" => d.pitch = value()?.parse()?,
+            "--height" => d.height = value()?.parse()?,
+            "--ball" => d.ball = value()?.parse()?,
+            "--span" => d.span = Range::parse(&value()?)?,
+            "--span-y" => d.span_y = Some(Range::parse(&value()?)?),
+            "--lead-len" => d.lead_len = Range::parse(&value()?)?,
+            "--lead-w" => d.lead_w = Range::parse(&value()?)?,
+            "--body" => d.body = Some(pair(&value()?)?),
+            "--thermal" => d.thermal = Some(pair(&value()?)?),
+            "--overwrite" => overwrite = true,
+            "--dry-run" => dry_run = true,
+            _ if a.starts_with("--") || family.is_some() => bail!("{a} is not valid for footprint-gen"),
+            _ => family = Some(a.clone()),
+        }
+    }
+    Ok(Command::FootprintGen { family: family.context("footprint-gen needs a family")?, category: category.context("footprint-gen needs --category")?, dims: Box::new(d), density, project, overwrite, dry_run })
+}
+
+fn footprint_gen(family: &str, category: &str, dims: &klm_core::footprint_gen::Dims, density: Option<char>, project: Option<&Path>, overwrite: bool, dry_run: bool) -> Result<()> {
+    use klm_core::footprint_gen::{self, Family};
+    let family = Family::from_label(family).with_context(|| format!("unknown family {family}; use chip, sod, sot, soic, qfn, qfp or bga"))?;
+    let s = settings()?;
+    let choice = klm_core::fab_data::FabChoice { density: density.unwrap_or(s.standard.fab.density), ..s.standard.fab.clone() };
+    let g = footprint_gen::generate(family, dims, &choice, &s.standard.rules, None)?;
+    if dry_run {
+        print!("{}", g.text);
+        return Ok(());
+    }
+    let root = roots(&s, project)?.pop().context("no library")?;
+    let path = footprint_gen::save(&root, category, &g, overwrite)?;
+    println!("Wrote {} (density {})", path.display(), choice.density);
+    Ok(())
 }
 
 fn parse_check_project(args: &[String]) -> Result<Command> {
@@ -85,6 +139,9 @@ fn parse(args: &[String]) -> Result<Command> {
     let (name, rest) = args.split_first().context("missing command")?;
     if name == "cleanup" {
         return parse_cleanup(rest);
+    }
+    if name == "footprint-gen" {
+        return parse_footprint_gen(rest);
     }
     if name == "check-project" {
         return parse_check_project(rest);
@@ -621,6 +678,7 @@ fn main() -> ExitCode {
         Command::Remove { part, category, project, yes } => remove(&part, category.as_deref(), project.as_deref(), yes).map(|_| ExitCode::SUCCESS),
         Command::Health { json, csv, project } => health(json, csv, project),
         Command::CheckProject { dir, fabs, all_fabs, format } => check_project(&dir, fabs, all_fabs, &format),
+        Command::FootprintGen { family, category, dims, density, project, overwrite, dry_run } => footprint_gen(&family, &category, &dims, density, project.as_deref(), overwrite, dry_run).map(|_| ExitCode::SUCCESS),
         Command::Cleanup { projects, remove, fix, moves, apply } => cleanup_cmd(projects, remove, fix, moves, apply),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
         Command::Export { zip, parts, category, project } => export(&zip, parts, category, project.as_deref()).map(|_| ExitCode::SUCCESS),
@@ -634,6 +692,14 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_footprint_gen() {
+        let c = parse(&args("footprint-gen soic --category ICs --pins 8 --pitch 1.27 --span 5.8-6.2 --height 1.75 --density A")).unwrap();
+        let Command::FootprintGen { family, dims, density, .. } = c else { panic!() };
+        assert_eq!((family.as_str(), dims.pins, dims.span.max, density), ("soic", 8, 6.2, Some('A')));
+        assert!(parse(&args("footprint-gen soic --bogus 1")).is_err() && parse(&args("footprint-gen soic")).is_err());
+    }
 
     fn args(s: &str) -> Vec<String> {
         s.split_whitespace().map(String::from).collect()
