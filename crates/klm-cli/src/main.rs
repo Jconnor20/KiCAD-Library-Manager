@@ -30,6 +30,7 @@ const USAGE: &str = "usage:
   klm-cli lookup <mpn>... [--json]   (what every enabled source knows about each MPN)
   klm-cli stdlib verify [<category>...] [--manifest <dir>] [--offline] [--json]   (checks the standard library's manifest against live sources)
   klm-cli stdlib build [<category>...] [--manifest <dir>]   (builds KLM_STD_<category> libraries in the global library)
+  klm-cli bom-import <bom.csv> [--map <field>=<column>]... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--manifest <dir>] [--out <csv>] [--dry-run]   (stdlib, then sources; builds a library from a BOM)
   --config <dir> (or KLM_CONFIG_DIR) keeps all of KLM's files, KiCad's library tables and API keys in <dir>";
 
 #[derive(Debug, PartialEq)]
@@ -49,6 +50,7 @@ enum Command {
     Lookup { mpns: Vec<String>, json: bool },
     StdlibVerify { categories: Vec<String>, manifest: Option<PathBuf>, offline: bool, json: bool },
     StdlibBuild { categories: Vec<String>, manifest: Option<PathBuf> },
+    BomImport { bom: PathBuf, maps: Vec<(String, String)>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, manifest: Option<PathBuf>, out: Option<PathBuf>, dry_run: bool },
 }
 
 fn parse_lookup(args: &[String]) -> Result<Command> {
@@ -61,6 +63,34 @@ fn parse_lookup(args: &[String]) -> Result<Command> {
         bail!("lookup needs at least one MPN");
     }
     Ok(Command::Lookup { mpns, json })
+}
+
+fn parse_bom_import(args: &[String]) -> Result<Command> {
+    let (mut bom, mut maps, mut category, mut to, mut project, mut overwrite, mut manifest, mut out, mut dry_run) = (None, vec![], None, Target::Global, None, false, None, None, false);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut value = || it.next().cloned().with_context(|| format!("{a} needs a value"));
+        match a.as_str() {
+            "--map" => maps.push(value()?.split_once('=').map(|(f, c)| (f.to_string(), c.to_string())).context("--map needs <field>=<column>")?),
+            "--category" => category = Some(value()?),
+            "--to" => {
+                to = match value()?.as_str() {
+                    "global" => Target::Global,
+                    "project" => Target::Project,
+                    "both" => Target::Both,
+                    other => bail!("--to must be global, project or both, not {other}"),
+                }
+            }
+            "--project" => project = Some(PathBuf::from(value()?)),
+            "--manifest" => manifest = Some(PathBuf::from(value()?)),
+            "--out" => out = Some(PathBuf::from(value()?)),
+            "--overwrite" => overwrite = true,
+            "--dry-run" => dry_run = true,
+            _ if a.starts_with("--") || bom.is_some() => bail!("{a} is not valid for bom-import"),
+            _ => bom = Some(PathBuf::from(a)),
+        }
+    }
+    Ok(Command::BomImport { bom: bom.context("bom-import needs a BOM CSV")?, maps, category, to, project, overwrite, manifest, out, dry_run })
 }
 
 fn parse_stdlib(args: &[String]) -> Result<Command> {
@@ -132,6 +162,9 @@ fn parse(args: &[String]) -> Result<Command> {
     }
     if name == "stdlib" {
         return parse_stdlib(rest);
+    }
+    if name == "bom-import" {
+        return parse_bom_import(rest);
     }
     let (mut csv, mut json, mut deep, mut overwrite, mut dry_run, mut yes) = (false, false, false, false, false, false);
     let (mut project, mut category, mut to, mut zips) = (None, None, None, vec![]);
@@ -761,6 +794,66 @@ fn stdlib_verify(categories: &[String], manifest: Option<PathBuf>, offline: bool
     Ok(if errors > 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
+/// Resolves each BOM line (standard library, then sources), prints the report and, unless `dry_run`, builds the library.
+/// Fails when any line is unresolved or couldn't be imported.
+#[allow(clippy::too_many_arguments)]
+fn bom_import(bom: &Path, maps: &[(String, String)], category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, manifest: Option<PathBuf>, out: Option<&Path>, dry_run: bool) -> Result<ExitCode> {
+    use klm_core::bom_import as bi;
+    let s = settings()?;
+    let rows = bi::load(bom)?;
+    let mut map = bi::detect(&rows[0]);
+    for (f, c) in maps {
+        bi::set_column(&mut map, &rows[0], f, c)?;
+    }
+    let (items, at) = bi::items_of(&rows, &map);
+    let dir = manifest_dir(manifest);
+    let manifests = if dir.is_dir() { klm_core::stdlib::Manifest::load_dir(&dir, &[])? } else { vec![] };
+    let sources = klm_core::sources::all(&s);
+    if sources.is_empty() {
+        eprintln!("note: no sources are enabled; only the standard library can match");
+    }
+    let resolved: Vec<_> = items.iter().map(|i| bi::resolve(&i.line, &manifests, &sources)).collect();
+    for (i, r) in items.iter().zip(&resolved) {
+        println!("{:<10} {:<24} x{:<4} {}", r.label(), if i.line.mpn.is_empty() { &i.line.value } else { &i.line.mpn }, i.qty, r.detail());
+    }
+    let unresolved = resolved.iter().filter(|r| matches!(r, bi::Resolved::NotFound(_) | bi::Resolved::Ambiguous(_))).count();
+    let mut failed = unresolved > 0;
+    if unresolved > 0 {
+        println!("{unresolved} line(s) not resolved; they are left out.");
+    }
+    if dry_run {
+        println!("Dry run: nothing was changed.");
+        return Ok(if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS });
+    }
+    let global = (to != Target::Project).then(|| global_root(&s)).transpose()?;
+    let project = (to != Target::Global)
+        .then(|| project.or(s.last_project.clone()).map(|dir| LibraryRoot::project(&dir)).context("no project: pass --project <dir>"))
+        .transpose()?;
+    ensure_kicad_closed()?;
+    let work = std::env::temp_dir().join(format!("klm-bom-import-{}", std::process::id()));
+    let opts = bi::Options { target: to, category, overwrite };
+    let done = bi::generate(&resolved, &sources, global.as_ref(), project.as_ref(), &opts, &s, &work);
+    let _ = std::fs::remove_dir_all(&work);
+    let g = done?;
+    for (i, d) in items.iter().zip(&g.lines) {
+        match (&d.library_part, &d.error) {
+            (_, Some(e)) => {
+                failed = true;
+                eprintln!("error: {}: {e}", i.line.mpn);
+            }
+            (Some(p), None) => println!("{} -> {p}", i.line.mpn),
+            _ => {}
+        }
+    }
+    println!("Standardise changed {} file(s); {} added part(s) compliant, {} not.", g.standardised, g.compliant, g.non_compliant);
+    if let Some(out) = out {
+        std::fs::write(out, bi::write_back(&rows, &at, &resolved, &g.lines))?;
+        println!("Wrote {}", out.display());
+    }
+    note_if_kicad_open();
+    Ok(if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+}
+
 fn stdlib_build(categories: &[String], manifest: Option<PathBuf>) -> Result<()> {
     use klm_core::stdlib;
     ensure_kicad_closed()?;
@@ -795,6 +888,7 @@ fn main() -> ExitCode {
         Command::Lookup { mpns, json } => lookup(&mpns, json),
         Command::StdlibVerify { categories, manifest, offline, json } => stdlib_verify(&categories, manifest, offline, json),
         Command::StdlibBuild { categories, manifest } => stdlib_build(&categories, manifest).map(|_| ExitCode::SUCCESS),
+        Command::BomImport { bom, maps, category, to, project, overwrite, manifest, out, dry_run } => bom_import(&bom, &maps, category, to, project, overwrite, manifest, out.as_deref(), dry_run),
     });
     result.unwrap_or_else(|e| {
         eprintln!("error: {e:#}\n{USAGE}");

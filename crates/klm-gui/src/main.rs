@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use tabs::ui_kit::{self, Level, Section};
-use tabs::{bom, cleanup, history, import, library, search, settings};
+use tabs::{bom, bom_import, cleanup, history, import, library, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
@@ -50,6 +50,7 @@ enum Msg {
     Library(library::Msg),
     History(history::Msg),
     Bom(bom::Msg),
+    BomImport(bom_import::Msg),
     Settings(settings::Msg),
 }
 
@@ -59,6 +60,7 @@ enum Tab {
     Import,
     Library,
     Bom,
+    BomImport,
     History,
     Cleanup,
 }
@@ -193,6 +195,7 @@ struct App {
     history_tab: history::HistoryTab,
     cleanup_tab: cleanup::CleanupTab,
     bom_tab: bom::BomTab,
+    bom_import_tab: bom_import::BomImportTab,
     settings_tab: settings::SettingsTab,
     log_open: bool,
     checklist_hidden: bool,
@@ -272,6 +275,7 @@ impl App {
             history_tab: history::HistoryTab::default(),
             cleanup_tab: cleanup::CleanupTab::default(),
             bom_tab: bom::BomTab::default(),
+            bom_import_tab: bom_import::BomImportTab::default(),
             settings_tab: settings::SettingsTab::new(),
             log_open: true,
             checklist_hidden: false,
@@ -376,6 +380,7 @@ impl App {
                 Msg::Library(m) => self.library_tab.handle(m, &mut self.cx),
                 Msg::History(m) => self.history_tab.handle(m, &mut self.cx),
                 Msg::Bom(m) => self.bom_tab.handle(m, &mut self.cx),
+                Msg::BomImport(m) => self.bom_import_tab.handle(m, &mut self.cx),
                 Msg::Settings(m) => self.settings_tab.handle(m, &mut self.cx),
             }
         }
@@ -539,6 +544,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.cx.tab, Tab::Import, RichText::new("Import").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::Library, RichText::new("Library").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::Bom, RichText::new("BOM").heading());
+                ui.selectable_value(&mut self.cx.tab, Tab::BomImport, RichText::new("BOM to library").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::History, RichText::new("History").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::Cleanup, RichText::new("Clean up").heading());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -565,6 +571,7 @@ impl eframe::App for App {
                 Tab::Import => self.import_tab.ui(ui, &mut self.cx),
                 Tab::Library => self.library_tab.ui(ui, &mut self.cx),
                 Tab::Bom => self.bom_tab.ui(ui, &mut self.cx),
+                Tab::BomImport => self.bom_import_tab.ui(ui, &mut self.cx),
                 Tab::History => self.history_tab.ui(ui, &mut self.cx),
                 Tab::Cleanup => self.cleanup_tab.ui(ui, &mut self.cx),
             }
