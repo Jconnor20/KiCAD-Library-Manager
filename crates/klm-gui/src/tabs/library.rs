@@ -8,6 +8,7 @@ use eframe::egui::{self, RichText, Sense};
 use klm_core::batch::{self, Op};
 use klm_core::checks::{self, Issue, Severity};
 use klm_core::compliance;
+use klm_core::kicad_edit::{self, Editor, FileWatch};
 use klm_core::health::{self, Finding};
 use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartEdit, PartStatus, RemovePlan, Scope};
 use klm_core::standardise;
@@ -45,6 +46,8 @@ enum Action {
     Edit(Vec<(String, String)>),
     Attach { scope: Scope, category: String, name: String, path: PathBuf },
     Preview { category: String, name: String },
+    /// Open the part's symbol library or footprint in KiCad's editor and re-check when it is saved.
+    EditInKicad { editor: Editor, category: String, name: String },
     /// Show what redrawing the symbol in the house style of its class would do.
     Restyle { category: String, name: String },
     /// Make the part the active profile's house template for its class.
@@ -101,6 +104,8 @@ pub struct LibraryTab {
     compliance: Option<Compliances>,
     compliance_rx: Option<mpsc::Receiver<Compliances>>,
     compliance_cache: std::sync::Arc<std::sync::Mutex<compliance::Cache>>,
+    /// Files open in KiCad; a save reloads (the compliance cache is keyed on mtimes, so it re-runs by itself).
+    kicad_edits: Vec<FileWatch>,
     /// The profile and naming rules compliance is judged by; a change reloads.
     standard: (standardise::profile::Profile, klm_core::rules::Rules),
     /// The next frame starts a reload.
@@ -144,6 +149,7 @@ impl Default for LibraryTab {
             compliance: None,
             compliance_rx: None,
             compliance_cache: Default::default(),
+            kicad_edits: vec![],
             standard: Default::default(),
             stale: true,
             generation: 0,
@@ -266,6 +272,12 @@ fn part_actions(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, has_project: bo
     if btn(ui, "Preview", true, "Show the symbol, footprint and 3D model", "") {
         *action = Action::Preview { category: key.0.clone(), name: key.1.clone() };
     }
+    if btn(ui, "Edit symbol in KiCad", true, "Open this category's symbol library in KiCad's symbol editor (pick the part in its tree). Saving there re-checks the part here.", "") {
+        *action = Action::EditInKicad { editor: Editor::Symbol, category: key.0.clone(), name: key.1.clone() };
+    }
+    if btn(ui, "Edit footprint in KiCad", true, "Open this part's footprint in KiCad. Saving there re-checks the part here.", "") {
+        *action = Action::EditInKicad { editor: Editor::Footprint, category: key.0.clone(), name: key.1.clone() };
+    }
     if btn(ui, "Restyle symbol…", true, "Redraw the symbol in the house style for its kind of part (resistor, capacitor, IC box…). Shows what changes first. Keeps every field; undo it in History. Wires on schematics that already use it may need fixing.", "") {
         *action = Action::Restyle { category: key.0.clone(), name: key.1.clone() };
     }
@@ -368,8 +380,26 @@ impl LibraryTab {
             self.standard = (cx.settings.standard.clone(), cx.settings.rules.clone());
             self.stale = true;
         }
+        if !self.kicad_edits.is_empty() {
+            self.stale |= self.kicad_edits.iter_mut().fold(false, |a, w| w.changed() | a);
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+        }
         match self.show(ui, global.as_ref(), project.as_ref()) {
             Action::None => {}
+            Action::EditInKicad { editor, category, name } => {
+                let root = if self.scope == Scope::Global { &global } else { &project };
+                if let Some(root) = root {
+                    match kicad_edit::target(root, editor, &category, &name).and_then(|f| kicad_edit::launch(editor, &f).map(|_| f)) {
+                        Ok(f) => {
+                            cx.log(Level::Info, format!("Opened {} in KiCad; saving there re-checks {name}", f.display()));
+                            if !self.kicad_edits.iter().any(|w| w.path == f) {
+                                self.kicad_edits.push(FileWatch::new(f));
+                            }
+                        }
+                        Err(e) => cx.log(Level::Error, format!("Could not open {name} in KiCad: {e:#}")),
+                    }
+                }
+            }
             Action::FindDatasheets(root) => self.find_datasheets(root, cx),
             Action::Batch(ops) => self.batch = Some(BatchDialog::Review(batch::plan(ops, global.as_ref(), project.as_ref()))),
             Action::Alternatives(open_on) => {
