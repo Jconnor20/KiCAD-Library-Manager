@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use tabs::ui_kit::{self, Level, Section};
-use tabs::{bom, cleanup, history, import, library, search, settings};
+use tabs::{bom, cleanup, footprint_gen, history, import, library, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
@@ -61,6 +61,7 @@ enum Tab {
     Bom,
     History,
     Cleanup,
+    Footprint,
 }
 
 /// The log: lines with a severity. `cx.log(level, text)` is the way to add one; `push`/`extend` are for older call sites.
@@ -192,6 +193,7 @@ struct App {
     library_tab: library::LibraryTab,
     history_tab: history::HistoryTab,
     cleanup_tab: cleanup::CleanupTab,
+    footprint_tab: footprint_gen::FootprintTab,
     bom_tab: bom::BomTab,
     settings_tab: settings::SettingsTab,
     log_open: bool,
@@ -271,6 +273,7 @@ impl App {
             library_tab: library::LibraryTab::default(),
             history_tab: history::HistoryTab::default(),
             cleanup_tab: cleanup::CleanupTab::default(),
+            footprint_tab: footprint_gen::FootprintTab::default(),
             bom_tab: bom::BomTab::default(),
             settings_tab: settings::SettingsTab::new(),
             log_open: true,
@@ -541,6 +544,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.cx.tab, Tab::Bom, RichText::new("BOM").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::History, RichText::new("History").heading());
                 ui.selectable_value(&mut self.cx.tab, Tab::Cleanup, RichText::new("Clean up").heading());
+                ui.selectable_value(&mut self.cx.tab, Tab::Footprint, RichText::new("Footprint").heading());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Settings…").clicked() {
                         self.cx.open_settings(Section::General);
@@ -567,6 +571,7 @@ impl eframe::App for App {
                 Tab::Bom => self.bom_tab.ui(ui, &mut self.cx),
                 Tab::History => self.history_tab.ui(ui, &mut self.cx),
                 Tab::Cleanup => self.cleanup_tab.ui(ui, &mut self.cx),
+                Tab::Footprint => self.footprint_tab.ui(ui, &mut self.cx),
             }
         });
 

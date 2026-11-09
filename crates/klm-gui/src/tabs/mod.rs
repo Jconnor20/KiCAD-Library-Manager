@@ -3,6 +3,7 @@ pub mod batch_dialog;
 pub mod bom;
 pub mod cleanup;
 pub mod edit_dialog;
+pub mod footprint_gen;
 pub mod history;
 pub mod import;
 pub mod library;
