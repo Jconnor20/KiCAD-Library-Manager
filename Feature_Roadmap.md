@@ -415,7 +415,8 @@ What the plan or the work packages called for and the product doesn't do yet, so
 
 ## Wave 12: Editors (decide after Wave 11, ships 1.0.0)
 
-- [ ] **W12.1 Edit in KiCad round trip** (S): open the part in KiCad's symbol or footprint editor, watch the file, and re-check and re-badge when it is saved.
+- [x] **W12.1 Edit in KiCad round trip** (S): open the part in KiCad's symbol or footprint editor, watch the file, and re-check and re-badge when it is saved.
+  - **Done:** `kicad_edit::{target, command, launch, FileWatch}`; the Library tab's part actions gain "Edit symbol in KiCad" (runs `eeschema` with the category's `.kicad_sym`, since KiCad can't open one symbol from the command line) and "Edit footprint in KiCad" (`pcbnew` with the part's `.kicad_mod`), both found next to `kicad-cli`. The tab polls the opened files' mtimes once a second and, on a save, reloads; the compliance cache is keyed on mtimes, so the Standard badge and checks refresh with no separate invalidation. Known limits: not tried against a real KiCad (whether `eeschema`/`pcbnew` open a bare library or footprint file as the standalone editor is unconfirmed, and macOS binary names differ); watching lasts until the app closes; a failed launch is only logged.
 - [ ] **W12.2 IPC-7351 footprint generator** (L): chip, SOD, SOT, SOIC, QFN, QFP and BGA from datasheet dimensions and the profile's density.
 - [ ] **W12.3 In-app symbol editor** (L): only if W12.1 isn't enough.
 - 3D CAD editing is not planned (it needs a CAD kernel). W11.1 covers positioning, and the model can be opened in FreeCAD.

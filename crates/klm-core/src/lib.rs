@@ -17,6 +17,7 @@ pub mod fab;
 pub mod fab_data;
 pub mod fields;
 pub mod health;
+pub mod kicad_edit;
 pub mod kicad_env;
 pub mod library;
 pub mod project_check;

@@ -51,15 +51,15 @@ pub fn findings(results: &HashMap<Key, Compliance>) -> Vec<Finding> {
     bad.into_iter().map(|((cat, name), c)| Finding { severity: Severity::Warning, kind: "compliance", item: format!("{cat}/{name}"), message: c.reasons.join("; ") }).collect()
 }
 
-fn symbol_lib(root: &LibraryRoot, cat: &str) -> PathBuf {
+pub(crate) fn symbol_lib(root: &LibraryRoot, cat: &str) -> PathBuf {
     root.dir.join("symbols").join(format!("{}.kicad_sym", sanitize(cat)))
 }
 
-fn footprint_path(root: &LibraryRoot, cat: &str, name: &str) -> PathBuf {
+pub(crate) fn footprint_path(root: &LibraryRoot, cat: &str, name: &str) -> PathBuf {
     root.dir.join("footprints").join(format!("{cat}.pretty")).join(format!("{name}.kicad_mod"))
 }
 
-fn footprint_name(root: &LibraryRoot, cat: &str, symbol: &str) -> Option<String> {
+pub(crate) fn footprint_name(root: &LibraryRoot, cat: &str, symbol: &str) -> Option<String> {
     let lib = std::fs::read_to_string(symbol_lib(root, cat)).ok().and_then(|t| sexpr::parse(&t).ok())?;
     let sym = lib.children("symbol").find(|s| s.arg(0) == Some(symbol))?;
     Some(property(sym, "Footprint")?.rsplit(':').next()?.to_string())
