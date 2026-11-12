@@ -2,8 +2,10 @@
 //! the part's preview. The edits themselves live in `klm_core::symbols::edit`; this is the form.
 //! Anything graphical beyond that is done in KiCad's own editor.
 
+use super::batch_dialog;
 use super::preview::PreviewPanel;
-use eframe::egui;
+use super::ui_kit::{self, Level};
+use eframe::egui::{self, RichText};
 use klm_core::library::LibraryRoot;
 use klm_core::sexpr::Sexpr;
 use klm_core::symbols::edit::{self, GRID, PIN_TYPES, PinRow};
@@ -119,88 +121,142 @@ impl SymbolEditor {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, naming: &Rules, profile: &Profile) -> Outcome {
-        let (mut open, mut out, mut restyle) = (true, Outcome::None, false);
-        egui::Window::new(format!("Edit symbol: {}", self.name)).open(&mut open).collapsible(false).default_width(700.0).show(ctx, |ui| {
-            egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 120.0).max(240.0)).show(ui, |ui| {
-                self.preview.show(ui);
-                ui.separator();
-                ui.label(format!("Positions snap to the {GRID} mm (50 mil) grid when you save. For anything graphical, use Edit in KiCad."));
-                if let Some(b) = &mut self.body {
-                    ui.horizontal(|ui| {
-                        ui.label("Body");
-                        for (i, label) in ["x1", "y1", "x2", "y2"].iter().enumerate() {
-                            ui.label(*label);
-                            ui.add(egui::DragValue::new(&mut b[i]).speed(GRID));
-                        }
-                    });
-                }
-                for (key, at) in &mut self.texts {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("{key} text  x"));
-                        ui.add(egui::DragValue::new(&mut at[0]).speed(GRID));
-                        ui.label("y");
-                        ui.add(egui::DragValue::new(&mut at[1]).speed(GRID));
-                    });
-                }
-                ui.add_space(4.0);
-                let mut remove = None;
-                egui::Grid::new("pin_table").striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
-                    for h in ["Number", "Name", "Type", "Side", "x", "y", "Length", ""] {
-                        ui.strong(h);
-                    }
-                    ui.end_row();
-                    for (i, (_, p)) in self.pins.iter_mut().enumerate() {
-                        ui.add(egui::TextEdit::singleline(&mut p.number).desired_width(50.0));
-                        ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(120.0));
-                        egui::ComboBox::from_id_salt(("pin_type", i)).selected_text(p.etype.clone()).show_ui(ui, |ui| {
-                            for t in PIN_TYPES {
-                                ui.selectable_value(&mut p.etype, t.to_string(), t);
-                            }
+        let (mut out, mut restyle, mut save) = (Outcome::None, false, false);
+        let dirty = self.edited().map(|s| s != self.was).unwrap_or(true);
+        let message = self.message.clone();
+        let sub = format!("Symbol · {}", self.category);
+        let n_pins = self.pins.len();
+        let closed = batch_dialog::dialog(
+            ctx,
+            egui::Id::NULL.with("symbol_editor"),
+            940.0,
+            &self.name.clone(),
+            Some(&sub),
+            |ui| {
+                ui.horizontal_top(|ui| {
+                    let side = 300.0;
+                    ui.vertical(|ui| {
+                        ui.set_width((ui.available_width() - side - 24.0).max(300.0));
+                        ui.horizontal(|ui| {
+                            ui_kit::section_label(ui, &format!("Pins · {n_pins}"));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("Add pin").clicked() {
+                                    let n = (1..).map(|n| n.to_string()).find(|n| self.pins.iter().all(|(_, p)| p.number != *n)).unwrap_or_default();
+                                    self.pins.push((String::new(), PinRow { number: n, name: "~".into(), etype: "passive".into(), x: 0.0, y: 0.0, rot: 0.0, length: 2.54 }));
+                                }
+                            });
                         });
-                        let side = SIDES.iter().find(|s| s.0 == p.rot).map_or("Other", |s| s.1);
-                        egui::ComboBox::from_id_salt(("pin_side", i)).selected_text(side).width(60.0).show_ui(ui, |ui| {
-                            for (rot, label) in SIDES {
-                                ui.selectable_value(&mut p.rot, rot, label);
-                            }
-                        });
-                        ui.add(egui::DragValue::new(&mut p.x).speed(GRID));
-                        ui.add(egui::DragValue::new(&mut p.y).speed(GRID));
-                        ui.add(egui::DragValue::new(&mut p.length).speed(GRID).range(GRID..=50.0));
-                        if ui.small_button("✕").on_hover_text("Remove this pin").clicked() {
-                            remove = Some(i);
-                        }
-                        ui.end_row();
-                    }
+                        self.pin_table(ui);
+                    });
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.set_width(side);
+                        self.side_pane(ui, &mut restyle);
+                    });
                 });
-                if let Some(i) = remove {
-                    self.pins.remove(i);
-                }
-                if ui.button("Add pin").clicked() {
-                    let n = (1..).map(|n| n.to_string()).find(|n| self.pins.iter().all(|(_, p)| p.number != *n)).unwrap_or_default();
-                    self.pins.push((String::new(), PinRow { number: n, name: "~".into(), etype: "passive".into(), x: 0.0, y: 0.0, rot: 0.0, length: 2.54 }));
-                }
-            });
-            ui.separator();
-            if let Some((ok, text)) = &self.message {
-                let color = if *ok { ui.visuals().text_color() } else { ui.visuals().error_fg_color };
-                ui.colored_label(color, text);
-            }
-            ui.horizontal(|ui| {
-                if ui.button("Save").clicked() && self.save(ctx) {
-                    out = Outcome::Saved;
-                }
-                restyle = ui.button("Apply house style").on_hover_text("Redraw in the house style of its kind of part, like Restyle symbol. Keeps pins' numbers, names and types.").clicked();
-                if ui.button("Close").clicked() {
-                    out = Outcome::Close;
-                }
-            });
-        });
+            },
+            |ui| {
+                ui.horizontal(|ui| {
+                    if dirty {
+                        ui_kit::badge(ui, "Unsaved changes", Level::Warn);
+                    }
+                    if let Some((ok, text)) = &message {
+                        let color = if *ok { ui.visuals().weak_text_color() } else { ui.visuals().error_fg_color };
+                        ui.label(RichText::new(text).color(color));
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        save = ui.add(ui_kit::primary("Save", ui.visuals())).clicked();
+                        if ui.button("Close").clicked() {
+                            out = Outcome::Close;
+                        }
+                    });
+                });
+            },
+        );
+        if save && self.save(ctx) {
+            out = Outcome::Saved;
+        }
         if restyle {
             self.house_style(naming, profile);
         }
-        if !open {
+        if closed {
             out = Outcome::Close;
         }
         out
+    }
+
+    /// One row per pin, edited in place.
+    fn pin_table(&mut self, ui: &mut egui::Ui) {
+        let mut remove = None;
+        egui::ScrollArea::both().max_height((ui.ctx().content_rect().height() - 260.0).max(200.0)).auto_shrink([false, true]).show(ui, |ui| {
+            egui::Grid::new("pin_table").striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
+                for h in ["No.", "Name", "Type", "Side", "x", "y", "Length", ""] {
+                    ui.label(RichText::new(h.to_uppercase()).monospace().size(11.0).weak());
+                }
+                ui.end_row();
+                for (i, (_, p)) in self.pins.iter_mut().enumerate() {
+                    ui.add(egui::TextEdit::singleline(&mut p.number).desired_width(40.0));
+                    ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(90.0));
+                    egui::ComboBox::from_id_salt(("pin_type", i)).selected_text(p.etype.clone()).show_ui(ui, |ui| {
+                        for t in PIN_TYPES {
+                            ui.selectable_value(&mut p.etype, t.to_string(), t);
+                        }
+                    });
+                    let side = SIDES.iter().find(|s| s.0 == p.rot).map_or("Other", |s| s.1);
+                    egui::ComboBox::from_id_salt(("pin_side", i)).selected_text(side).width(60.0).show_ui(ui, |ui| {
+                        for (rot, label) in SIDES {
+                            ui.selectable_value(&mut p.rot, rot, label);
+                        }
+                    });
+                    ui.add(egui::DragValue::new(&mut p.x).speed(GRID));
+                    ui.add(egui::DragValue::new(&mut p.y).speed(GRID));
+                    ui.add(egui::DragValue::new(&mut p.length).speed(GRID).range(GRID..=50.0));
+                    if ui.add(ui_kit::ghost("✕")).on_hover_text("Remove this pin").clicked() {
+                        remove = Some(i);
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+        if let Some(i) = remove {
+            self.pins.remove(i);
+        }
+    }
+
+    /// The picture, the body rectangle, the Reference/Value positions and the house style.
+    fn side_pane(&mut self, ui: &mut egui::Ui, restyle: &mut bool) {
+        ui_kit::section_label(ui, "Symbol");
+        ui.add_space(2.0);
+        self.preview.inspector(ui);
+        ui.add_space(10.0);
+        if let Some(b) = &mut self.body {
+            ui_kit::section_label(ui, "Body");
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                for (i, label) in ["x1", "y1", "x2", "y2"].iter().enumerate() {
+                    ui.weak(*label);
+                    ui.add(egui::DragValue::new(&mut b[i]).speed(GRID));
+                }
+            });
+            ui.add_space(10.0);
+        }
+        ui_kit::section_label(ui, "Text positions");
+        ui.add_space(2.0);
+        for (key, at) in &mut self.texts {
+            ui.horizontal(|ui| {
+                ui.label(*key);
+                ui.weak("x");
+                ui.add(egui::DragValue::new(&mut at[0]).speed(GRID));
+                ui.weak("y");
+                ui.add(egui::DragValue::new(&mut at[1]).speed(GRID));
+            });
+        }
+        ui.add_space(10.0);
+        ui_kit::section_label(ui, "House style");
+        ui.add_space(2.0);
+        ui.weak(format!("Positions snap to the {GRID} mm (50 mil) grid when you save. For anything graphical, use Edit in KiCad."));
+        if ui.button("Apply house style").on_hover_text("Redraw in the house style of its kind of part, like Restyle symbol. Keeps pins' numbers, names and types.").clicked() {
+            *restyle = true;
+        }
     }
 }

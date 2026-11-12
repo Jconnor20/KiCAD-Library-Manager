@@ -58,6 +58,7 @@ fn settings_and_every_library_dialog_open() {
 
         let mut h = lib();
         click(&mut h, "RP2040");
+        click(&mut h, "Actions");
         click(&mut h, "Preview");
         snap(&mut h, "library-preview");
 
@@ -79,16 +80,18 @@ fn settings_and_every_library_dialog_open() {
         snap(&mut h, "library-attach-dialog");
 
         let mut h = lib();
+        click(&mut h, "More");
         click(&mut h, "Relink libraries");
         snap(&mut h, "library-batch-relink");
 
         let mut h = lib();
         h.query_all_by_role(Role::CheckBox).next().unwrap().click();
         h.run_ok();
-        click(&mut h, "Copy selected to project");
+        click(&mut h, "Copy to project");
         snap(&mut h, "library-batch-copy-to-project");
 
         let mut h = lib();
+        click(&mut h, "More");
         click(&mut h, "Find missing datasheets");
         snap(&mut h, "library-find-datasheets");
     }

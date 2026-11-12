@@ -236,10 +236,10 @@ fn k11_log_is_coloured_by_level() {
 fn k12_open_settings_hook() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
-    assert!(h.query_by_label("Settings").is_none());
+    assert!(h.state().cx.tab != Tab::Settings);
     h.state().cx.open_settings(Section::General);
     h.run_ok();
-    assert!(h.query_by_label("Settings").is_some(), "Settings did not open");
+    assert!(h.state().cx.tab == Tab::Settings && h.query_by_label("General › Libraries").is_some(), "Settings did not open");
 }
 
 /// Every non-ASCII symbol the GUI draws, on one sheet for eyeballing (kit-glyphs.png).

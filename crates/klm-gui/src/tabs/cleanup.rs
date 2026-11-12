@@ -1,12 +1,13 @@
+use super::page_kit::{primary, tile};
 use super::ui_kit::{self, Col, Level, Sort};
-use crate::AppCtx;
-use eframe::egui;
+use crate::{AppCtx, theme};
+use eframe::egui::{self, RichText};
 use klm_core::cleanup::{self, Action, Entry, Issue, IssueKind, Kind, Move, Report};
 use klm_core::kicad_env;
 use std::path::PathBuf;
 
-/// Scans KiCad's own library tables for duplicates, broken entries and unused libraries, and lets the
-/// user queue "remove from table", "fix path" and "move into KLM" per library. Nothing is written until
+/// Standards · KiCad tables: scans KiCad's own library tables for duplicates, broken entries and unused libraries, and
+/// lets the user queue "remove from table", "fix path" and "move into KLM" per library. Nothing is written until
 /// the preview of the queued changes is applied; library files are never deleted.
 #[derive(Default)]
 pub struct CleanupTab {
@@ -19,8 +20,15 @@ pub struct CleanupTab {
     preview: Option<Result<(Vec<String>, Vec<String>), String>>,
 }
 
-fn tag(e: &Entry) -> String {
-    format!("{}: {}", if e.kind == Kind::Symbol { "symbol" } else { "footprint" }, e.name)
+const GROUPS: [(IssueKind, &str); 4] = [(IssueKind::Broken, "Broken"), (IssueKind::Unused, "Maybe unused"), (IssueKind::Duplicate, "Duplicate"), (IssueKind::Unverifiable, "Can't check")];
+
+fn same(a: IssueKind, b: IssueKind) -> bool {
+    std::mem::discriminant(&a) == std::mem::discriminant(&b)
+}
+
+/// A symbol library on disk that could be copied into KLM.
+fn movable(e: &Entry) -> bool {
+    e.kind == Kind::Symbol && e.path.as_ref().is_some_and(|p| p.is_file())
 }
 
 impl CleanupTab {
@@ -55,20 +63,27 @@ impl CleanupTab {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
+        let scanned = self.report.is_some();
         ui.horizontal(|ui| {
-            if ui.button("Scan KiCad's library tables").clicked() {
-                self.scan(cx);
+            ui.label(RichText::new("KiCad library tables").heading().strong());
+            if let Some(r) = &self.report {
+                ui.weak(format!("{} libraries · {} project(s) searched", r.entries.len(), r.projects.len()));
             }
-            if ui.button("Add project folder…").on_hover_text("Projects whose files are searched to see which libraries are used").clicked()
-                && let Some(d) = rfd::FileDialog::new().pick_folder()
-            {
-                self.projects.push(d);
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if primary(ui, true, if scanned { "Scan again" } else { "Scan KiCad's library tables" }).clicked() {
+                    self.scan(cx);
+                }
+                if ui.button("Add project folder…").on_hover_text("Projects whose files are searched to see which libraries are used").clicked()
+                    && let Some(d) = rfd::FileDialog::new().pick_folder()
+                {
+                    self.projects.push(d);
+                }
+            });
         });
         let mut drop = None;
         for (i, p) in self.projects.iter().enumerate() {
             ui.horizontal(|ui| {
-                ui.label(p.display().to_string());
+                ui.label(RichText::new(p.display().to_string()).monospace());
                 if ui.small_button("x").clicked() {
                     drop = Some(i);
                 }
@@ -77,11 +92,17 @@ impl CleanupTab {
         if let Some(i) = drop {
             self.projects.remove(i);
         }
-        ui.weak("Shows what is wrong in your global and project library tables. \"Unused\" only means none of the chosen projects use a library; check your other projects before removing it.");
+        ui.weak("Shows what is wrong in your global and project library tables. \"Maybe unused\" only means none of the chosen projects use a library; check your other projects before removing it.");
+        ui.add_space(4.0);
         let (mut apply, mut discard) = (false, false);
         if !self.queue.is_empty() {
-            egui::Panel::bottom("cleanup_queue").resizable(false).show(ui, |ui| {
-                ui.strong("Changes to apply");
+            let pal = theme::palette(ui.visuals());
+            egui::Frame::new().fill(pal.panel).inner_margin(egui::Margin::symmetric(8, 6)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.strong("Changes to apply");
+                    ui.weak(format!("{} fix(es) staged", self.queue.len()));
+                });
                 match &self.preview {
                     Some(Ok((lines, warnings))) => {
                         lines.iter().for_each(|l| {
@@ -101,8 +122,11 @@ impl CleanupTab {
                     ui.colored_label(Level::Warn.color(ui.visuals()), "KiCad is open and would overwrite these changes. Close it to apply.");
                 }
                 ui.horizontal(|ui| {
-                    apply = ui.add_enabled(!running, egui::Button::new("Apply (a backup of each table is made first)")).clicked();
-                    discard = ui.button("Discard").clicked();
+                    ui.weak("Only table entries change; library files stay. A backup of each table is made first.");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        apply = primary(ui, !running, &format!("Apply {} fixes", self.queue.len())).clicked();
+                        discard = ui.button("Discard").clicked();
+                    });
                 });
             });
         }
@@ -123,45 +147,72 @@ impl CleanupTab {
         let rows: Vec<(usize, bool, &Issue)> = (0..report.entries.len())
             .flat_map(|i| report.issues_of(i).enumerate().map(move |(n, x)| (i, n == 0, x)))
             .collect();
-        ui.weak(format!("{} libraries, {} project(s) searched, {} problem(s) found", report.entries.len(), report.projects.len(), rows.len()));
+        let of = |k: IssueKind| rows.iter().filter(|r| same(r.2.kind, k)).count();
+        let outside = report.entries.iter().filter(|e| movable(e)).count();
+        let pal = theme::palette(ui.visuals());
+        let (err, warn) = (Level::Error.color(ui.visuals()), Level::Warn.color(ui.visuals()));
+        ui.columns(4, |c| {
+            tile(&mut c[0], "Broken", &of(IssueKind::Broken).to_string(), "path doesn't exist", (of(IssueKind::Broken) > 0).then_some(err));
+            tile(&mut c[1], "Maybe unused", &of(IssueKind::Unused).to_string(), "no chosen project uses it", (of(IssueKind::Unused) > 0).then_some(warn));
+            tile(&mut c[2], "Outside KLM", &outside.to_string(), "could be moved in", None);
+            tile(&mut c[3], "Can't check", &of(IssueKind::Unverifiable).to_string(), "set by KiCad itself", None);
+        });
+        ui.add_space(4.0);
+        // A header row per kind of problem, then that kind's rows.
+        let mut entries: Vec<Result<(usize, bool, &Issue), (&str, usize)>> = vec![];
+        for (k, name) in GROUPS {
+            let group: Vec<_> = rows.iter().filter(|r| same(r.2.kind, k)).collect();
+            if !group.is_empty() {
+                entries.push(Err((name, group.len())));
+                entries.extend(group.into_iter().map(|r| Ok(*r)));
+            }
+        }
         let mut want: Option<Action> = None;
+        let mut undo: Option<usize> = None;
         let mut move_of: Option<usize> = None;
-        let cols = [Col::new("Library", 170.0).no_sort(), Col::new("Problem", 90.0).no_sort(), Col::rest("Detail").no_sort(), Col::new("Fix", 260.0).no_sort()];
-        ui_kit::table(ui, "cleanup", &cols, &mut Sort { col: usize::MAX, asc: true }, rows.len(), |n, row| {
-            let (i, first, x) = rows[n];
+        let cols = [Col::new("Library", 170.0).no_sort(), Col::new("Type", 80.0).no_sort(), Col::rest("Detail").no_sort(), Col::new("Fix", 300.0).no_sort()];
+        ui_kit::table(ui, "cleanup", &cols, &mut Sort { col: usize::MAX, asc: true }, entries.len(), |n, row| {
+            let (i, _, x) = match entries[n] {
+                Err((name, count)) => {
+                    row.col(|ui| {
+                        ui.label(RichText::new(format!("{name} · {count}")).strong().color(pal.fg));
+                    });
+                    for _ in 1..cols.len() {
+                        row.col(|_| {});
+                    }
+                    return;
+                }
+                Ok(r) => r,
+            };
             let e = &report.entries[i];
             row.col(|ui| {
-                if first {
-                    ui.strong(tag(e)).on_hover_text(format!("{} in {}", e.uri, e.table.display()));
-                }
+                ui.strong(&e.name).on_hover_text(format!("{} in {}", e.uri, e.table.display()));
             });
             row.col(|ui| {
-                let (label, level) = match x.kind {
-                    IssueKind::Broken => ("Broken", Level::Error),
-                    IssueKind::Unverifiable => ("Can't check", Level::Info),
-                    IssueKind::Unused => ("Unused?", Level::Warn),
-                    IssueKind::Duplicate => ("Duplicate", Level::Warn),
-                };
-                ui_kit::badge(ui, label, level);
+                ui.weak(if e.kind == Kind::Symbol { "Symbol" } else { "Footprint" });
             });
             row.col(|ui| {
-                ui.label(&x.message).on_hover_text(&x.message);
+                ui.label(RichText::new(&x.message).monospace().size(12.0)).on_hover_text(&x.message);
             });
             row.col(|ui| {
                 ui.horizontal(|ui| {
-                    if !first {
-                        return;
-                    }
                     if let Some(why) = e.locked {
-                        ui.weak("locked").on_hover_text(format!("Can't be changed here: {why}"));
+                        ui.weak("Locked").on_hover_text(format!("Can't be changed here: {why}"));
                         return;
                     }
-                    let queued = self.queue.iter().any(|a| matches!(a, Action::Remove { table, name } | Action::FixPath { table, name, .. } if *table == e.table && *name == e.name));
-                    if queued {
-                        ui.weak("queued");
+                    let queued = self.queue.iter().position(|a| matches!(a, Action::Remove { table, name } | Action::FixPath { table, name, .. } if *table == e.table && *name == e.name));
+                    if let Some(q) = queued {
+                        let text = match &self.queue[q] {
+                            Action::FixPath { new_path, .. } => format!("Will point to {}", new_path.display()),
+                            _ => "Will remove".into(),
+                        };
+                        ui_kit::badge(ui, &text, Level::Ok);
+                        if ui.small_button("Undo").clicked() {
+                            undo = Some(q);
+                        }
                         return;
                     }
-                    if ui.small_button("Remove").on_hover_text("Remove from table: only the table entry goes; the library's files stay").clicked() {
+                    if ui.small_button("Remove from table").on_hover_text("Only the table entry goes; the library's files stay").clicked() {
                         want = Some(Action::Remove { table: e.table.clone(), name: e.name.clone() });
                     }
                     if ui.small_button("Fix path…").clicked() {
@@ -170,12 +221,16 @@ impl CleanupTab {
                             want = Some(Action::FixPath { table: e.table.clone(), name: e.name.clone(), new_path });
                         }
                     }
-                    if e.kind == Kind::Symbol && e.path.as_ref().is_some_and(|p| p.is_file()) && ui.small_button("Move into KLM…").clicked() {
+                    if movable(e) && ui.small_button("Move into KLM…").clicked() {
                         move_of = Some(i);
                     }
                 });
             });
         });
+        if let Some(q) = undo {
+            self.queue.remove(q);
+            self.refresh_preview();
+        }
         if let Some(a) = want {
             self.queue.push(a);
             self.refresh_preview();

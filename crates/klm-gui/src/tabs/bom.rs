@@ -1,9 +1,11 @@
 //! The "BOM" tab: the project's BOM matched against the libraries and priced from the distributors.
 
+use super::page_kit;
 use super::search;
 use super::ui_kit::{self, Col, Level, Section, Sort};
 use crate::{AppCtx, Msg as AppMsg, Tab};
-use eframe::egui;
+use crate::theme;
+use eframe::egui::{self, RichText};
 use klm_core::alternatives::LibPart;
 use klm_core::bom::{self, Lifecycle, Line, ProjectBom, Quote, Row, Status};
 use klm_core::cache;
@@ -36,6 +38,9 @@ pub struct BomTab {
     filter: String,
     shortfalls: bool,
     sort: Option<Sort>,
+    not_in_library: bool,
+    /// Row (index into `rows`) shown in the inspector.
+    selected: Option<usize>,
 }
 
 /// A line the order can't be filled from: not in the library, no price, or less stock than the boards need.
@@ -154,12 +159,28 @@ impl BomTab {
             self.settings = ProjectBom::load(&project);
             self.loaded = None;
             self.rows.clear();
+            self.selected = None;
+        }
+        let pal = theme::palette(ui.visuals());
+        let boards = self.settings.boards;
+        let (mut search, mut import, mut swap, mut swap_jlc, mut show) = (None, false, None, None, None);
+        // The inspector for the selected line sits beside everything else, full height; only where there is room for it.
+        if let Some(i) = self.selected.filter(|&i| i < self.rows.len()).filter(|_| ui.available_width() >= 900.0) {
+            let frame = egui::Frame::new().fill(pal.panel).inner_margin(egui::Margin::symmetric(16, 12));
+            let panel = egui::Panel::right("bom_inspector").resizable(false).exact_size(340.0).frame(frame).show(ui, |ui| inspector(ui, &self.rows[i], boards));
+            ui.painter().line_segment([panel.response.rect.left_top(), panel.response.rect.left_bottom()], egui::Stroke::new(1.0, pal.line));
+            match panel.inner {
+                Some(Insp::Swap(alt)) => swap = Some((i, alt)),
+                Some(Insp::Show(mpn)) => show = Some(mpn),
+                Some(Insp::Close) => self.selected = None,
+                None => {}
+            }
         }
         let (mut save, mut reprice) = (false, false);
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!self.running, egui::Button::new("Read BOM and prices")).on_hover_text("Runs kicad-cli, then asks the enabled distributors (cached results are reused)").clicked() {
-                self.load(cx, project.clone());
-            }
+            ui.label(RichText::new("BOM").heading().strong());
+            ui.label(RichText::new(project.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).monospace().size(12.0).color(pal.muted));
+            ui.add_space(8.0);
             ui.label("Boards");
             let boards = ui.add(egui::DragValue::new(&mut self.settings.boards).range(1..=1_000_000));
             reprice |= boards.changed();
@@ -173,6 +194,9 @@ impl BomTab {
             if self.settings.region.is_empty() && cx.settings.shipping_region.is_empty() && ui.link("Set in Settings…").on_hover_text("No region anywhere: DigiKey prices use its default site").clicked() {
                 cx.open_settings(Section::Bom);
             }
+            if self.running {
+                ui.spinner();
+            }
             if ui.add_enabled(!self.rows.is_empty(), egui::Button::new("Export CSV…")).clicked() {
                 if let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom.csv").save_file() {
                     let csv = bom::to_csv(&self.rows, self.settings.boards, &self.priced_in);
@@ -182,8 +206,8 @@ impl BomTab {
                     });
                 }
             }
-            if self.running {
-                ui.spinner();
+            if page_kit::primary(ui, !self.running, "Read BOM and prices").on_hover_text("Runs kicad-cli, then asks the enabled distributors (cached results are reused)").clicked() {
+                self.load(cx, project.clone());
             }
         });
         if reprice || (self.priced_in != Self::target(cx) && self.loaded.is_some()) {
@@ -194,32 +218,45 @@ impl BomTab {
                 cx.log.push(format!("BOM: {e:#}"));
             }
         }
+        ui.add_space(4.0);
         if self.rows.is_empty() {
             ui.weak("Nothing read yet.");
             return;
         }
         let (t, cur) = (bom::totals(&self.rows), self.priced_in.clone());
-        let lead = t.longest_lead_days.map_or("unknown".into(), |d| format!("{d} days")) + &if t.unknown_lead > 0 { format!(" (+{} unknown)", t.unknown_lead) } else { String::new() };
-        ui.label(format!(
-            "{} lines, {} priced ({} without a price). Per board {:.2} {cur}, order {:.2} {cur}. Longest lead time: {lead}.",
-            t.lines,
-            t.priced,
-            t.lines - t.priced,
-            t.unit_cost,
-            t.extended_cost,
-        ));
-        let summary = bom::assembly_summary(&self.rows).text();
-        if !summary.is_empty() {
-            ui.label(format!("JLCPCB: {summary}.")).on_hover_text("Class and stock come from LCSC's listing, lifecycle from DigiKey and Mouser. \"?\" means no source said, not that the part is missing.");
-        }
-        let boards = self.settings.boards;
-        ui.horizontal(|ui| {
-            ui.label("Filter");
-            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("refs, MPN, maker…").desired_width(160.0));
-            ui.checkbox(&mut self.shortfalls, "Shortfalls only").on_hover_text("Lines missing from the library, without a price, or with less stock than the boards need");
+        let short: Vec<&Row> = self.rows.iter().filter(|r| shortfall(r, boards)).collect();
+        let not_in_library = self.rows.iter().filter(|r| r.status.missing_cad()).count();
+        let lead = t.longest_lead_days.map_or("unknown".into(), |d| format!("{d} days"));
+        let warn = Level::Warn.color(ui.visuals());
+        ui.columns(5, |c| {
+            page_kit::tile(&mut c[0], "Lines", &t.lines.to_string(), &format!("{not_in_library} not in library"), None);
+            page_kit::tile(&mut c[1], "Per board", &format!("{:.2} {cur}", t.unit_cost), &format!("{} of {} priced", t.priced, t.lines), None);
+            page_kit::tile(&mut c[2], &format!("Order · {boards} boards"), &format!("{:.2} {cur}", t.extended_cost), "before shipping", None);
+            let refs: Vec<String> = short.iter().take(2).map(|r| r.line.refs.join(" ")).collect();
+            let sub = if short.is_empty() { String::new() } else { format!("{}{}", refs.join(" · "), if short.len() > 2 { "…" } else { "" }) };
+            page_kit::tile(&mut c[3], "Shortfalls", &short.len().to_string(), &sub, (!short.is_empty()).then_some(warn));
+            page_kit::tile(&mut c[4], "Longest lead", &lead, &if t.unknown_lead > 0 { format!("{} unknown", t.unknown_lead) } else { String::new() }, None);
         });
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Filter refs, MPN, maker…").desired_width(200.0));
+            if ui.add(egui::Button::new("Shortfalls only").selected(self.shortfalls)).on_hover_text("Lines missing from the library, without a price, or with less stock than the boards need").clicked() {
+                self.shortfalls = !self.shortfalls;
+            }
+            if ui.add(egui::Button::new(format!("Not in library {not_in_library}")).selected(self.not_in_library)).on_hover_text("Lines the library doesn't have yet").clicked() {
+                self.not_in_library = !self.not_in_library;
+            }
+            let summary = bom::assembly_summary(&self.rows).text();
+            if !summary.is_empty() {
+                ui.label(RichText::new(format!("JLCPCB: {summary}.")).color(pal.muted).size(12.0))
+                    .on_hover_text("Class and stock come from LCSC's listing, lifecycle from DigiKey and Mouser. \"?\" means no source said, not that the part is missing.");
+            }
+        });
+        ui.add_space(4.0);
         let needle = self.filter.trim().to_lowercase();
-        let mut view: Vec<usize> = (0..self.rows.len()).filter(|&i| (needle.is_empty() || matches(&self.rows[i], &needle)) && (!self.shortfalls || shortfall(&self.rows[i], boards))).collect();
+        let mut view: Vec<usize> = (0..self.rows.len())
+            .filter(|&i| (needle.is_empty() || matches(&self.rows[i], &needle)) && (!self.shortfalls || shortfall(&self.rows[i], boards)) && (!self.not_in_library || self.rows[i].status.missing_cad()))
+            .collect();
         let mut sort = self.sort.unwrap_or(Sort { col: usize::MAX, asc: true });
         if sort.col != usize::MAX {
             view.sort_by(|&a, &b| {
@@ -235,26 +272,30 @@ impl BomTab {
             Col::new("Qty", 32.0),
             Col::new("MPN", 160.0),
             Col::new("Library", 170.0),
-            Col::new("JLCPCB", 190.0),
+            Col::new("JLCPCB", 215.0),
             Col::rest("Alternatives"),
             Col::new("Source", 52.0),
             Col::new("Stock", 46.0),
             Col::new("Unit / extended", 96.0),
             Col::new("Lead", 46.0),
         ];
-        let (mut search, mut import, mut swap, mut swap_jlc) = (None, false, None, None);
-        let rows = &self.rows;
-        ui_kit::table(ui, "bom", &cols, &mut sort, view.len(), |n, row| {
+        let (rows, selected, mut pick) = (&self.rows, self.selected, None);
+        ui.style_mut().interaction.selectable_labels = false; // so a click on any cell selects the row
+        // The columns need about 940 px; narrower than that (small window, inspector open) the table scrolls sideways.
+        egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_min_width(940.0);
+            ui_kit::table(ui, "bom", &cols, &mut sort, view.len(), |n, row| {
             let i = view[n];
             let r = &rows[i];
+            row.set_selected(selected == Some(i));
             row.col(|ui| {
-                ui.label(r.line.refs.join(" ")).on_hover_text(r.line.refs.join(" "));
+                ui.label(RichText::new(r.line.refs.join(" ")).monospace()).on_hover_text(r.line.refs.join(" "));
             });
             row.col(|ui| {
                 ui.label((r.line.qty() * boards).to_string());
             });
             row.col(|ui| {
-                ui.label(mpn_of(r));
+                ui.label(RichText::new(mpn_of(r)).monospace());
             });
             row.col(|ui| {
                 ui.horizontal(|ui| {
@@ -313,7 +354,8 @@ impl BomTab {
                         ui.label(format!("{}{}", q.source, if q.stale { " (old)" } else { "" }));
                     });
                     row.col(|ui| {
-                        ui.label(q.stock.map_or("?".into(), |s| s.to_string()));
+                        let text = RichText::new(q.stock.map_or("?".into(), |s| s.to_string()));
+                        ui.label(if q.stock.is_some_and(|s| s < r.line.qty() * boards) { text.color(Level::Warn.color(ui.visuals())) } else { text });
                     });
                     row.col(|ui| {
                         ui.label(format!("{:.4} / {:.2}", b.priced.unit, b.priced.ext)).on_hover_text(format!("{} bought", b.priced.bought));
@@ -331,8 +373,15 @@ impl BomTab {
                     }
                 }
             }
+            if row.response().clicked() {
+                pick = Some(i);
+            }
+            });
         });
         self.sort = (sort.col != usize::MAX).then_some(sort);
+        if pick.is_some() {
+            self.selected = pick;
+        }
         if let Some(mpn) = search {
             cx.send(AppMsg::Search(search::Msg::Query(mpn)));
             cx.tab = Tab::Search;
@@ -344,8 +393,72 @@ impl BomTab {
             cx.send(AppMsg::Library(super::library::Msg::Swap(symbol)));
             cx.tab = Tab::Library;
         }
+        if let Some(mpn) = show {
+            cx.send(AppMsg::Library(super::library::Msg::Show(mpn)));
+            cx.tab = Tab::Library;
+        }
         if let Some((i, alt)) = swap {
             self.swap(i, &alt, cx);
         }
     }
+}
+
+/// What the inspector asked for.
+enum Insp {
+    Swap(klm_core::store::Alternative),
+    Show(String),
+    Close,
+}
+
+/// The right-hand panel for the selected line: what to buy it as, and the price breaks of the quote in use.
+fn inspector(ui: &mut egui::Ui, r: &Row, boards: u64) -> Option<Insp> {
+    let pal = theme::palette(ui.visuals());
+    let mut act = None;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("{} · {}", r.line.refs.join(" "), mpn_of(r))).monospace().size(15.0).strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("Close").on_hover_text("Hide this panel").clicked() {
+                act = Some(Insp::Close);
+            }
+        });
+    });
+    let maker = if r.line.manufacturer.is_empty() { String::new() } else { format!(" · {}", r.line.manufacturer) };
+    ui.label(RichText::new(format!("{} needed for {boards} boards{maker}", r.line.qty() * boards)).color(pal.muted));
+    ui.add_space(8.0);
+    page_kit::caption(ui, "Buy as");
+    ui.label(RichText::new("The library part's own MPN, or one of its alternatives").size(12.0).color(pal.muted));
+    page_kit::card(ui, None, |ui| {
+        let _ = ui.radio(true, RichText::new(mpn_of(r)).monospace());
+        if let Some(b) = &r.best {
+            let q = &r.quotes[b.quote];
+            ui.label(RichText::new(format!("{:.4} · {} · {}", b.priced.unit, q.source, q.stock.map_or("?".into(), |s| s.to_string()))).size(12.0).color(pal.muted));
+        }
+    });
+    for a in &r.alternatives {
+        page_kit::card(ui, None, |ui| {
+            let on = ui.radio(false, RichText::new(format!("{} ({})", a.mpn, a.role)).monospace()).on_hover_text("Show this part in place of the line's own");
+            if on.clicked() {
+                act = Some(Insp::Swap(a.clone()));
+            }
+        });
+    }
+    if let Some(b) = &r.best {
+        let q = &r.quotes[b.quote];
+        if !q.breaks.is_empty() {
+            ui.add_space(8.0);
+            page_kit::caption(ui, &format!("Price breaks · {} · {}", q.source, q.currency));
+            egui::Grid::new("bom_breaks").num_columns(2).spacing([12.0, 2.0]).show(ui, |ui| {
+                for (qty, price) in &q.breaks {
+                    ui.label(RichText::new(format!("{qty}+")).color(pal.muted));
+                    ui.label(RichText::new(format!("{price:.4}")).monospace());
+                    ui.end_row();
+                }
+            });
+        }
+    }
+    ui.add_space(12.0);
+    if matches!(r.status, Status::Found { .. }) && ui.button("Show in Library").clicked() {
+        act = Some(Insp::Show(mpn_of(r).to_string()));
+    }
+    act
 }

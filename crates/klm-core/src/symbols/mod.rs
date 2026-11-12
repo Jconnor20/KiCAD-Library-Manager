@@ -13,7 +13,7 @@ mod class;
 mod template;
 
 pub use class::{Class, detect};
-pub use template::{Slot, Template};
+pub use template::{Slot, Template, of as template_of};
 
 use crate::convert::easyeda::geom::fmt;
 use crate::kicad_env::write_atomic;
@@ -393,6 +393,21 @@ pub fn restyle(sym: &Sexpr, class: Class, profile: &Profile) -> Result<Sexpr> {
 pub fn class_of(category: &str, sym: &Sexpr, naming: &rules::Rules) -> Result<Class> {
     let pins = source_pins(sym)?;
     detect(category, sym, pins.len(), naming).map_err(anyhow::Error::msg)
+}
+
+/// The house-style class of every part in `root` that has one, by (category, symbol name). Parts with no
+/// class (a potentiometer, an unclear IC) are left out. Reads the symbol libraries only.
+pub fn classes_in(root: &LibraryRoot, naming: &rules::Rules) -> std::collections::HashMap<(String, String), Class> {
+    let mut out = std::collections::HashMap::new();
+    for cat in root.categories() {
+        let Some(lib) = std::fs::read_to_string(lib_path(root, &cat)).ok().and_then(|t| sexpr::parse(&t).ok()) else { continue };
+        for sym in lib.children("symbol") {
+            if let (Some(name), Ok(class)) = (sym.arg(0), class_of(&cat, sym, naming)) {
+                out.insert((cat.clone(), name.to_string()), class);
+            }
+        }
+    }
+    out
 }
 
 fn lib_path(root: &LibraryRoot, category: &str) -> std::path::PathBuf {

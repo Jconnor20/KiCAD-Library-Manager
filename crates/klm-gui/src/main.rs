@@ -16,14 +16,16 @@
 //! - Adding a feature to a tab: add its state and `Msg` variants in that tab's file. Adding a new tab:
 //!   a file in `tabs/`, a `Msg` variant, a `Tab` variant and one line each in `App` for `ui`/`handle`.
 
+mod shell;
 mod tabs;
+mod theme;
 
 // Headless UI tests live in tests/gui/ (outside src/ so the folder reads as tests); they are a child module to reach private state.
 #[cfg(test)]
 #[path = "../tests/gui/mod.rs"]
 mod gui_tests;
 
-use eframe::egui::{self, RichText};
+use eframe::egui;
 use klm_core::kicad_env;
 use klm_core::library::LibraryRoot;
 use klm_core::settings::Settings;
@@ -31,8 +33,8 @@ use klm_core::sources::Source;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use tabs::ui_kit::{self, Level, Section};
-use tabs::{bom, bom_import, cleanup, footprint_gen, history, import, library, search, settings};
+use tabs::ui_kit::{Level, Section};
+use tabs::{bom, bom_import, classes, cleanup, footprint_gen, health, history, import, library, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
@@ -62,7 +64,10 @@ enum Tab {
     Bom,
     BomImport,
     History,
+    Settings,
     Cleanup,
+    Classes,
+    Health,
     Footprint,
 }
 
@@ -88,6 +93,10 @@ impl Log {
 
     fn clear(&mut self) {
         self.lines.clear();
+    }
+
+    fn warnings(&self) -> usize {
+        self.lines.iter().filter(|(l, _)| *l == Level::Warn).count()
     }
 
     fn errors(&self) -> usize {
@@ -117,7 +126,7 @@ fn install_fonts(ctx: &egui::Context) {
         }
         at += 1;
     }
-    ctx.set_fonts(fonts);
+    theme::install(ctx, fonts);
 }
 
 /// State every tab can read and change.
@@ -195,12 +204,15 @@ struct App {
     library_tab: library::LibraryTab,
     history_tab: history::HistoryTab,
     cleanup_tab: cleanup::CleanupTab,
+    classes_tab: classes::ClassesTab,
+    health_tab: health::HealthTab,
     footprint_tab: footprint_gen::FootprintTab,
     bom_tab: bom::BomTab,
     bom_import_tab: bom_import::BomImportTab,
     settings_tab: settings::SettingsTab,
     log_open: bool,
     checklist_hidden: bool,
+    omni: shell::Omni,
 }
 
 fn main() -> eframe::Result {
@@ -276,12 +288,15 @@ impl App {
             library_tab: library::LibraryTab::default(),
             history_tab: history::HistoryTab::default(),
             cleanup_tab: cleanup::CleanupTab::default(),
+            classes_tab: Default::default(),
+            health_tab: Default::default(),
             footprint_tab: footprint_gen::FootprintTab::default(),
             bom_tab: bom::BomTab::default(),
             bom_import_tab: bom_import::BomImportTab::default(),
             settings_tab: settings::SettingsTab::new(),
-            log_open: true,
+            log_open: false,
             checklist_hidden: false,
+            omni: shell::Omni::default(),
             cx,
             rx,
         };
@@ -375,7 +390,10 @@ impl App {
             match msg {
                 Msg::Log(s) => self.cx.log.push(s),
                 Msg::LogAt(level, s) => self.cx.log(level, s),
-                Msg::OpenSettings(section) => self.settings_tab.open(section, &self.cx.settings),
+                Msg::OpenSettings(section) => {
+                    self.settings_tab.open(section, &self.cx.settings);
+                    self.cx.tab = Tab::Settings;
+                }
                 Msg::ApplyPending => self.apply_pending(),
                 Msg::MoveGlobal(dir) => self.move_global(&dir),
                 Msg::Search(m) => self.search_tab.handle(m, &mut self.cx),
@@ -452,54 +470,6 @@ impl App {
         });
         ui.separator();
     }
-
-    fn top_bar(&mut self, ui: &mut egui::Ui) {
-        let cx = &mut self.cx;
-        egui::Grid::new("roots").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
-            ui.strong("Global library");
-            match &cx.settings.global_root {
-                Some(g) => ui.label(g.display().to_string()),
-                None => ui.weak("not set up"),
-            };
-            ui.horizontal(|ui| {
-                if cx.global_root().is_some()
-                    && ui.button("Change location…").on_hover_text("Move the library, or point KLM at where you moved it").clicked()
-                {
-                    if let Some(d) = rfd::FileDialog::new().set_title("New location for the global library").pick_folder() {
-                        cx.send(Msg::MoveGlobal(d));
-                    }
-                }
-                if cx.pending_libs > 0 {
-                    ui.label(format!("{} pending", cx.pending_libs)).on_hover_text("Written to KiCad's library list; re-checked when KiCad closes in case it saves over them");
-                    if ui.button("Apply now").clicked() {
-                        cx.when_kicad_closed(Msg::ApplyPending);
-                    }
-                }
-            });
-            ui.end_row();
-
-            ui.strong("Project");
-            match &cx.project {
-                Some(p) => ui.label(p.display().to_string()),
-                None => ui.weak("none chosen"),
-            };
-            ui.horizontal(|ui| {
-                if ui.button("Choose project…").clicked() {
-                    if let Some(f) = rfd::FileDialog::new().add_filter("KiCad project", &["kicad_pro"]).pick_file() {
-                        cx.project = Some(project_dir(&f));
-                        cx.settings.last_project = cx.project.clone();
-                        cx.save_settings();
-                        cx.send(Msg::Library(library::Msg::Refresh));
-                    }
-                }
-                if cx.project.is_some() && ui.button("Close project").clicked() {
-                    cx.project = None;
-                    cx.send(Msg::Library(library::Msg::Refresh));
-                }
-            });
-            ui.end_row();
-        });
-    }
 }
 
 impl eframe::App for App {
@@ -513,74 +483,7 @@ impl eframe::App for App {
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(5));
 
-        egui::Panel::top("top").show(ui, |ui| {
-            ui.add_space(6.0);
-            self.top_bar(ui);
-            ui.add_space(6.0);
-        });
-        if self.log_open {
-            egui::Panel::bottom("log").resizable(true).default_size(90.0).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("Clear").clicked() {
-                        self.cx.log.clear();
-                    }
-                    if ui.button("Copy").on_hover_text("Copy all log lines to the clipboard").clicked() {
-                        ui.ctx().copy_text(self.cx.log.text());
-                    }
-                    if ui.button("Hide").clicked() {
-                        self.log_open = false;
-                    }
-                });
-                egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink(false).show(ui, |ui| {
-                    for (level, line) in &self.cx.log.lines {
-                        match level {
-                            Level::Info => ui.label(line),
-                            _ => ui.colored_label(level.color(ui.visuals()), line),
-                        };
-                    }
-                });
-            });
-        }
-        egui::CentralPanel::default_margins().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.cx.tab, Tab::Search, RichText::new("Search").heading());
-                ui.selectable_value(&mut self.cx.tab, Tab::Import, RichText::new("Import").heading());
-                ui.selectable_value(&mut self.cx.tab, Tab::Library, RichText::new("Library").heading());
-                ui.selectable_value(&mut self.cx.tab, Tab::Bom, RichText::new("BOM").heading());
-                ui.selectable_value(&mut self.cx.tab, Tab::BomImport, RichText::new("BOM to library").heading());
-                ui.selectable_value(&mut self.cx.tab, Tab::History, RichText::new("History").heading());
-                ui.selectable_value(&mut self.cx.tab, Tab::Cleanup, RichText::new("Clean up").heading());
-                ui.selectable_value(&mut self.cx.tab, Tab::Footprint, RichText::new("Footprint").heading());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Settings…").clicked() {
-                        self.cx.open_settings(Section::General);
-                    }
-                    if !self.log_open && ui.button("Show log").clicked() {
-                        self.log_open = true;
-                    }
-                    let errors = self.cx.log.errors();
-                    if errors > 0 {
-                        let text = format!("{errors} error{}", if errors == 1 { "" } else { "s" });
-                        let r = ui_kit::badge(ui, &text, Level::Error);
-                        if ui.interact(r.rect, ui.scope_id().with("error_badge"), egui::Sense::click()).on_hover_text("Show the log").clicked() {
-                            self.log_open = true;
-                        }
-                    }
-                });
-            });
-            ui.separator();
-            self.checklist(ui);
-            match self.cx.tab {
-                Tab::Search => self.search_tab.ui(ui, &mut self.cx),
-                Tab::Import => self.import_tab.ui(ui, &mut self.cx),
-                Tab::Library => self.library_tab.ui(ui, &mut self.cx),
-                Tab::Bom => self.bom_tab.ui(ui, &mut self.cx),
-                Tab::BomImport => self.bom_import_tab.ui(ui, &mut self.cx),
-                Tab::History => self.history_tab.ui(ui, &mut self.cx),
-                Tab::Cleanup => self.cleanup_tab.ui(ui, &mut self.cx),
-                Tab::Footprint => self.footprint_tab.ui(ui, &mut self.cx),
-            }
-        });
+        self.shell(ui);
 
         self.import_tab.dialogs(&mut self.cx);
         // Floating windows are only drawn on their own tab; their state survives the switch.

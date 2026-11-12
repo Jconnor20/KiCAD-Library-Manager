@@ -34,6 +34,7 @@ fn b2_preview_window_stays_on_its_tab() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     select(&mut h, "RP2040");
+    click(&mut h, "Actions");
     click(&mut h, "Preview");
     assert!(h.query_by_label("Preview: RP2040").is_some(), "Preview did not open");
     super::shell::goto(&mut h, Tab::History);
@@ -54,7 +55,7 @@ fn assert_nothing_clipped(h: &Gui, size: (f32, f32), tab: &str) {
             inside("Browse by category");
             inside("Search");
         }
-        _ => inside("Refresh"),
+        _ => inside("Standardise…"),
     }
 }
 
@@ -65,7 +66,7 @@ fn b3_search_header_is_not_clipped_at_both_sizes() {
         let mut h = app(size, Tab::Search);
         with_probe(&mut h);
         let search = h.get_all_by_label("Search").last().unwrap().rect();
-        let top = h.get_by_label("Choose project…").rect().max.y;
+        let top = h.get_by_label("KLM").rect().max.y;
         assert!(search.min.y > top && search.max.y <= size.1, "Search box misplaced at {size:?}: {search:?}");
         assert_nothing_clipped(&h, size, "Search");
     }
@@ -90,10 +91,8 @@ fn b4_search_sidebar_icons_have_glyphs() {
         let mut h = app(size, Tab::Search);
         with_probe(&mut h);
         settle(&mut h);
-        // The side list starts closed on narrow windows (W7.4).
-        if h.query_by_label("Recently imported").is_none() {
-            click(&mut h, "Saved & recent");
-        }
+        // The saved and recent lists live in a menu now.
+        click(&mut h, "Saved & recent ▾");
         assert!(h.query_by_label("Recently imported").is_some(), "side list missing");
         let missing = missing_glyphs(&h);
         assert!(missing.is_empty(), " Search at {size:?} draws {missing:?} as empty boxes (star buttons, sort arrows)");
@@ -135,10 +134,12 @@ fn b6_missing_sim_model_is_not_flagged_like_a_real_gap() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     settle(&mut h);
-    let col = h.get_by_label("Sim model").rect().min.x;
-    let in_col = |label: &str| h.query_all_by_label(label).filter(|n| (n.rect().min.x - col).abs() < 3.0).count();
-    assert_eq!(in_col("missing"), 0, "rows show a 'missing' sim model, though sim models are optional");
-    assert_eq!(in_col("—"), 3, "an absent sim model should read '—'");
+    // The table lists a sim model only when there is one; the inspector shows the empty slot as optional, not missing.
+    assert_eq!(h.query_all_by_label("Sim model: missing").count(), 0, "rows show a 'missing' sim model, though sim models are optional");
+    h.get_by_label("RP2040").click();
+    h.run_ok();
+    assert_eq!(h.query_all_by_label("Sim model: missing").count(), 0);
+    assert_eq!(h.query_all_by_label("Sim model: optional").count(), 1, "an absent sim model should read as optional");
 }
 
 #[test]

@@ -4,8 +4,8 @@ use super::edit_dialog::{EditAction, EditDialog};
 use super::preview::PreviewPanel;
 use super::symbol_editor::{Outcome, SymbolEditor};
 use super::ui_kit::{self, Col, Level, Sort, Status as Cell};
-use crate::{AppCtx, Msg as AppMsg};
-use eframe::egui::{self, RichText, Sense};
+use crate::{AppCtx, Msg as AppMsg, theme};
+use eframe::egui::{self, RichText};
 use klm_core::batch::{self, Op};
 use klm_core::checks::{self, Issue, Severity};
 use klm_core::compliance;
@@ -13,6 +13,7 @@ use klm_core::kicad_edit::{self, Editor, FileWatch};
 use klm_core::health::{self, Finding};
 use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartEdit, PartStatus, RemovePlan, Scope};
 use klm_core::standardise;
+use klm_core::store::{Alternative, Store};
 use klm_core::symbols::Restyled;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -89,7 +90,7 @@ pub struct LibraryTab {
     maker: String,
     status: Filter,
     sort: Sort,
-    /// The row whose actions the detail panel shows.
+    /// The row the inspector shows.
     current: Option<Key>,
     finder_results: Option<Vec<(String, Result<String, String>)>>,
     /// The listing; `None` until the first load arrives. A reload keeps the old rows on screen.
@@ -132,6 +133,10 @@ pub struct LibraryTab {
     preview: Option<(String, PreviewPanel)>,
     symbol_editor: Option<SymbolEditor>,
     alternatives: Option<AlternativesPanel>,
+    /// The inspector's view of `current`.
+    inspect: Option<Inspect>,
+    /// Counts reloads, so the inspector re-reads when the files under it change.
+    loads: u64,
 }
 
 impl Default for LibraryTab {
@@ -142,7 +147,7 @@ impl Default for LibraryTab {
             category: String::new(),
             maker: String::new(),
             status: Filter::All,
-            sort: Sort { col: 1, asc: true },
+            sort: Sort { col: CATEGORY, asc: true },
             current: None,
             finder_results: None,
             parts: None,
@@ -169,6 +174,8 @@ impl Default for LibraryTab {
             preview: None,
             symbol_editor: None,
             alternatives: None,
+            inspect: None,
+            loads: 0,
         }
     }
 }
@@ -208,16 +215,15 @@ struct ViewKey {
     sort: Sort,
 }
 
-/// Column positions in the table; 0 is the tick box.
-const CATEGORY: usize = 1;
-const MPN: usize = 2;
-const MAKER: usize = 3;
-const FOOTPRINT: usize = 4;
-const MODEL: usize = 5;
-const DATASHEET: usize = 6;
-const SIM: usize = 7;
-const IN_KICAD: usize = 8;
-const CHECKS: usize = 9;
+/// Column ids; the table shows a subset of them, chosen by its width.
+const TICK: usize = 0;
+const MPN: usize = 1;
+const MAKER: usize = 2;
+const CATEGORY: usize = 3;
+const FILES: usize = 4;
+const KICAD: usize = 5;
+const CHECKS: usize = 6;
+const STANDARD: usize = 7;
 
 /// Worst-first rank, so ascending puts the parts with problems on top.
 fn rank(c: Check) -> u8 {
@@ -229,16 +235,18 @@ fn rank(c: Check) -> u8 {
     }
 }
 
+/// The worst of a part's files (a missing sim model is fine).
+fn files_rank(p: &PartStatus) -> u8 {
+    [rank(p.footprint), rank(p.model), rank(p.datasheet), if p.sim == Check::Broken { 0 } else { 3 }].into_iter().min().unwrap_or(3)
+}
+
 fn compare(col: usize, a: &PartStatus, b: &PartStatus, issues: impl Fn(&PartStatus) -> usize) -> std::cmp::Ordering {
     match col {
         CATEGORY => a.category.to_lowercase().cmp(&b.category.to_lowercase()),
         MPN => a.mpn.to_lowercase().cmp(&b.mpn.to_lowercase()),
         MAKER => a.manufacturer.to_lowercase().cmp(&b.manufacturer.to_lowercase()),
-        FOOTPRINT => rank(a.footprint).cmp(&rank(b.footprint)),
-        MODEL => rank(a.model).cmp(&rank(b.model)),
-        DATASHEET => rank(a.datasheet).cmp(&rank(b.datasheet)),
-        SIM => rank(a.sim).cmp(&rank(b.sim)),
-        IN_KICAD => a.in_kicad.cmp(&b.in_kicad),
+        FILES => files_rank(a).cmp(&files_rank(b)),
+        KICAD => a.in_kicad.cmp(&b.in_kicad),
         CHECKS => issues(b).cmp(&issues(a)),
         _ => std::cmp::Ordering::Equal,
     }
@@ -259,59 +267,66 @@ fn pick_attachment() -> Option<PathBuf> {
     TEST_PICK.lock().unwrap().clone()
 }
 
-/// The part's actions as full-size buttons; one that doesn't apply is disabled and says why.
-/// Used by the detail panel and the row's context menu (`menu` closes the menu on a click).
-fn part_actions(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, has_project: bool, menu: bool, action: &mut Action) {
-    let key = (p.category.clone(), p.name.clone());
-    let btn = |ui: &mut egui::Ui, label: &str, enabled: bool, tip: &str, why_not: &str| {
-        let r = ui.add_enabled(enabled, egui::Button::new(label));
-        let clicked = if enabled { r.on_hover_text(tip).clicked() } else { r.on_disabled_hover_text(why_not).clicked() };
-        if clicked && menu {
-            ui.close();
-        }
-        clicked
+/// What the inspector keeps about the current part, read when it becomes current and again after every reload.
+struct Inspect {
+    key: Key,
+    /// `LibraryTab::loads` when it was read.
+    load: u64,
+    preview: PreviewPanel,
+    fields: Vec<(&'static str, String)>,
+    alternatives: Vec<Alternative>,
+}
+
+fn small(text: &str) -> egui::Button<'_> {
+    egui::Button::new(text).small()
+}
+
+/// An inspector section: padded, with a rule under it.
+fn section(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = 8.0;
+        add(ui);
+    });
+    ui.add(egui::Separator::default().spacing(0.0));
+}
+
+/// One SYM / FP / 3D / DS chip. A missing or broken footprint, 3D model or datasheet can be clicked to fix it:
+/// the first two ask for a file, the datasheet starts the finder.
+fn file_chips(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, downloading: bool, root: &LibraryRoot, action: &mut Action, with_sim: bool) {
+    ui.spacing_mut().item_spacing.x = 4.0;
+    let chip = |ui: &mut egui::Ui, short: &str, what: &str, status: Cell| {
+        let (state, tip) = match status {
+            Cell::Ok => ("present", format!("{what} present")),
+            Cell::Link => ("link", format!("{what} points at a web page or another library")),
+            Cell::Missing => ("missing", format!("No {what}. Click to fix it.")),
+            Cell::Broken => ("broken", format!("{what} is set but its file isn't there. Click to fix it.")),
+            Cell::Optional => ("optional", format!("No {what} (optional)")),
+        };
+        ui_kit::file_chip(ui, short, status, &tip, &format!("{what}: {state}"))
     };
-    if btn(ui, "Edit…", true, "Edit MPN, maker, description, category, supplier numbers, datasheet and tags", "") {
-        *action = Action::Edit(vec![key.clone()]);
-    }
-    if btn(ui, "Preview", true, "Show the symbol, footprint and 3D model", "") {
-        *action = Action::Preview { category: key.0.clone(), name: key.1.clone() };
-    }
-    if btn(ui, "Edit symbol in KiCad", true, "Open this category's symbol library in KiCad's symbol editor (pick the part in its tree). Saving there re-checks the part here.", "") {
-        *action = Action::EditInKicad { editor: Editor::Symbol, category: key.0.clone(), name: key.1.clone() };
-    }
-    if btn(ui, "Edit footprint in KiCad", true, "Open this part's footprint in KiCad. Saving there re-checks the part here.", "") {
-        *action = Action::EditInKicad { editor: Editor::Footprint, category: key.0.clone(), name: key.1.clone() };
-    }
-    if btn(ui, "Edit symbol…", true, "Edit pins, body and text positions of the symbol in the app (graphical editing: use KiCad)", "") {
-        *action = Action::EditSymbol { category: key.0.clone(), name: key.1.clone() };
-    }
-    if btn(ui, "Restyle symbol…", true, "Redraw the symbol in the house style for its kind of part (resistor, capacitor, IC box…). Shows what changes first. Keeps every field; undo it in History. Wires on schematics that already use it may need fixing.", "") {
-        *action = Action::Restyle { category: key.0.clone(), name: key.1.clone() };
-    }
-    // Detecting the class needs the symbol file, too slow for every frame, so the log names the class.
-    if btn(ui, "Use as house template for its class", true, "Make this symbol (and its footprint's text, line and pin-1 style) the active profile's house style for its kind of part. Restyle and Standardise then follow it. Settings > Symbols puts the built-in back.", "") {
-        *action = Action::HouseTemplate { category: key.0.clone(), name: key.1.clone() };
-    }
-    if btn(ui, "Attach…", true, "Add a datasheet (PDF), SPICE model, 3D model (STEP/WRL) or a footprint/3D ZIP without a symbol", "") {
+    let fixable = |c: Check| matches!(c, Check::Missing | Check::Broken);
+    let key = (p.category.clone(), p.name.clone());
+    chip(ui, "SYM", "Symbol", Cell::Ok);
+    let r = chip(ui, "FP", "Footprint", cell(p.footprint));
+    if fixable(p.footprint) && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
         if let Some(path) = pick_attachment() {
             *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
         }
     }
-    let (can_copy, why) = match (scope, has_project) {
-        (Scope::Project, _) => (false, "This part is already in the project library"),
-        (_, false) => (false, "Choose a project first"),
-        _ => (true, ""),
-    };
-    if btn(ui, "Copy to project", can_copy, "Copy this part into the project's library. Shift-click to replace a copy already there.", why) {
-        let overwrite = ui.input(|i| i.modifiers.shift);
-        *action = Action::CopyToProject { category: key.0.clone(), name: key.1.clone(), overwrite };
-    }
-    let target = p.datasheet_target.as_deref();
-    if btn(ui, "Open datasheet", target.is_some(), "Open the datasheet in your PDF viewer or browser", "This part has no datasheet") {
-        if let Some(t) = target {
-            let _ = open::that(t);
+    let r = chip(ui, "3D", "3D model", cell(p.model));
+    if fixable(p.model) && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        if let Some(path) = pick_attachment() {
+            *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
         }
+    }
+    let r = chip(ui, "DS", "Datasheet", cell(p.datasheet));
+    if fixable(p.datasheet) && !downloading && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        *action = Action::FindDatasheets(root.clone());
+    }
+    // Sim models are optional: the inspector always lists the slot, the table only when there is something to say.
+    if with_sim || p.sim != Check::Missing {
+        chip(ui, "SIM", "Sim model", if p.sim == Check::Missing { Cell::Optional } else { cell(p.sim) });
     }
 }
 
@@ -336,12 +351,13 @@ fn issues_cell(ui: &mut egui::Ui, issues: Option<&Vec<Issue>>) {
         return;
     };
     let Some(worst) = issues.iter().map(|i| i.severity).max() else {
-        ui.label(RichText::new("✔").color(Level::Ok.color(ui.visuals()))).on_hover_text("No problems found");
+        ui.weak("—").on_hover_text("No problems found");
         return;
     };
-    let color = if worst == Severity::Error { Level::Error } else { Level::Warn }.color(ui.visuals());
+    let (word, level) = if worst == Severity::Error { ("error", Level::Error) } else { ("warning", Level::Warn) };
+    let n = issues.len();
     let tip: Vec<_> = issues.iter().map(|i| format!("• {}", i.message)).collect();
-    ui.label(RichText::new(issues.len().to_string()).color(color)).on_hover_text(tip.join("\n"));
+    ui.label(RichText::new(format!("{n} {word}{}", if n == 1 { "" } else { "s" })).color(level.color(ui.visuals()))).on_hover_text(tip.join("\n"));
 }
 
 static NO_ISSUES: Vec<Issue> = Vec::new();
@@ -430,16 +446,7 @@ impl LibraryTab {
                 let path = klm_core::settings::sandbox_dir().or_else(dirs::document_dir).or_else(dirs::home_dir).unwrap_or_default().join("klm_export.zip");
                 self.dry = Some(Dry::Export { root, parts: sorted(&self.selected), path: path.display().to_string() });
             }
-            Action::Delete(root, targets) => {
-                let (tx, rx) = mpsc::channel();
-                let (r, ctx) = (root.clone(), cx.ctx.clone());
-                std::thread::spawn(move || {
-                    let plans = r.plan_remove_all(&targets);
-                    let _ = tx.send(targets.into_iter().zip(plans).map(|(k, p)| (k, p.map_err(|e| format!("{e:#}")))).collect());
-                    ctx.request_repaint();
-                });
-                self.dry = Some(Dry::PlanningDelete(root, rx));
-            }
+            Action::Delete(root, targets) => self.start_delete(root, targets, &cx.ctx),
             Action::Health => {
                 if let Some(dir) = cx.project.clone() {
                     let (tx, rx) = mpsc::channel();
@@ -454,7 +461,7 @@ impl LibraryTab {
             Action::Edit(targets) => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
-                    self.edit_dialog = Some(EditDialog::new(self.scope, targets, root, cx.settings.rules.clone()));
+                    self.edit_dialog = Some(EditDialog::new(&cx.ctx, self.scope, targets, root, cx.settings.rules.clone()));
                 }
             }
             Action::Preview { category, name } => {
@@ -503,6 +510,18 @@ impl LibraryTab {
                 }
             }
         }
+    }
+
+    /// Plans the delete on a worker; the review dialog follows.
+    fn start_delete(&mut self, root: LibraryRoot, targets: Vec<Key>, ctx: &egui::Context) {
+        let (tx, rx) = mpsc::channel();
+        let (r, ctx) = (root.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let plans = r.plan_remove_all(&targets);
+            let _ = tx.send(targets.into_iter().zip(plans).map(|(k, p)| (k, p.map_err(|e| format!("{e:#}")))).collect());
+            ctx.request_repaint();
+        });
+        self.dry = Some(Dry::PlanningDelete(root, rx));
     }
 
     pub fn handle(&mut self, msg: Msg, cx: &mut AppCtx) {
@@ -580,6 +599,13 @@ impl LibraryTab {
             match dialog.show(&cx.ctx) {
                 EditAction::None => {}
                 EditAction::Cancel => self.edit_dialog = None,
+                EditAction::Delete { targets } => {
+                    self.edit_dialog = None;
+                    let root = if self.scope == Scope::Global { &global } else { &project };
+                    if let Some(root) = root {
+                        self.start_delete(root.clone(), targets, &cx.ctx);
+                    }
+                }
                 EditAction::Apply { scope, targets, edit } => {
                     self.edit_dialog = None;
                     let root = if scope == Scope::Global { &global } else { &project };
@@ -663,7 +689,7 @@ impl LibraryTab {
                 sections.extend(plan.errors.iter().map(|e| ("Can't be read".to_string(), vec![e.clone()])));
                 let note = format!("{}
 The rules are in Settings → Standards. A snapshot is taken first, so History can roll it back.", plan.root.dir.display());
-                match batch_dialog::review(&ctx, "dry_standardise", "Apply", "Standardise", &sections, !plan.files.is_empty(), |ui| {
+                match batch_dialog::review(&ctx, "dry_standardise", "Apply", false, "Standardise", &sections, !plan.files.is_empty(), |ui| {
                     ui.weak(note);
                 }) {
                     Some(true) if cx.busy => cx.log(Level::Warn, "Standardise: wait for the running import or download to finish, then press Apply again"),
@@ -695,7 +721,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 };
                 let sections = vec![(format!("{category} / {name}"), lines)];
                 let note = "Keeps every field. A snapshot is taken first, so History can undo it. Wires on schematics that already use the symbol may need fixing.";
-                match batch_dialog::review(&ctx, "dry_restyle", "Apply", "Restyle symbol", &sections, can_apply, |ui| {
+                match batch_dialog::review(&ctx, "dry_restyle", "Apply", false, "Restyle symbol", &sections, can_apply, |ui| {
                     ui.weak(note);
                 }) {
                     Some(true) if cx.busy => cx.log(Level::Warn, "Restyle: wait for the running import or download to finish, then press Apply again"),
@@ -716,7 +742,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 let sections: Vec<_> = parts.iter().map(|(c, n)| (format!("{c} / {n}"), vec![])).collect();
                 let title = format!("Export {} part(s) as a ZIP", parts.len());
                 let can = !parts.is_empty() && !path.trim().is_empty();
-                let answer = batch_dialog::review(&ctx, "dry_export", "Apply", &title, &sections, can, |ui| {
+                let answer = batch_dialog::review(&ctx, "dry_export", "Apply", false, &title, &sections, can, |ui| {
                     ui.add_space(6.0);
                     if Path::new(path.trim()).exists() {
                         ui.colored_label(ui.visuals().warn_fg_color, "That file exists and will be replaced.");
@@ -754,9 +780,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                     .map(|((c, n), plan)| (format!("{c} / {n}"), plan.as_ref().map_or_else(|e| vec![format!("can't be deleted: {e}")], |p| p.lines())))
                     .collect();
                 let can = !plans.is_empty() && plans.iter().all(|(_, p)| p.is_ok());
-                let title = format!("Delete {} part(s)", plans.len());
+                let title = format!("Delete {} part(s)?", plans.len());
+                let confirm = format!("Delete {} part(s)", plans.len());
                 let note = "A snapshot is taken first, so History can roll it back. A footprint, 3D model, datasheet or sim model another part still uses is kept; it goes with the last part that uses it.";
-                match batch_dialog::review(&ctx, "dry_delete", "Delete", &title, &sections, can, |ui| {
+                match batch_dialog::review(&ctx, "dry_delete", &confirm, true, &title, &sections, can, |ui| {
                     ui.add_space(6.0);
                     ui.colored_label(ui.visuals().warn_fg_color, "Deleted parts are removed from the library, KLM's database and alternatives.");
                     ui.weak(note);
@@ -793,34 +820,39 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             }
             Some(Dry::Health(findings)) => {
                 let (mut copy, mut close) = (false, false);
-                let modal = egui::Modal::new(egui::Id::NULL.with("dry_health")).show(&ctx, |ui| {
-                    ui.set_width(620.0);
-                    ui.heading("Health report");
-                    if findings.is_empty() {
-                        ui.label("No problems found in the project's library.");
-                    } else {
-                        ui.label(format!("{} finding(s)", findings.len()));
-                    }
-                    egui::ScrollArea::vertical().max_height(340.0).auto_shrink([false, true]).show(ui, |ui| {
-                        for f in findings.iter() {
-                            ui.horizontal_wrapped(|ui| {
-                                let level = if f.severity == Severity::Error { Level::Error } else { Level::Warn };
-                                ui_kit::badge(ui, f.kind, level);
-                                ui.label(RichText::new(&f.item).strong());
-                                ui.label(&f.message);
-                            });
+                let sub = if findings.is_empty() { "no problems found".to_string() } else { format!("{} finding(s)", findings.len()) };
+                let dismissed = batch_dialog::dialog(
+                    &ctx,
+                    egui::Id::NULL.with("dry_health"),
+                    700.0,
+                    "Health report",
+                    Some(sub.as_str()),
+                    |ui| {
+                        if findings.is_empty() {
+                            ui.label("No problems found in the project's library.");
                         }
-                    });
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        copy = ui.button("Copy as CSV").clicked();
-                        close = ui.button("Close").clicked();
-                    });
-                });
+                        egui::ScrollArea::vertical().max_height(340.0).auto_shrink([false, true]).show(ui, |ui| {
+                            for f in findings.iter() {
+                                ui.horizontal_wrapped(|ui| {
+                                    let level = if f.severity == Severity::Error { Level::Error } else { Level::Warn };
+                                    ui_kit::badge(ui, f.kind, level);
+                                    ui.label(RichText::new(&f.item).strong());
+                                    ui.label(&f.message);
+                                });
+                            }
+                        });
+                    },
+                    |ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            close = ui.button("Close").clicked();
+                            copy = ui.button("Copy as CSV").clicked();
+                        });
+                    },
+                );
                 if copy {
                     ctx.copy_text(health::to_csv(findings));
                 }
-                if close || modal.should_close() {
+                if close || dismissed {
                     self.dry = None;
                 }
             }
@@ -917,6 +949,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             c.request_repaint();
         });
         self.dir = Some(root.dir.clone());
+        self.loads += 1;
         let (comp_tx, comp_rx) = mpsc::channel();
         let (r, c, cache, (profile, naming)) = (root.clone(), ctx.clone(), self.compliance_cache.clone(), self.standard.clone());
         std::thread::spawn(move || {
@@ -1036,53 +1069,40 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
         }
     }
 
+    fn current_part(&self) -> Option<&PartStatus> {
+        let k = self.current.as_ref()?;
+        self.parts.as_ref()?.iter().find(|p| (&p.category, &p.name) == (&k.0, &k.1))
+    }
+
+    /// Keeps the inspector's pictures, fields and alternatives for the current part; rebuilt when the part or the listing changes.
+    fn sync_inspector(&mut self, ctx: &egui::Context, root: &LibraryRoot) {
+        let Some(p) = self.current_part() else {
+            self.inspect = None;
+            return;
+        };
+        let (key, mpn) = ((p.category.clone(), p.name.clone()), p.mpn.clone());
+        if self.inspect.as_ref().is_some_and(|i| i.key == key && i.load == self.loads) {
+            return;
+        }
+        let fields = root.part_fields(&key.0, &key.1).unwrap_or_default();
+        let alternatives = Store::default_path().and_then(|p| Store::open(&p).ok()).and_then(|s| klm_core::alternatives::alternatives_of(&s, &mpn).ok()).unwrap_or_default();
+        self.inspect = Some(Inspect { preview: PreviewPanel::for_library(ctx, root, &key.0, &key.1), key, load: self.loads, fields, alternatives });
+    }
+
     fn show(&mut self, ui: &mut egui::Ui, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> Action {
         let mut action = Action::None;
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("View");
-            let before = self.scope;
-            ui.add_enabled_ui(global.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Global, "Global"));
-            ui.add_enabled_ui(project.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Project, "Project"));
-            if self.scope != before {
-                self.stale = true;
-                self.current = None;
-            }
-            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Filter by MPN, maker, category…").desired_width(200.0));
-            let all = |v: &str, what: &str| if v.is_empty() { format!("Any {what}") } else { v.to_string() };
-            let (cats, makers) = self.parts.as_ref().map_or_else(Default::default, |ps| {
-                let set = |f: fn(&PartStatus) -> &String| ps.iter().map(f).filter(|s| !s.is_empty()).cloned().collect::<std::collections::BTreeSet<_>>();
-                (set(|p| &p.category), set(|p| &p.manufacturer))
-            });
-            for (id, value, options, what) in [("cat_filter", &mut self.category, cats, "library"), ("maker_filter", &mut self.maker, makers, "manufacturer")] {
-                egui::ComboBox::from_id_salt(id).selected_text(all(value, what)).show_ui(ui, |ui| {
-                    ui.selectable_value(value, String::new(), format!("Any {what}"));
-                    for o in options {
-                        ui.selectable_value(value, o.clone(), o);
-                    }
-                });
-            }
-            let current = Filter::ALL.iter().find(|(s, _)| *s == self.status).map_or("", |(_, l)| l);
-            egui::ComboBox::from_id_salt("status_filter").selected_text(current).show_ui(ui, |ui| {
-                for (s, label) in Filter::ALL {
-                    ui.selectable_value(&mut self.status, s, label);
-                }
-            });
-            if ui.button("Refresh").clicked() {
-                self.stale = true;
-            }
-        });
-
         let root = match self.scope {
             Scope::Global => global,
             Scope::Project => project,
         };
         let Some(root) = root else {
-            (self.parts, self.parts_rx, self.checks_rx, self.compliance_rx, self.dir) = (None, None, None, None, None);
+            (self.parts, self.parts_rx, self.checks_rx, self.compliance_rx, self.dir, self.inspect) = (None, None, None, None, None, None);
+            self.header(ui, global, project, None, &mut action);
             ui.label(match self.scope {
                 Scope::Global => "Set up a global library first.",
                 Scope::Project => "Choose a project first.",
             });
-            return Action::None;
+            return action;
         };
         // A different library (another scope, or the project changed) shares nothing with what is shown.
         if self.dir.as_ref() != Some(&root.dir) {
@@ -1096,178 +1116,459 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
         }
         self.receive();
         self.update_view();
+        self.sync_inspector(ui.ctx(), root);
 
-        let has_selection = !self.selected.is_empty();
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("Library actions");
-            if ui.add_enabled(!self.view.is_empty(), egui::Button::new("Select all")).on_hover_text("Tick every part shown").clicked() {
-                self.selected = (0..self.view.len()).filter_map(|i| self.key_at(i)).collect();
-            }
-            if ui.add_enabled(has_selection, egui::Button::new("Select none")).clicked() {
-                self.selected.clear();
-            }
-            if ui.add_enabled(has_selection, egui::Button::new("Edit selected…")).on_disabled_hover_text("Tick parts first").clicked() {
-                action = Action::Edit(sorted(&self.selected));
-            }
-            let can_copy = self.scope == Scope::Global && project.is_some() && has_selection;
-            let copy = ui.add_enabled(can_copy, egui::Button::new("Copy selected to project"));
-            if copy.on_hover_text("Copy the ticked parts into the project's library. Shift-click to replace copies already there.").clicked() {
-                action = Action::Batch(vec![Op::CopyToProject { parts: sorted(&self.selected), overwrite: ui.input(|i| i.modifiers.shift) }]);
-            }
-            let attach = ui.add_enabled(has_selection, egui::Button::new("Attach to selected…"));
-            if attach.on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked() {
-                if let Some(file) = pick_attachment() {
-                    action = Action::Batch(vec![Op::Attach { scope: self.scope, file, parts: sorted(&self.selected) }]);
-                }
-            }
-            let export = ui.add_enabled(has_selection, egui::Button::new("Export selected…"));
-            if export.on_hover_text("Write the ticked parts, with their footprints and 3D models, to one ZIP").on_disabled_hover_text("Tick parts first").clicked() {
-                action = Action::Export(root.clone());
-            }
-            let targets = if has_selection { sorted(&self.selected) } else { self.current.iter().cloned().collect() };
-            let delete = ui.add_enabled(!targets.is_empty(), egui::Button::new("Delete…"));
-            if delete.on_hover_text("Delete the ticked parts (or the clicked one), with the files no other part uses. Shows what goes first.").on_disabled_hover_text("Click or tick a part first").clicked() {
-                action = Action::Delete(root.clone(), targets);
-            }
-            if ui.button("Standardise…").on_hover_text("Fix symbols and footprints to the rules in Settings → Standards. Shows what changes first.").clicked() {
-                action = Action::Standardise(root.clone());
-            }
-            let health = ui.add_enabled(project.is_some(), egui::Button::new("Health report…"));
-            if health.on_hover_text("Everything wrong or untidy in the project's library").on_disabled_hover_text("Choose a project first").clicked() {
-                action = Action::Health;
-            }
-            if ui.button("Alternatives…").on_hover_text("Find duplicates and equivalent parts, and mark preferred ones").clicked() {
-                let one = (self.selected.len() == 1).then(|| self.selected.iter().next().cloned()).flatten();
-                action = Action::Alternatives(one.or_else(|| self.current.clone()));
-            }
-            if ui.button("Relink libraries").on_hover_text("Add every KLM library missing from KiCad's library list").clicked() {
-                action = Action::Batch(vec![Op::RelinkAll]);
-            }
-            let find = ui.add_enabled(!self.downloading, egui::Button::new("Find missing datasheets"));
-            if find.on_hover_text("For parts with no working datasheet, try the existing link, then search the enabled sources by MPN, and save the first real PDF").clicked() {
-                action = Action::FindDatasheets(root.clone());
-            }
-        });
+        // The inspector goes first so it takes the full height beside the header and the table.
+        if let Some(p) = self.current_part().cloned() {
+            let pal = theme::palette(ui.visuals());
+            let width = if ui.available_width() < 900.0 { 300.0 } else { 352.0 };
+            egui::Panel::right("library_inspector").resizable(true).default_size(width).size_range(260.0..=520.0).frame(egui::Frame::new().fill(pal.panel)).show(ui, |ui| {
+                self.inspector(ui, &p, root, project.is_some(), &mut action);
+            });
+        }
+        self.header(ui, global, project, Some(root), &mut action);
 
-        let Some(parts) = &self.parts else {
+        if self.parts.is_none() {
             ui.weak(format!("Loading parts from {}…", root.dir.display()));
             return action;
+        }
+        if !self.selected.is_empty() {
+            self.selection_bar(ui, project.is_some(), root, &mut action);
+        }
+        let Some(parts) = &self.parts else { return action };
+        if parts.is_empty() {
+            ui.add_space(8.0);
+            ui.weak("No parts yet. Import one from Search or Import.");
+            return action;
+        }
+
+        // The table's width decides how many columns fit; the sort is kept as a column id, not a position.
+        let wide = ui.available_width();
+        let shown: &[usize] = if wide >= 800.0 {
+            &[TICK, MPN, MAKER, CATEGORY, FILES, KICAD, CHECKS, STANDARD]
+        } else if wide >= 500.0 {
+            &[TICK, MPN, MAKER, FILES, CHECKS]
+        } else {
+            &[TICK, MPN, FILES, CHECKS]
         };
-        let loading = self.parts_rx.is_some() || self.checks_rx.is_some() || self.compliance_rx.is_some();
-        let bad = parts.iter().filter(|p| incomplete(p)).count();
-        let mut summary = format!("{} parts in {} · {bad} incomplete", parts.len(), root.dir.display());
-        if self.view.len() != parts.len() {
-            summary += &format!(" · {} shown", self.view.len());
-        }
-        if has_selection {
-            summary += &format!(" · {} selected", self.selected.len());
-        }
-        if loading {
-            summary += " · reading…";
-        }
-        ui.weak(summary);
-        ui.add_space(4.0);
-
-        let current = self.current.as_ref().and_then(|k| parts.iter().find(|p| (&p.category, &p.name) == (&k.0, &k.1)));
-        egui::Panel::bottom("library_detail").resizable(false).show(ui, |ui| match current {
-            Some(p) => {
-                ui.horizontal_wrapped(|ui| {
-                    ui.strong(&p.mpn);
-                    ui.weak(format!("{} · {}", p.manufacturer, p.category));
-                });
-                ui.horizontal_wrapped(|ui| part_actions(ui, p, self.scope, project.is_some(), false, &mut action));
-            }
-            None => {
-                ui.weak("Click a part to see its actions; right-click a row for the same. Ctrl-click or shift-click to tick several. Click a missing datasheet or 3D model to fix it.");
-            }
-        });
-
-        // Narrow enough that Checks is still on screen at the 820 px default.
-        let cols = [
-            Col::new("", 24.0).no_sort(),
-            Col::new("Category", 74.0),
-            Col::new("MPN", 120.0),
-            Col::new("Manufacturer", 104.0),
-            Col::new("Footprint", 66.0),
-            Col::new("3D model", 66.0),
-            Col::new("Datasheet", 72.0),
-            Col::new("Sim model", 66.0),
-            Col::new("In KiCad", 64.0),
-            Col::new("Checks", 52.0),
-            Col::rest("Standard").no_sort(),
-        ];
-        let (scope, has_project, downloading) = (self.scope, project.is_some(), self.downloading);
+        let cols: Vec<Col> = shown
+            .iter()
+            .map(|&c| match c {
+                TICK => Col::new("", 28.0).no_sort(),
+                MPN if shown.contains(&STANDARD) => Col::new("MPN", 140.0),
+                MPN => Col::rest("MPN"),
+                MAKER => Col::new("Manufacturer", 110.0),
+                CATEGORY => Col::new("Category", 80.0),
+                FILES => Col::new("Files", 168.0),
+                KICAD => Col::new("KiCad", 48.0),
+                CHECKS => Col::new("Checks", 84.0),
+                _ => Col::rest("Standard").no_sort(),
+            })
+            .collect();
+        let (scope, downloading) = (self.scope, self.downloading);
         let mut click = None;
+        let mut toggle_all = false;
         let (view, selected, checks, current, compliance) = (&self.view, &self.selected, &self.checks, &self.current, &self.compliance);
-        let mut sort = self.sort;
+        let all_ticked = !view.is_empty() && selected.len() == view.len();
+        let before = Sort { col: shown.iter().position(|&c| c == self.sort.col).unwrap_or(usize::MAX), asc: self.sort.asc };
+        let mut sort = before;
         ui.scope(|ui| {
             // A selectable label would swallow the click that selects the row.
             ui.style_mut().interaction.selectable_labels = false;
-            ui_kit::table(ui, "library", &cols, &mut sort, view.len(), |i, row| {
-                let p = &parts[view[i]];
-                let key = (p.category.clone(), p.name.clone());
-                row.set_selected(current.as_ref() == Some(&key));
-                row.col(|ui| {
-                    let mut ticked = selected.contains(&key);
-                    let r = ui.checkbox(&mut ticked, "");
-                    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, ticked, format!("Select {}", p.mpn)));
+            ui_kit::table_with_head(
+                ui,
+                "library",
+                &cols,
+                &mut sort,
+                view.len(),
+                |i, ui| {
+                    if shown[i] != TICK {
+                        return false;
+                    }
+                    let mut on = all_ticked;
+                    let r = ui.checkbox(&mut on, "");
+                    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, all_ticked, if all_ticked { "Select none" } else { "Select all" }));
+                    toggle_all = r.clicked();
+                    true
+                },
+                |i, row| {
+                    let p = &parts[view[i]];
+                    let key = (p.category.clone(), p.name.clone());
+                    row.set_selected(current.as_ref() == Some(&key));
+                    for &c in shown {
+                        row.col(|ui| match c {
+                            TICK => {
+                                let mut ticked = selected.contains(&key);
+                                let r = ui.checkbox(&mut ticked, "");
+                                r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, ticked, format!("Select {}", p.mpn)));
+                                if r.clicked() {
+                                    click = Some(Click::Tick(i, ui.input(|i| i.modifiers.shift)));
+                                }
+                            }
+                            MPN => {
+                                let r = ui.label(RichText::new(&p.mpn).monospace());
+                                if !p.description.is_empty() {
+                                    r.on_hover_text(&p.description);
+                                }
+                            }
+                            MAKER => {
+                                ui.label(&p.manufacturer);
+                            }
+                            CATEGORY => {
+                                ui.label(RichText::new(&p.category).weak());
+                            }
+                            FILES => {
+                                ui.horizontal(|ui| file_chips(ui, p, scope, downloading, root, &mut action, false));
+                            }
+                            KICAD => {
+                                if p.in_kicad {
+                                    ui.label(RichText::new("✔").color(Level::Ok.color(ui.visuals()))).on_hover_text("This category's library is in KiCad's library list");
+                                } else {
+                                    ui.label(RichText::new("no").color(Level::Warn.color(ui.visuals()))).on_hover_text("This category's library isn't in KiCad's library list yet. Relink libraries adds it.");
+                                }
+                            }
+                            CHECKS => issues_cell(ui, checks.as_ref().map(|c| c.get(&key).unwrap_or(&NO_ISSUES))),
+                            _ => compliance_cell(ui, compliance.as_ref().and_then(|c| c.get(&key))),
+                        });
+                    }
+                    let r = row.response();
                     if r.clicked() {
-                        click = Some(Click::Tick(i, ui.input(|i| i.modifiers.shift)));
+                        click = Some(Click::Row(i, r.ctx.input(|i| i.modifiers)));
+                    } else if r.secondary_clicked() {
+                        click = Some(Click::Menu(i));
                     }
-                });
-                row.col(|ui| {
-                    ui.label(&p.category);
-                });
-                row.col(|ui| {
-                    let r = ui.label(RichText::new(&p.mpn).strong());
-                    if !p.description.is_empty() {
-                        r.on_hover_text(&p.description);
-                    }
-                });
-                row.col(|ui| {
-                    ui.label(&p.manufacturer);
-                });
-                row.col(|ui| {
-                    ui_kit::status_cell(ui, cell(p.footprint), "Footprint");
-                });
-                row.col(|ui| {
-                    let fixable = matches!(p.model, Check::Missing | Check::Broken);
-                    let r = ui_kit::status_cell(ui, cell(p.model), "3D model");
-                    if fixable && r.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                        if let Some(path) = pick_attachment() {
-                            action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
-                        }
-                    }
-                });
-                row.col(|ui| {
-                    let fixable = matches!(p.datasheet, Check::Missing | Check::Broken);
-                    let r = ui_kit::status_cell(ui, cell(p.datasheet), "Datasheet");
-                    if fixable && !downloading && r.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                        action = Action::FindDatasheets(root.clone());
-                    }
-                });
-                row.col(|ui| {
-                    ui_kit::status_cell(ui, if p.sim == Check::Missing { Cell::Optional } else { cell(p.sim) }, "Sim model");
-                });
-                row.col(|ui| {
-                    ui_kit::status_cell(ui, if p.in_kicad { Cell::Ok } else { Cell::Missing }, "KiCad library entry");
-                });
-                row.col(|ui| issues_cell(ui, checks.as_ref().map(|c| c.get(&key).unwrap_or(&NO_ISSUES))));
-                row.col(|ui| compliance_cell(ui, compliance.as_ref().and_then(|c| c.get(&key))));
-                let r = row.response();
-                if r.clicked() {
-                    click = Some(Click::Row(i, r.ctx.input(|i| i.modifiers)));
-                } else if r.secondary_clicked() {
-                    click = Some(Click::Menu(i));
-                }
-                r.context_menu(|ui| part_actions(ui, p, scope, has_project, true, &mut action));
-            });
+                },
+            );
         });
-        self.sort = sort;
+        if sort != before {
+            if let Some(&c) = shown.get(sort.col) {
+                self.sort = Sort { col: c, asc: sort.asc };
+            }
+        }
+        if toggle_all {
+            self.selected = if all_ticked { HashSet::new() } else { (0..self.view.len()).filter_map(|i| self.key_at(i)).collect() };
+        }
         if let Some(c) = click {
             self.click(c);
         }
         action
+    }
+
+    fn scope_toggle(&mut self, ui: &mut egui::Ui, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) {
+        ui.add_enabled_ui(global.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Global, "Global"));
+        ui.add_enabled_ui(project.is_some(), |ui| ui.selectable_value(&mut self.scope, Scope::Project, "Project"));
+    }
+
+    /// Title, count and the library switch; filters; the page's own buttons. One row on a wide page, two on a
+    /// medium one, and on a narrow one the rarer buttons move into More.
+    fn header(&mut self, ui: &mut egui::Ui, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>, root: Option<&LibraryRoot>, action: &mut Action) {
+        let width = ui.available_width();
+        let (narrow, one_row) = (width < 700.0, width >= 1300.0);
+        let n_bad = self.parts.as_ref().map_or(0, |ps| ps.iter().filter(|p| incomplete(p)).count());
+        let before = self.scope;
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Library").heading().strong());
+            if let Some(ps) = &self.parts {
+                let loading = self.parts_rx.is_some() || self.checks_rx.is_some() || self.compliance_rx.is_some();
+                let mut text = format!("{} parts", ps.len());
+                if self.view.len() != ps.len() {
+                    text += &format!(" · {} shown", self.view.len());
+                }
+                if loading {
+                    text += " · reading…";
+                }
+                let dir = root.map(|r| r.dir.display().to_string()).unwrap_or_default();
+                ui.weak(text).on_hover_text(format!("{dir}\n{n_bad} incomplete"));
+            }
+            if !narrow {
+                self.scope_toggle(ui, global, project);
+            }
+            if one_row {
+                self.filters(ui, n_bad);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.tools(ui, root, project, narrow, action));
+        });
+        if !one_row {
+            ui.add_space(2.0);
+            ui.horizontal_wrapped(|ui| {
+                if narrow {
+                    self.scope_toggle(ui, global, project);
+                }
+                self.filters(ui, n_bad);
+            });
+        }
+        if self.scope != before {
+            self.stale = true;
+            self.current = None;
+            ui.ctx().request_repaint();
+        }
+        ui.add_space(4.0);
+    }
+
+    fn filters(&mut self, ui: &mut egui::Ui, n_bad: usize) {
+        ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Filter MPN, maker, category…").desired_width(170.0));
+        let all = |v: &str, what: &str| if v.is_empty() { format!("Any {what}") } else { v.to_string() };
+        let (cats, makers) = self.parts.as_ref().map_or_else(Default::default, |ps| {
+            let set = |f: fn(&PartStatus) -> &String| ps.iter().map(f).filter(|s| !s.is_empty()).cloned().collect::<std::collections::BTreeSet<_>>();
+            (set(|p| &p.category), set(|p| &p.manufacturer))
+        });
+        for (id, value, options, what) in [("cat_filter", &mut self.category, cats, "library"), ("maker_filter", &mut self.maker, makers, "manufacturer")] {
+            egui::ComboBox::from_id_salt(id).selected_text(all(value, what)).show_ui(ui, |ui| {
+                ui.selectable_value(value, String::new(), format!("Any {what}"));
+                for o in options {
+                    ui.selectable_value(value, o.clone(), o);
+                }
+            });
+        }
+        if ui_kit::chip(ui, "Incomplete", Some(n_bad), self.status == Filter::Incomplete).on_hover_text("Parts missing a footprint, 3D model or datasheet, or not in KiCad").clicked() {
+            self.status = if self.status == Filter::Incomplete { Filter::All } else { Filter::Incomplete };
+        }
+        let current = Filter::ALL.iter().find(|(s, _)| *s == self.status).map_or("", |(_, l)| l);
+        egui::ComboBox::from_id_salt("status_filter").selected_text(current).show_ui(ui, |ui| {
+            for (s, label) in Filter::ALL {
+                ui.selectable_value(&mut self.status, s, label);
+            }
+        });
+    }
+
+    /// The buttons on the right of the header, laid out right to left: Standardise, More, then the ghosts.
+    fn tools(&mut self, ui: &mut egui::Ui, root: Option<&LibraryRoot>, project: Option<&LibraryRoot>, narrow: bool, action: &mut Action) {
+        let style = ui.style().clone();
+        let std = ui.add_enabled(root.is_some(), ui_kit::primary("Standardise…", &style.visuals)).on_hover_text("Fix symbols and footprints to the rules in Settings → Standards. Shows what changes first.");
+        if let (true, Some(root)) = (std.clicked(), root) {
+            *action = Action::Standardise(root.clone());
+        }
+        ui.menu_button("More", |ui| {
+            if narrow {
+                if ui.add_enabled(project.is_some(), egui::Button::new("Health report…")).on_hover_text("Everything wrong or untidy in the project's library").on_disabled_hover_text("Choose a project first").clicked() {
+                    *action = Action::Health;
+                    ui.close();
+                }
+                if ui.button("Alternatives…").on_hover_text("Find duplicates and equivalent parts, and mark preferred ones").clicked() {
+                    *action = self.alternatives_action();
+                    ui.close();
+                }
+            }
+            if ui.add_enabled(root.is_some() && !self.downloading, egui::Button::new("Find missing datasheets")).on_hover_text("For parts with no working datasheet, try the existing link, then search the enabled sources by MPN, and save the first real PDF").clicked() {
+                if let Some(root) = root {
+                    *action = Action::FindDatasheets(root.clone());
+                }
+                ui.close();
+            }
+            if ui.button("Relink libraries").on_hover_text("Add every KLM library missing from KiCad's library list").clicked() {
+                *action = Action::Batch(vec![Op::RelinkAll]);
+                ui.close();
+            }
+            if ui.button("Refresh").on_hover_text("Read the library again").clicked() {
+                self.stale = true;
+                ui.close();
+            }
+        });
+        if narrow {
+            return;
+        }
+        if ui.add_enabled(project.is_some(), ui_kit::ghost("Health report…")).on_hover_text("Everything wrong or untidy in the project's library").on_disabled_hover_text("Choose a project first").clicked() {
+            *action = Action::Health;
+        }
+        if ui.add(ui_kit::ghost("Alternatives…")).on_hover_text("Find duplicates and equivalent parts, and mark preferred ones").clicked() {
+            *action = self.alternatives_action();
+        }
+    }
+
+    /// Alternatives opens on the one ticked part, else the current one.
+    fn alternatives_action(&self) -> Action {
+        let one = (self.selected.len() == 1).then(|| self.selected.iter().next().cloned()).flatten();
+        Action::Alternatives(one.or_else(|| self.current.clone()))
+    }
+
+    /// The teal bar over the table while rows are ticked: what can be done to all of them.
+    fn selection_bar(&mut self, ui: &mut egui::Ui, has_project: bool, root: &LibraryRoot, action: &mut Action) {
+        let targets = sorted(&self.selected);
+        let style = ui.style().clone();
+        egui::Frame::new().fill(ui.visuals().selection.bg_fill).corner_radius(4).inner_margin(egui::Margin::symmetric(10, 5)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(format!("{} selected", targets.len())).strong());
+                if ui.add(small("Edit…")).on_hover_text("Edit category, maker, description, datasheet and supplier numbers of the ticked parts").clicked() {
+                    *action = Action::Edit(targets.clone());
+                }
+                let can_copy = self.scope == Scope::Global && has_project;
+                let copy = ui.add_enabled(can_copy, small("Copy to project"));
+                if copy.on_hover_text("Copy the ticked parts into the project's library. Shift-click to replace copies already there.").on_disabled_hover_text("Needs the global library and a project").clicked() {
+                    *action = Action::Batch(vec![Op::CopyToProject { parts: targets.clone(), overwrite: ui.input(|i| i.modifiers.shift) }]);
+                }
+                if ui.add(small("Attach…")).on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked() {
+                    if let Some(file) = pick_attachment() {
+                        *action = Action::Batch(vec![Op::Attach { scope: self.scope, file, parts: targets.clone() }]);
+                    }
+                }
+                let fill = ui.add_enabled(!self.downloading, small("Fill missing files…"));
+                if fill.on_hover_text("For every part in this library with no working datasheet, try the existing link, then search the enabled sources by MPN").clicked() {
+                    *action = Action::FindDatasheets(root.clone());
+                }
+                if ui.add(small("Export…")).on_hover_text("Write the ticked parts, with their footprints and 3D models, to one ZIP").clicked() {
+                    *action = Action::Export(root.clone());
+                }
+                let del = ui.add(ui_kit::danger("Delete…", false, &style.visuals).small());
+                if del.on_hover_text("Delete the ticked parts, with the files no other part uses. Shows what goes first.").clicked() {
+                    *action = Action::Delete(root.clone(), targets.clone());
+                }
+                if ui.add(ui_kit::ghost("Clear selection").small()).clicked() {
+                    self.selected.clear();
+                }
+            });
+        });
+        ui.add_space(4.0);
+    }
+
+    /// The right-hand pane for the current part: what it is, its pictures, fields and alternatives, and its actions.
+    fn inspector(&mut self, ui: &mut egui::Ui, p: &PartStatus, root: &LibraryRoot, has_project: bool, action: &mut Action) {
+        let pal = theme::palette(ui.visuals());
+        let key = (p.category.clone(), p.name.clone());
+        let style = ui.style().clone();
+        egui::Panel::bottom("library_inspector_footer").resizable(false).frame(egui::Frame::new().fill(pal.panel).inner_margin(egui::Margin::symmetric(16, 10))).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let target = p.datasheet_target.as_deref();
+                let open = ui.add_enabled(target.is_some(), egui::Button::new("Open datasheet"));
+                if open.on_hover_text("Open the datasheet in your PDF viewer or browser").on_disabled_hover_text("This part has no datasheet").clicked() {
+                    if let Some(t) = target {
+                        let _ = open::that(t);
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (can, why) = match (self.scope, has_project) {
+                        (Scope::Project, _) => (false, "This part is already in the project library"),
+                        (_, false) => (false, "Choose a project first"),
+                        _ => (true, ""),
+                    };
+                    let copy = ui.add_enabled(can, ui_kit::primary("Copy to project", &style.visuals));
+                    if copy.on_hover_text("Copy this part into the project's library. Shift-click to replace a copy already there.").on_disabled_hover_text(why).clicked() {
+                        let overwrite = ui.input(|i| i.modifiers.shift);
+                        *action = Action::CopyToProject { category: key.0.clone(), name: key.1.clone(), overwrite };
+                    }
+                });
+            });
+        });
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            // Identity: MPN, who makes it, which files it has.
+            section(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&p.mpn).monospace().size(16.0).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let x = ui.add(ui_kit::ghost("✕"));
+                        x.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Close inspector"));
+                        if x.clicked() {
+                            self.current = None;
+                            ui.ctx().request_repaint();
+                        }
+                        ui.menu_button("Actions", |ui| {
+                            if ui.button("Preview").on_hover_text("Show the symbol, footprint and 3D model large").clicked() {
+                                *action = Action::Preview { category: key.0.clone(), name: key.1.clone() };
+                                ui.close();
+                            }
+                            if ui.button("Use as house template for its class").on_hover_text("Make this symbol (and its footprint's text, line and pin-1 style) the active profile's house style for its kind of part. Restyle and Standardise then follow it. Settings > Symbols puts the built-in back.").clicked() {
+                                *action = Action::HouseTemplate { category: key.0.clone(), name: key.1.clone() };
+                                ui.close();
+                            }
+                            if ui.add(ui_kit::danger("Delete…", false, ui.visuals())).on_hover_text("Delete this part, with the files no other part uses. Shows what goes first.").clicked() {
+                                *action = Action::Delete(root.clone(), vec![key.clone()]);
+                                ui.close();
+                            }
+                        });
+                    });
+                });
+                let who = [p.manufacturer.as_str(), p.category.as_str()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+                ui.weak(format!("{who} · {} library", if self.scope == Scope::Global { "global" } else { "project" }));
+                ui.horizontal(|ui| file_chips(ui, p, self.scope, self.downloading, root, action, true));
+                ui.horizontal(|ui| {
+                    ui.weak("House standard");
+                    compliance_cell(ui, self.compliance.as_ref().and_then(|c| c.get(&key)));
+                });
+            });
+            // The three pictures, and what can be done to the symbol.
+            section(ui, |ui| {
+                if self.inspect.as_mut().is_some_and(|i| i.preview.pictures(ui)) {
+                    *action = Action::Preview { category: key.0.clone(), name: key.1.clone() };
+                }
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if ui.add(small("Edit symbol…")).on_hover_text("Edit pins, body and text positions of the symbol in the app (graphical editing: use KiCad)").clicked() {
+                        *action = Action::EditSymbol { category: key.0.clone(), name: key.1.clone() };
+                    }
+                    if ui.add(small("Restyle symbol…")).on_hover_text("Redraw the symbol in the house style for its kind of part. Shows what changes first. Keeps every field; undo it in History. Wires on schematics that already use it may need fixing.").clicked() {
+                        *action = Action::Restyle { category: key.0.clone(), name: key.1.clone() };
+                    }
+                    ui.menu_button("Open in KiCad", |ui| {
+                        if ui.button("Symbol in KiCad's editor").on_hover_text("Open this category's symbol library in KiCad's symbol editor (pick the part in its tree). Saving there re-checks the part here.").clicked() {
+                            *action = Action::EditInKicad { editor: Editor::Symbol, category: key.0.clone(), name: key.1.clone() };
+                            ui.close();
+                        }
+                        if ui.button("Footprint in KiCad's editor").on_hover_text("Open this part's footprint in KiCad. Saving there re-checks the part here.").clicked() {
+                            *action = Action::EditInKicad { editor: Editor::Footprint, category: key.0.clone(), name: key.1.clone() };
+                            ui.close();
+                        }
+                    });
+                });
+            });
+            // Fields.
+            section(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui_kit::section_label(ui, "Fields");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(ui_kit::ghost("Edit…")).on_hover_text("Edit MPN, maker, description, category, supplier numbers, datasheet and tags").clicked() {
+                            *action = Action::Edit(vec![key.clone()]);
+                        }
+                        if ui.add(ui_kit::ghost("Attach…")).on_hover_text("Add a datasheet (PDF), SPICE model, 3D model (STEP/WRL) or a footprint/3D ZIP without a symbol").clicked() {
+                            if let Some(path) = pick_attachment() {
+                                *action = Action::Attach { scope: self.scope, category: key.0.clone(), name: key.1.clone(), path };
+                            }
+                        }
+                    });
+                });
+                let rows: Vec<_> = self.inspect.iter().flat_map(|i| i.fields.iter()).filter(|(k, v)| !v.is_empty() && !matches!(*k, "MPN" | "Manufacturer")).collect();
+                if rows.is_empty() {
+                    ui.weak("No fields set.");
+                }
+                egui::Grid::new("inspector_fields").num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
+                    for (k, v) in rows {
+                        ui.label(RichText::new(*k).weak().size(12.0));
+                        let text = if matches!(*k, "Description" | "Tags") { RichText::new(v).size(12.0) } else { RichText::new(v).monospace().size(12.0) };
+                        ui.add(egui::Label::new(text).truncate()).on_hover_text(v);
+                        ui.end_row();
+                    }
+                });
+            });
+            // Alternatives.
+            section(ui, |ui| {
+                let n = self.inspect.as_ref().map_or(0, |i| i.alternatives.len());
+                ui.horizontal(|ui| {
+                    ui_kit::section_label(ui, "Alternatives");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(ui_kit::ghost("Find…")).on_hover_text("Find duplicates and equivalent parts, and mark preferred ones").clicked() {
+                            *action = Action::Alternatives(Some(key.clone()));
+                        }
+                    });
+                });
+                if n == 0 {
+                    ui.weak("None marked yet.");
+                }
+                for a in self.inspect.iter().flat_map(|i| i.alternatives.iter()) {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&a.mpn).monospace().size(12.0));
+                        ui.weak(&a.manufacturer);
+                        ui_kit::badge(ui, &a.role, if a.role == "preferred" { Level::Ok } else { Level::Info });
+                    });
+                }
+            });
+            // What the part checks found.
+            section(ui, |ui| {
+                ui_kit::section_label(ui, "Checks");
+                if let Some(i) = &self.inspect {
+                    i.preview.issues_list(ui);
+                }
+            });
+        });
     }
 }
 
@@ -1295,33 +1596,36 @@ impl AttachDialog {
 
     fn show(&mut self, ctx: &egui::Context, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> AttachAction {
         let mut action = AttachAction::None;
-        let modal = egui::Modal::new(egui::Id::unique("attach_dialog")).show(ctx, |ui| {
-            ui.set_width(460.0);
-            ui.heading("Add file");
-            ui.label(format!("{} → {}", self.path.file_name().unwrap_or_default().to_string_lossy(), self.name));
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label("Add to");
-                ui.add_enabled(global.is_some(), egui::Checkbox::new(&mut self.to_global, "Global"));
-                ui.add_enabled(project.is_some(), egui::Checkbox::new(&mut self.to_project, "Project"));
-            });
-            ui.weak("The file is copied into each library's folder. A library without this part gets a copy of it first.");
-
-            let targets: Vec<LibraryRoot> = [(self.to_global, global), (self.to_project, project)]
-                .into_iter()
-                .filter_map(|(on, r)| if on { r.cloned() } else { None })
-                .collect();
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.add_enabled(!targets.is_empty(), egui::Button::new("Add")).clicked() {
-                    action = AttachAction::Attach { targets };
-                }
-                if ui.button("Cancel").clicked() {
-                    action = AttachAction::Cancel;
-                }
-            });
-        });
-        if modal.should_close() && matches!(action, AttachAction::None) {
+        let file = format!("{} → {}", self.path.file_name().unwrap_or_default().to_string_lossy(), self.name);
+        let targets: Vec<LibraryRoot> = [(self.to_global, global), (self.to_project, project)].into_iter().filter_map(|(on, r)| if on { r.cloned() } else { None }).collect();
+        let dismissed = batch_dialog::dialog(
+            ctx,
+            egui::Id::NULL.with("attach_dialog"),
+            460.0,
+            "Add file",
+            None,
+            |ui| {
+                ui.label(RichText::new(&file).monospace());
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label("Add to");
+                    ui.add_enabled(global.is_some(), egui::Checkbox::new(&mut self.to_global, "Global"));
+                    ui.add_enabled(project.is_some(), egui::Checkbox::new(&mut self.to_project, "Project"));
+                });
+                ui.weak("The file is copied into each library's folder. A library without this part gets a copy of it first.");
+            },
+            |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add_enabled(!targets.is_empty(), ui_kit::primary("Add", ui.visuals())).clicked() {
+                        action = AttachAction::Attach { targets: targets.clone() };
+                    }
+                    if ui.button("Cancel").clicked() {
+                        action = AttachAction::Cancel;
+                    }
+                });
+            },
+        );
+        if dismissed && matches!(action, AttachAction::None) {
             action = AttachAction::Cancel;
         }
         action

@@ -21,14 +21,15 @@ pub enum Level {
 impl Level {
     pub fn color(self, v: &egui::Visuals) -> Color32 {
         match (self, v.dark_mode) {
-            (Level::Info, true) => Color32::from_rgb(110, 170, 240),
-            (Level::Info, false) => Color32::from_rgb(30, 100, 190),
-            (Level::Ok, true) => Color32::from_rgb(84, 190, 120),
-            (Level::Ok, false) => Color32::from_rgb(30, 130, 60),
-            (Level::Warn, true) => Color32::from_rgb(230, 160, 60),
-            (Level::Warn, false) => Color32::from_rgb(170, 100, 0),
-            (Level::Error, true) => Color32::from_rgb(240, 100, 100),
-            (Level::Error, false) => Color32::from_rgb(190, 40, 40),
+            // The wireframes' --info / --ok / --warn / --err; the light set is the same hues, darkened for white.
+            (Level::Info, true) => Color32::from_rgb(0x6f, 0xb3, 0xff),
+            (Level::Info, false) => Color32::from_rgb(0x1f, 0x6f, 0xc9),
+            (Level::Ok, true) => Color32::from_rgb(0x5c, 0xc4, 0x89),
+            (Level::Ok, false) => Color32::from_rgb(0x1d, 0x7f, 0x4e),
+            (Level::Warn, true) => Color32::from_rgb(0xe0, 0xa9, 0x4a),
+            (Level::Warn, false) => Color32::from_rgb(0x9a, 0x65, 0x00),
+            (Level::Error, true) => Color32::from_rgb(0xef, 0x6b, 0x6b),
+            (Level::Error, false) => Color32::from_rgb(0xb4, 0x2c, 0x2c),
         }
     }
 }
@@ -78,7 +79,69 @@ pub fn status_cell(ui: &mut Ui, status: Status, what: &str) -> egui::Response {
         Status::Broken => ("broken", Level::Error.color(v), format!("{what} is set but its file isn't there")),
         Status::Optional => ("—", v.weak_text_color(), format!("No {what} (optional)")),
     };
-    ui.label(RichText::new(text).color(color)).on_hover_text(tip)
+    // A filled-tint chip, as the wireframes draw SYM / FP / 3D / DS.
+    // The tint is painted behind the label, so the text keeps its column's left edge.
+    let bg = ui.painter().add(egui::Shape::Noop);
+    let r = ui.label(RichText::new(text).color(color).small());
+    ui.painter().set(bg, egui::Shape::rect_filled(r.rect.expand2(egui::vec2(5.0, 1.0)), 3.0, color.gamma_multiply(0.15)));
+    r.on_hover_text(tip)
+}
+
+/// The wireframes' SYM / FP / 3D / DS chip: mono, tinted by `status`, `a11y` is its accessible name ("Datasheet: missing").
+/// Hover shows `tip`; the response senses clicks, so a missing one can be made fixable by the caller.
+pub fn file_chip(ui: &mut Ui, text: &str, status: Status, tip: &str, a11y: &str) -> egui::Response {
+    let v = ui.visuals();
+    let color = match status {
+        Status::Ok => Level::Ok.color(v),
+        Status::Link => Level::Info.color(v),
+        Status::Missing => Level::Warn.color(v),
+        Status::Broken => Level::Error.color(v),
+        Status::Optional => v.weak_text_color(),
+    };
+    let galley = ui.painter().layout_no_wrap(text.into(), egui::FontId::monospace(11.0), color);
+    let size = egui::vec2((galley.size().x + 10.0).max(28.0), galley.size().y + 6.0);
+    let (rect, r) = ui.allocate_exact_size(size, Sense::click());
+    ui.painter().rect_filled(rect, 3.0, color.gamma_multiply(0.15));
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, a11y));
+    r.on_hover_text(tip)
+}
+
+/// A filter chip: `label` with an optional count, filled in the accent when `on`.
+pub fn chip(ui: &mut Ui, label: &str, count: Option<usize>, on: bool) -> egui::Response {
+    let text = match count {
+        Some(n) => format!("{label} {n}"),
+        None => label.to_string(),
+    };
+    let accent = ui.visuals().selection.stroke.color;
+    let t = if on { RichText::new(text).color(accent) } else { RichText::new(text) };
+    ui.add(egui::Button::new(t).selected(on).min_size(egui::vec2(0.0, 26.0)))
+}
+
+/// The accent-filled call-to-action button (one per view).
+pub fn primary(text: &str, v: &egui::Visuals) -> egui::Button<'static> {
+    let on = if v.dark_mode { Color32::from_rgb(0x07, 0x18, 0x1b) } else { Color32::WHITE };
+    egui::Button::new(RichText::new(text).strong().color(on)).fill(crate::theme::palette(v).accent).stroke(egui::Stroke::NONE)
+}
+
+/// A destructive button: red text and outline, no fill. `filled` for the confirm button of a delete dialog.
+pub fn danger(text: &str, filled: bool, v: &egui::Visuals) -> egui::Button<'static> {
+    let c = Level::Error.color(v);
+    if filled {
+        egui::Button::new(RichText::new(text).strong().color(Color32::from_rgb(0x2a, 0x0b, 0x0b))).fill(c).stroke(egui::Stroke::NONE)
+    } else {
+        egui::Button::new(RichText::new(text).color(c)).fill(Color32::TRANSPARENT).stroke(egui::Stroke::new(1.0, c))
+    }
+}
+
+/// A button with no frame until hovered, for secondary actions.
+pub fn ghost(text: &str) -> egui::Button<'static> {
+    egui::Button::new(text.to_string()).frame(false).frame_when_inactive(false)
+}
+
+/// A small mono caps label that heads a section ("FIELDS").
+pub fn section_label(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text.to_uppercase()).monospace().size(11.0).color(ui.visuals().weak_text_color()));
 }
 
 /// A small coloured pill, e.g. "3 errors".
@@ -87,7 +150,7 @@ pub fn badge(ui: &mut Ui, text: &str, level: Level) -> egui::Response {
     egui::Frame::new()
         .fill(color.gamma_multiply(0.18))
         .stroke(egui::Stroke::new(1.0, color.gamma_multiply(0.6)))
-        .corner_radius(8)
+        .corner_radius(4)
         .inner_margin(egui::Margin::symmetric(6, 1))
         .show(ui, |ui| ui.label(RichText::new(text).color(color).small()))
         .response
@@ -123,19 +186,28 @@ impl Col {
     }
 }
 
-pub const ROW_HEIGHT: f32 = 22.0;
+pub const ROW_HEIGHT: f32 = 28.0;
 
 /// A table with a fixed header. `row` is called only for rows in view: it gets the row's index and adds one
 /// `row.col(|ui| …)` per column, in order. Clicking a sortable header changes `sort`; the caller re-sorts its data.
 /// Selection: `row.set_selected(…)` and `row.response()` (egui_extras' `TableRow`).
-pub fn table(ui: &mut Ui, id: &str, cols: &[Col], sort: &mut Sort, rows: usize, mut row: impl FnMut(usize, &mut TableRow)) {
-    let mut t = TableBuilder::new(ui).id_salt(id).striped(true).resizable(true).sense(Sense::click()).auto_shrink(false);
+pub fn table(ui: &mut Ui, id: &str, cols: &[Col], sort: &mut Sort, rows: usize, row: impl FnMut(usize, &mut TableRow)) {
+    table_with_head(ui, id, cols, sort, rows, |_, _| false, row)
+}
+
+/// [`table`] where `head(column, ui)` may draw a header cell itself (a select-all box) and return true.
+pub fn table_with_head(ui: &mut Ui, id: &str, cols: &[Col], sort: &mut Sort, rows: usize, mut head: impl FnMut(usize, &mut Ui) -> bool, mut row: impl FnMut(usize, &mut TableRow)) {
+    let mut t = TableBuilder::new(ui).id_salt(id).striped(false).resizable(true).sense(Sense::click()).auto_shrink(false);
     for c in cols {
         t = t.column(if c.width > 0.0 { Column::initial(c.width).at_least(24.0).clip(true) } else { Column::remainder().at_least(60.0).clip(true) });
     }
     t.header(ROW_HEIGHT, |mut h| {
         for (i, c) in cols.iter().enumerate() {
-            h.col(|ui| sort_header(ui, c, i, sort));
+            h.col(|ui| {
+                if !head(i, ui) {
+                    sort_header(ui, c, i, sort);
+                }
+            });
         }
     })
     .body(|body| {

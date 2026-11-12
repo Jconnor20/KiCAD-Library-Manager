@@ -436,3 +436,12 @@ fn symbol_editor_ops_round_trip_through_the_file_and_keep_everything_else() {
     assert_eq!(property(&back, "Alternates"), property(&was, "Alternates"));
     assert!(back.children("symbol").flat_map(|u| u.children("pin")).all(|p| p.child("alternate").is_some() || pin_number(p) == "3"));
 }
+
+#[test]
+fn classes_in_lists_the_parts_that_have_a_class() {
+    let r = vendor("RC0603", "U", "Chip resistor", &[("passive", "1", "1", false), ("passive", "2", "2", false)]);
+    let (_b, root) = library("symbols_classes_in", "Resistors", &[r]);
+    let found = classes_in(&root, &rules());
+    assert_eq!(found.get(&("Resistors".to_string(), "RC0603".to_string())), Some(&Class::Resistor));
+    assert_eq!(found.len(), 1);
+}

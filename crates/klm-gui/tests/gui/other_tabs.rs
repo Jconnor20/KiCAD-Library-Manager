@@ -41,7 +41,7 @@ fn y(h: &Gui, label: &str) -> f32 {
 }
 
 fn settings_open(h: &Gui) -> bool {
-    h.query_by_label("Settings").is_some()
+    h.state().cx.tab == Tab::Settings
 }
 
 fn on_page(h: &Gui, text: &str) -> bool {
@@ -150,7 +150,7 @@ fn h4_what_changed() {
         let mut h = history(size);
         assert!(h.query_by_label("Click a row to see which files that change touched.").is_some());
         click(&mut h, "import RP2040");
-        assert!(h.query_all_by_label_contains("What \"import RP2040\" changed").next().is_some(), "{}", dump(&h));
+        assert!(h.query_all_by_label_contains("CHANGED SINCE THIS SNAPSHOT").next().is_some(), "{}", dump(&h));
         assert!(h.query_all_by_label("added").next().is_some(), "the files the import added are listed");
         assert!(snap(&mut h, "history-what-changed").is_empty());
     }
@@ -253,11 +253,40 @@ fn c1_cleanup_issues() {
     for size in SIZES {
         let mut h = app(size, Tab::Cleanup);
         click(&mut h, "Scan KiCad's library tables");
-        assert!(h.query_all_by_label("Broken").next().is_some(), "{}", dump(&h));
+        assert!(h.query_all_by_label("Broken · 3").next().is_some(), "{}", dump(&h));
         assert!(snap(&mut h, "cleanup-scan").is_empty());
-        click(&mut h, "Remove");
+        click(&mut h, "Remove from table");
         assert!(h.query_by_label("Changes to apply").is_some());
         assert!(snap(&mut h, "cleanup-queued").is_empty());
+    }
+}
+
+/// The Standards pages (Classes, Create footprint and symbol, Library health) open at both sizes and show real data.
+#[test]
+fn c2_standards_pages() {
+    let env = setup();
+    // The fixture parts have one pin each, which no house class accepts; a two-pin capacitor gives Classes something to count.
+    let prop = |k: &str, v: &str| format!("(property \"{k}\" \"{v}\" (at 0 0 0) (effects (font (size 1.27 1.27))))");
+    let pin = |n: &str, x: i32, r: i32| format!("(pin passive line (at {x} 0 {r}) (length 1) (name \"{n}\" (effects (font (size 1 1)))) (number \"{n}\" (effects (font (size 1 1)))))");
+    let sym = format!("(kicad_symbol_lib (version 20251024) (generator \"t\") (symbol \"CL05\" {} {} {} {} {} (symbol \"CL05_1_1\" {} {})))", prop("Reference", "U"), prop("Value", "CL05"), prop("Footprint", ""), prop("Description", "Capacitor"), prop("MPN", "CL05"), pin("1", -5, 0), pin("2", 5, 180));
+    std::fs::write(env.lib.join("symbols/Capacitors.kicad_sym"), sym).unwrap();
+    for size in SIZES {
+        let mut h = app(size, Tab::Classes);
+        settle(&mut h);
+        assert!(h.query_by_label("Capacitor").is_some() && h.query_by_label("When new parts come in").is_some(), "{}", dump(&h));
+        assert!(h.query_by_label("1 differ").is_some(), "{}", dump(&h));
+        assert!(snap(&mut h, "standards-classes").is_empty());
+
+        let mut h = app(size, Tab::Health);
+        settle(&mut h);
+        assert!(h.query_by_label("Parts checked").is_some() || h.query_by_label("PARTS CHECKED").is_some(), "{}", dump(&h));
+        assert!(snap(&mut h, "standards-health").is_empty());
+
+        let mut h = app(size, Tab::Footprint);
+        click(&mut h, "Generate");
+        assert!(snap(&mut h, "standards-create-footprint").is_empty());
+        click(&mut h, "Symbol");
+        assert!(snap(&mut h, "standards-create-symbol").is_empty());
     }
 }
 
@@ -306,4 +335,56 @@ fn b6_swap_opens_alternatives_filtered_to_jlcpcb() {
     h.run_ok();
     let on = |h: &Gui, label: &str| h.get_by_label(label).accesskit_node().toggled() == Some(eframe::egui::accesskit::Toggled::True);
     assert!(on(&h, "Available at JLCPCB") && on(&h, "Same package"), "{}", dump(&h));
+}
+
+/// A waiting part shows in the table with its includes and status, the Import button counts it, and the rail badge says one is waiting.
+#[test]
+fn i4_waiting_part_table_detail_and_badge() {
+    let env = setup();
+    for size in SIZES {
+        let mut h = app(size, Tab::Import);
+        let part = klm_core::part::Part { mpn: "TPS54331DR".into(), manufacturer: "Texas Instruments".into(), source: "Ultra Librarian ZIP".into(), symbol_file: Some(env.dir.join("src/LM358.kicad_sym")), ..Default::default() };
+        let s = h.state_mut();
+        s.import_tab.handle(crate::tabs::import::Msg::Found(part, env.dir.join("work")), &mut s.cx);
+        settle(&mut h);
+        assert!(h.query_all_by_label("TPS54331DR").next().is_some(), "{}", dump(&h));
+        assert!(h.query_by_label("Import 1 part").is_some() && h.query_by_label("New").is_some(), "{}", dump(&h));
+        assert_eq!(h.state().import_tab.waiting(), 1);
+        let m = snap(&mut h, "import-waiting");
+        assert!(m.is_empty(), "missing glyphs {m:?}");
+    }
+}
+
+/// "From a BOM" opens without a file and says what it does.
+#[test]
+fn i5_bom_import_page() {
+    let _env = setup();
+    for size in SIZES {
+        let mut h = app(size, Tab::BomImport);
+        assert!(h.query_by_label("Build a library from a BOM").is_some(), "{}", dump(&h));
+        let m = snap(&mut h, "bom-import");
+        assert!(m.is_empty(), "missing glyphs {m:?}");
+    }
+}
+
+/// Looks at the three redesigned pages in the light theme, and the BOM with a line selected (snapshots only).
+#[test]
+fn w1_light_theme_and_bom_inspector() {
+    let _env = setup();
+    for size in SIZES {
+        let mut h = bom(size);
+        h.ctx.set_theme(eframe::egui::ThemePreference::Light);
+        h.run_ok();
+        click(&mut h, "LM358");
+        assert!(snap(&mut h, "bom-selected-light").is_empty());
+        let mut h = history(size);
+        h.ctx.set_theme(eframe::egui::ThemePreference::Light);
+        click(&mut h, "import RP2040");
+        assert!(snap(&mut h, "history-light").is_empty());
+        let mut h = app(size, Tab::Library);
+        h.ctx.set_theme(eframe::egui::ThemePreference::Light);
+        h.state().cx.open_settings(crate::tabs::ui_kit::Section::DigiKey);
+        h.run_ok();
+        assert!(snap(&mut h, "settings-light").is_empty());
+    }
 }

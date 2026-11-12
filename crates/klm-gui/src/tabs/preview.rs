@@ -111,7 +111,8 @@ impl PreviewPanel {
         open
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui) {
+    /// Takes what the render and check threads have produced.
+    fn poll(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Image(i, result) => {
@@ -126,6 +127,49 @@ impl PreviewPanel {
         if let Ok(issues) = self.issues_rx.try_recv() {
             self.issues = Some(issues);
         }
+    }
+
+    /// The Library inspector's strip: Symbol / Footprint / 3D in equal labelled boxes, then the check warnings.
+    /// True when a picture was clicked (the caller opens the big preview).
+    pub fn inspector(&mut self, ui: &mut egui::Ui) -> bool {
+        let clicked = self.pictures(ui);
+        self.issues_list(ui);
+        clicked
+    }
+
+    /// Just the three boxes of [`inspector`](Self::inspector).
+    pub fn pictures(&mut self, ui: &mut egui::Ui) -> bool {
+        self.poll();
+        let gap = ui.spacing().item_spacing.x.min(6.0);
+        let w = ((ui.available_width() - 2.0 * gap) / 3.0).floor().max(60.0);
+        let size = Vec2::new(w, 120.0);
+        let mut clicked = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for (i, (kind, label)) in KINDS.iter().enumerate() {
+                clicked |= slot(ui, &self.slots[i], *kind, size, Some(label));
+            }
+        });
+        clicked
+    }
+
+    /// The check warnings, or "Checking…" while they run.
+    pub fn issues_list(&self, ui: &mut egui::Ui) {
+        match &self.issues {
+            None => {
+                ui.weak("Checking…");
+            }
+            Some(issues) => {
+                for issue in issues {
+                    let color = if issue.severity == Severity::Error { ui.visuals().error_fg_color } else { ui.visuals().warn_fg_color };
+                    ui.colored_label(color, &issue.message);
+                }
+            }
+        }
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        self.poll();
         let w = ((ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0).clamp(140.0, THUMB.x).floor();
         let thumb = Vec2::new(w, (w * 0.75).floor());
         ui.horizontal(|ui| {
@@ -147,7 +191,7 @@ impl PreviewPanel {
                     if let Some(name) = picked.filter(|n| self.symbol.as_ref() != Some(n)) {
                         self.pick_symbol(name);
                     }
-                    if slot(ui, &self.slots[i], *kind, thumb) {
+                    if slot(ui, &self.slots[i], *kind, thumb, None) {
                         self.zoomed = if self.zoomed == Some(i) { None } else { Some(i) };
                     }
                 });
@@ -155,35 +199,29 @@ impl PreviewPanel {
         });
         if let Some(i) = self.zoomed {
             ui.add_space(4.0);
-            if slot(ui, &self.slots[i], KINDS[i].0, Vec2::new(ui.available_width().min(ZOOM.x), ZOOM.y)) {
+            if slot(ui, &self.slots[i], KINDS[i].0, Vec2::new(ui.available_width().min(ZOOM.x), ZOOM.y), None) {
                 self.zoomed = None;
             }
         }
-        match &self.issues {
-            None => {
-                ui.weak("Checking…");
-            }
-            Some(issues) => {
-                for issue in issues {
-                    let color = if issue.severity == Severity::Error { ui.visuals().error_fg_color } else { ui.visuals().warn_fg_color };
-                    ui.colored_label(color, &issue.message);
-                }
-            }
-        }
+        self.issues_list(ui);
     }
 }
 
 /// One picture in a frame; true if it was clicked. The symbol is drawn for a light background and the
-/// footprint for a dark one, as in KiCad.
-fn slot(ui: &mut egui::Ui, slot: &Slot, kind: Kind, size: Vec2) -> bool {
+/// footprint for a dark one, as in KiCad. `label` is drawn in the top-left corner.
+fn slot(ui: &mut egui::Ui, slot: &Slot, kind: Kind, size: Vec2, label: Option<&str>) -> bool {
     let bg = match kind {
         Kind::Symbol => Color32::from_rgb(0xF5, 0xF4, 0xEF),
         _ => Color32::from_rgb(0x0B, 0x10, 0x20),
     };
     let mut clicked = false;
-    egui::Frame::new().fill(bg).show(ui, |ui| {
+    egui::Frame::new().fill(bg).corner_radius(4).show(ui, |ui| {
         ui.set_min_size(size);
         ui.set_max_size(size);
+        if let Some(l) = label {
+            let ink = Color32::from_rgb(0x70, 0x76, 0x80);
+            ui.painter().text(ui.max_rect().min + Vec2::new(6.0, 5.0), egui::Align2::LEFT_TOP, l.to_uppercase(), egui::FontId::monospace(10.0), ink);
+        }
         match slot {
             Slot::Loading => {
                 ui.centered_and_justified(|ui| ui.spinner());

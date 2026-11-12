@@ -22,12 +22,12 @@ fn tick(h: &mut Gui, mpn: &str, mods: Modifiers) {
     h.run_ok();
 }
 
-/// "N selected" from the summary line; 0 when it isn't there.
+/// "N selected" from the selection bar; 0 when the bar isn't there.
 fn selected(h: &Gui) -> usize {
-    h.query_by_label_contains(" parts in ").map_or(0, |n| {
+    h.query_by_label_contains(" selected").map_or(0, |n| {
         let a = n.accesskit_node();
         let text = a.label().or_else(|| a.value()).unwrap_or_default().to_string();
-        text.split(" · ").find_map(|p| p.strip_suffix(" selected")?.parse().ok()).unwrap_or(0)
+        text.split(' ').next().and_then(|n| n.parse().ok()).unwrap_or(0)
     })
 }
 
@@ -48,11 +48,10 @@ fn files(dir: &Path) -> BTreeMap<std::path::PathBuf, Vec<u8>> {
     out
 }
 
-/// Clicks the first node labelled `label` whose left edge is within 3 px of the column header `header`.
-fn click_in_column(h: &mut Gui, header: &str, label: &str) {
-    let col = h.get_by_label(header).rect().min.x;
-    h.query_all_by_label(label).find(|n| (n.rect().min.x - col).abs() < 3.0).unwrap_or_else(|| panic!("no {label:?} under {header}")).click();
-    h.run_ok();
+/// Opens the header's More menu and clicks `item`.
+fn more(h: &mut Gui, item: &str) {
+    click(h, "More");
+    click(h, item);
 }
 
 fn log_has(h: &Gui, needle: &str) -> bool {
@@ -101,7 +100,7 @@ fn l3_range_follows_the_order_shown() {
     tick(&mut h, "RC0603FR-0710KL", Modifiers::SHIFT);
     assert_eq!(selected(&h), 2);
     // Filtering drops the ticks on rows that are no longer shown.
-    let filter = h.query_all_by_role(Role::TextInput).next().expect("no filter box");
+    let filter = h.query_all_by_role(Role::TextInput).nth(1).expect("no filter box"); // [0] is the Ctrl+K box
     filter.focus();
     filter.type_text("RC06");
     h.run_ok();
@@ -149,7 +148,7 @@ fn l7_reload_keeps_the_selection_that_still_exists() {
     tick(&mut h, "LM358", Modifiers::NONE);
     tick(&mut h, "RP2040", Modifiers::COMMAND);
     assert_eq!(selected(&h), 2);
-    click(&mut h, "Refresh");
+    more(&mut h, "Refresh");
     settle(&mut h);
     assert_eq!(selected(&h), 2, "a reload must not forget the ticks");
 }
@@ -158,10 +157,10 @@ fn l7_reload_keeps_the_selection_that_still_exists() {
 fn l9_status_cell_click_finds_datasheet() {
     let _env = setup();
     let mut h = library(SIZES[1]);
-    click_in_column(&mut h, "Datasheet", "missing");
+    click(&mut h, "Datasheet: missing");
     assert!(log_has(&h, "Looking for datasheets"), "the finder did not start");
     settle(&mut h);
-    assert!(h.query_all_by_label("Find missing datasheets").count() >= 2, "no result window");
+    assert!(h.query_all_by_label("Find missing datasheets").count() >= 1, "no result window");
     assert_eq!(SOURCE_CALLS.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
 
@@ -172,7 +171,7 @@ fn l10_status_cell_click_attaches_a_model() {
     std::fs::write(&step, "ISO-10303-21;").unwrap();
     *TEST_PICK.lock().unwrap() = Some(step);
     let mut h = library(SIZES[1]);
-    click_in_column(&mut h, "3D model", "missing");
+    click(&mut h, "3D model: missing");
     *TEST_PICK.lock().unwrap() = None;
     assert!(h.query_by_label("Add file").is_some(), "the attach dialog did not open");
     assert!(h.query_by_label_contains("part.step").is_some());
@@ -206,10 +205,10 @@ fn l11_standardise_dry_run_then_apply() {
 fn l13_export_selected() {
     let env = setup();
     let mut h = library(SIZES[1]);
-    assert!(h.get_by_label("Export selected…").accesskit_node().is_disabled(), "export needs ticked parts");
+    assert!(h.query_by_label("Export…").is_none(), "export needs ticked parts");
     tick(&mut h, "LM358", Modifiers::NONE);
     tick(&mut h, "RP2040", Modifiers::COMMAND);
-    click(&mut h, "Export selected…");
+    click(&mut h, "Export…");
     assert!(h.query_by_label("Export 2 part(s) as a ZIP").is_some(), "no review dialog");
     assert!(h.query_by_label("ICs / LM358").is_some() && h.query_by_label("ICs / RP2040").is_some());
     assert!(missing_glyphs(&h).is_empty());
@@ -240,13 +239,13 @@ fn l14_health_report() {
 fn l15_delete_goes_through_a_review() {
     let _env = setup();
     let mut h = library(SIZES[1]);
-    assert!(h.get_by_label("Delete…").accesskit_node().is_disabled(), "nothing to delete yet");
-    click(&mut h, "RP2040");
+    assert!(h.query_by_label("Delete…").is_none(), "nothing to delete yet");
+    tick(&mut h, "RP2040", Modifiers::NONE);
     let root = h.state().cx.global_root().unwrap();
     let before = files(&root.dir);
 
     click(&mut h, "Delete…");
-    assert!(h.query_by_label("Delete 1 part(s)").is_some(), "no confirm dialog");
+    assert!(h.query_by_label("Delete 1 part(s)?").is_some(), "no confirm dialog");
     assert!(h.query_by_label("ICs / RP2040").is_some() && h.query_by_label_contains("Remove symbol RP2040").is_some());
     assert!(missing_glyphs(&h).is_empty());
     snap(&mut h, "library-delete");
@@ -254,7 +253,7 @@ fn l15_delete_goes_through_a_review() {
     assert_eq!(files(&root.dir), before, "Cancel must change nothing");
 
     click(&mut h, "Delete…");
-    click(&mut h, "Delete");
+    click(&mut h, "Delete 1 part(s)");
     settle(&mut h);
     assert!(log_has(&h, "Deleted RP2040"), "nothing logged: {:?}", h.state().cx.log.lines);
     assert!(!root.has_part("ICs", "RP2040") && root.has_part("ICs", "LM358"));
@@ -326,10 +325,18 @@ fn l19_preview_thumbnails_are_at_least_240px() {
     for size in SIZES {
         let mut h = library(size);
         click(&mut h, "RP2040");
+        settle(&mut h);
+        // The inspector shows the three pictures inside the window.
+        let small: Vec<_> = h.query_all_by_role(Role::Image).map(|n| n.rect()).collect();
+        assert!(small.len() >= 2, "{size:?}: no pictures in the inspector");
+        assert!(small.iter().all(|r| r.min.x >= 0.0 && r.max.x <= size.0 && r.max.y <= size.1), "{size:?}: inspector pictures off the window: {small:?}");
+        snap(&mut h, "library-inspector");
+        // Actions → Preview opens the large pictures.
+        click(&mut h, "Actions");
         click(&mut h, "Preview");
         settle(&mut h);
         // The picture keeps its aspect ratio inside a 240x180 frame, so the frames' spacing is what shows their width.
-        let mut images: Vec<_> = h.query_all_by_role(Role::Image).map(|n| n.rect()).collect();
+        let mut images: Vec<_> = h.query_all_by_role(Role::Image).map(|n| n.rect()).filter(|r| r.height() >= 170.0).collect();
         images.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
         assert!(images.len() >= 2, "{size:?}: no thumbnails");
         assert!(images[1].min.x - images[0].min.x >= 240.0, "{size:?}: thumbnail frames narrower than 240 px: {images:?}");

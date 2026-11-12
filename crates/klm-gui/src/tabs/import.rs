@@ -1,7 +1,8 @@
 use super::batch_dialog::{self, BatchDialog, ImportAllSetup, Progress, SetupAction};
 use super::library;
 use super::preview::PreviewPanel;
-use super::ui_kit::Section;
+use super::ui_kit::{self, Col, Level, Section, Sort};
+use crate::{shell, theme};
 use crate::{AppCtx, Msg as AppMsg, new_work_dir};
 use eframe::egui;
 use klm_core::batch::{self, Op, Target};
@@ -10,6 +11,7 @@ use klm_core::matching;
 use klm_core::part::Part;
 use klm_core::sources::combine::{Combined, Kind};
 use klm_core::sources::{foreign, watcher::Watcher, zip_import};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,6 +41,19 @@ struct Pending {
     part: Part,
     /// Extracted files; removed once the part is imported or dismissed.
     work: PathBuf,
+    /// Category the naming rules give it.
+    category: String,
+    /// Libraries that already hold this MPN, as of when it arrived.
+    existing: Vec<String>,
+}
+
+impl Pending {
+    fn new(cx: &AppCtx, id: u64, part: Part, work: PathBuf) -> Self {
+        let category = cx.settings.rules.category_for(&part);
+        let mpn = cx.settings.rules.normalise_mpn(&part.mpn);
+        let existing = cx.roots().iter().filter(|r| r.has_part(&category, &mpn)).map(|r| r.nickname(&category)).collect();
+        Self { id, part, work, category, existing }
+    }
 }
 
 /// Parts waiting to be imported (from the Downloads watcher, "Import ZIP…" or a search), and the import dialog.
@@ -57,6 +72,16 @@ pub struct ImportTab {
     batch_works: Vec<PathBuf>,
     /// Single-symbol files made by "Import library…"; removed once its batch has run.
     foreign_work: Option<PathBuf>,
+    /// The first-run page was skipped.
+    setup_skipped: bool,
+    /// Waiting parts left out of "Import N parts", and the one shown on the right.
+    unchecked: HashSet<u64>,
+    selected: Option<u64>,
+    preview: Option<(u64, PreviewPanel)>,
+    /// The MPN box of "No file?".
+    mpn: String,
+    /// The last imports, read once and again after each import.
+    recent: Option<Vec<String>>,
 }
 
 /// Reads one ZIP on the calling thread and reports what it found.
@@ -199,16 +224,19 @@ impl ImportTab {
             batch: None,
             batch_works: vec![],
             foreign_work: None,
+            setup_skipped: false,
+            unchecked: HashSet::new(),
+            selected: None,
+            preview: None,
+            mpn: String::new(),
+            recent: None,
         };
         tab.start_watcher(cx);
         tab
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
-        if cx.settings.global_root.is_none() {
-            self.setup_screen(ui, cx);
-            ui.separator();
-        }
+        self.take_drops(ui.ctx(), cx);
         self.parts_screen(ui, cx);
     }
 
@@ -227,7 +255,8 @@ impl ImportTab {
                     matching::merge(&mut part, &self.awaiting_cad.remove(i));
                 }
                 cx.log.push(format!("Found {} ({})", part.mpn, part.source));
-                self.pending.push(Pending { id: next_id(), part, work });
+                let p = Pending::new(cx, next_id(), part, work);
+                self.pending.push(p);
             }
             Msg::Gather { part, work, waiting } => {
                 let mut dialog = ImportDialog::new(0, &part, categories(cx), cx.global_root().is_some(), cx.project.is_some(), &cx.settings.rules);
@@ -255,6 +284,7 @@ impl ImportTab {
             }
             Msg::Imported { id, notes } => {
                 cx.busy = false;
+                self.recent = None;
                 cx.log.extend(notes);
                 cx.send(AppMsg::Library(library::Msg::Refresh));
                 if let Some(i) = self.pending.iter().position(|p| p.id == id) {
@@ -343,7 +373,7 @@ impl ImportTab {
                     // A "Get…" part's files live until its import finishes, like a ZIP's.
                     if let Some(g) = dialog.gathered.take() {
                         id = next_id();
-                        self.pending.push(Pending { id, part: part.clone(), work: g.work });
+                        self.pending.push(Pending::new(cx, id, part.clone(), g.work));
                     }
                     self.dialog = None;
                     // New libraries are queued for KiCad's tables when it closes, so this never needs KiCad closed.
@@ -412,92 +442,195 @@ impl ImportTab {
         self.dialog = Some(ImportDialog::new(self.pending[i].id, &self.pending[i].part, categories(cx), cx.global_root().is_some(), cx.project.is_some(), &cx.settings.rules));
     }
 
-    fn setup_screen(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
-        ui.heading("Set up your global library");
-        ui.label("Parts imported to \"Global\" go here, available in every KiCad project.");
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.setup_path).desired_width(480.0));
-            if ui.button("Browse…").clicked() {
-                if let Some(d) = rfd::FileDialog::new().pick_folder() {
-                    self.setup_path = d.display().to_string();
-                }
-            }
+    /// True until the global library exists (or the user chose "Skip for now").
+    pub fn needs_setup(&self, cx: &AppCtx) -> bool {
+        cx.settings.global_root.is_none() && !self.setup_skipped
+    }
+
+    /// Parts waiting to be imported, for the rail badge.
+    pub fn waiting(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// The first-run page: three numbered steps, nothing written until "Create global library".
+    pub fn first_run(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
+        let pal = theme::palette(ui.visuals());
+        let w = ui.available_width().min(760.0);
+        ui.vertical_centered(|ui| {
+            ui.set_max_width(w);
+            ui.add_space(24.0);
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.label(egui::RichText::new("Set up your global library").size(22.0).strong());
+                ui.label(egui::RichText::new("Parts you import go here and are available in every KiCad project. You can change any of this later in Settings.").color(pal.muted));
+                ui.add_space(10.0);
+                step(ui, 1, "Library location", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut self.setup_path).desired_width((w - 150.0).max(160.0)));
+                        if ui.button("Browse…").clicked()
+                            && let Some(d) = rfd::FileDialog::new().pick_folder()
+                        {
+                            self.setup_path = d.display().to_string();
+                        }
+                    });
+                    ui.label(egui::RichText::new("An empty folder, or an existing KLM library to reuse.").size(12.0).color(pal.muted));
+                });
+                step(ui, 2, "KiCad", |ui| match &cx.kicad_config {
+                    Ok(dir) => {
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(8.0), egui::Sense::hover());
+                            ui.painter().circle_filled(r.center(), 4.0, Level::Ok.color(ui.visuals()));
+                            ui.label("KiCad found ·");
+                            ui.label(egui::RichText::new(dir.display().to_string()).monospace().color(pal.muted));
+                        });
+                        ui.label(egui::RichText::new("KLM adds its libraries to KiCad's global library tables.").size(12.0).color(pal.muted));
+                    }
+                    Err(e) => {
+                        ui.colored_label(Level::Warn.color(ui.visuals()), format!("KiCad was not found: {e}"));
+                        if ui.button("Open Settings · KiCad").clicked() {
+                            cx.open_settings(Section::KiCad);
+                        }
+                    }
+                });
+                step(ui, 3, "Where to find parts", |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for s in klm_core::credentials::SOURCES.iter().filter(|s| s.searchable) {
+                            let on = cx.sources.iter().any(|k| k.name() == s.name);
+                            let text = format!("{} · {}", s.name, if on { "on" } else if s.fields.is_empty() { "off" } else { "needs keys" });
+                            if shell::chip(ui, &text, on).clicked() {
+                                cx.open_settings(Section::Sources);
+                            }
+                        }
+                    });
+                    ui.add_space(4.0);
+                    shell::caption(ui, "Folders to watch for vendor ZIPs");
+                    ui.horizontal_wrapped(|ui| {
+                        for d in cx.settings.downloads() {
+                            shell::chip(ui, &d.display().to_string(), true);
+                        }
+                        if ui.button("Add folder…").clicked() {
+                            cx.open_settings(Section::WatchFolders);
+                        }
+                    });
+                });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Nothing is written until you press Create.").size(12.0).color(pal.muted));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let can = cx.kicad_config.is_ok() && !self.setup_path.trim().is_empty();
+                        if ui.add_enabled(can, shell::primary(ui, "Create global library")).clicked() {
+                            self.create_global_library(cx);
+                        }
+                        if ui.add(egui::Button::new("Skip for now").frame(false)).clicked() {
+                            self.setup_skipped = true;
+                        }
+                    });
+                });
+            });
         });
-        ui.add_space(8.0);
-        let can = cx.kicad_config.is_ok() && !self.setup_path.trim().is_empty();
-        if ui.add_enabled(can, egui::Button::new("Create global library")).clicked() {
-            self.create_global_library(cx);
+    }
+
+    /// Files dropped on the window: a ZIP is read like the Downloads watcher's, a folder or library files go to "Import library".
+    fn take_drops(&mut self, ctx: &egui::Context, cx: &mut AppCtx) {
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
+        if dropped.is_empty() {
+            return;
+        }
+        let (zips, rest): (Vec<_>, Vec<_>) = dropped.into_iter().partition(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")));
+        for zip in zips {
+            let (tx, ctx, rules) = (cx.tx.clone(), cx.ctx.clone(), cx.settings.rules.clone());
+            std::thread::spawn(move || {
+                scan_zip(&zip, &tx, Some(&rules));
+                ctx.request_repaint();
+            });
+        }
+        let (csv, rest): (Vec<_>, Vec<_>) = rest.into_iter().partition(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("csv")));
+        if !csv.is_empty() {
+            cx.log.push("A BOM CSV goes on the \"From a BOM\" page: open it there with Open BOM….".into());
+        }
+        if !rest.is_empty() && !cx.busy {
+            self.import_library(rest, cx);
         }
     }
 
     fn parts_screen(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
+        let pal = theme::palette(ui.visuals());
+        let wide = ui.available_width() >= 1000.0;
+        let n = self.pending.len();
         ui.horizontal(|ui| {
-            ui.strong("Parts to import");
-            if ui.button("Import ZIP…").clicked() {
-                if let Some(f) = rfd::FileDialog::new().add_filter("Vendor ZIP", &["zip"]).pick_file() {
-                    let tx = cx.tx.clone();
-                    let ctx = cx.ctx.clone();
-                    let rules = cx.settings.rules.clone();
+            if n > 0 {
+                ui.label(egui::RichText::new(format!("{n} waiting")).color(pal.muted));
+            }
+            if cx.busy {
+                ui.spinner();
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(egui::Button::new("Watch folders…").frame(false)).clicked() {
+                    cx.open_settings(Section::WatchFolders);
+                }
+                let tip = "Eagle/Altium/EasyEDA libraries kicad-cli can convert, or KiCad libraries (.kicad_sym, .pretty, 3D models). Shows a preview first.";
+                if ui.add_enabled(!cx.busy, egui::Button::new("Import files…")).on_hover_text(format!("Import library files (.lbr, .SchLib, .PcbLib, .kicad_sym…). {tip}")).clicked()
+                    && let Some(files) = rfd::FileDialog::new().pick_files()
+                {
+                    self.import_library(files, cx);
+                }
+                if ui.add_enabled(!cx.busy, egui::Button::new("Import folder…")).on_hover_text(format!("Import a folder of libraries. {tip}")).clicked()
+                    && let Some(d) = rfd::FileDialog::new().pick_folder()
+                {
+                    self.import_library(vec![d], cx);
+                }
+                if ui.button("Import ZIP…").clicked()
+                    && let Some(f) = rfd::FileDialog::new().add_filter("Vendor ZIP", &["zip"]).pick_file()
+                {
+                    let (tx, ctx, rules) = (cx.tx.clone(), cx.ctx.clone(), cx.settings.rules.clone());
                     std::thread::spawn(move || {
                         scan_zip(&f, &tx, Some(&rules));
                         ctx.request_repaint();
                     });
                 }
-            }
-            let tip = "Eagle/Altium/EasyEDA libraries kicad-cli can convert, or KiCad libraries (.kicad_sym, .pretty, 3D models). Shows a preview first.";
-            if ui.add_enabled(!cx.busy, egui::Button::new("Import folder…")).on_hover_text(format!("Import a folder of libraries. {tip}")).clicked()
-                && let Some(d) = rfd::FileDialog::new().pick_folder()
-            {
-                self.import_library(vec![d], cx);
-            }
-            if ui.add_enabled(!cx.busy, egui::Button::new("Import files…")).on_hover_text(format!("Import library files (.lbr, .SchLib, .PcbLib, .kicad_sym…). {tip}")).clicked()
-                && let Some(files) = rfd::FileDialog::new().pick_files()
-            {
-                self.import_library(files, cx);
-            }
-            if ui.add_enabled(!cx.busy && !self.pending.is_empty(), egui::Button::new("Import all…")).on_hover_text("Import every part waiting here in one go, after a preview").clicked() {
-                self.batch_works = self.pending.iter().map(|p| p.work.clone()).collect();
-                let parts = self.pending.iter().map(|p| p.part.clone()).collect();
-                self.batch_setup = Some(ImportAllSetup::new(parts, categories(cx), cx.global_root().is_some(), cx.project.is_some()));
-            }
-            if cx.busy {
-                ui.spinner();
-            }
-        });
-        ui.horizontal_wrapped(|ui| {
-            if ui.link("Watch folders…").clicked() {
-                cx.open_settings(Section::WatchFolders);
-            }
-            let dirs = cx.settings.downloads();
-            ui.weak(if dirs.is_empty() {
-                "No watch folder: download a part's KiCad ZIP and use Import ZIP…, or set one.".to_string()
-            } else {
-                format!("Download a part's KiCad ZIP from SnapMagic, Ultra Librarian or SamacSys and it appears here. Watching {}.", dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", "))
             });
         });
         ui.add_space(6.0);
-        if self.pending.is_empty() {
-            ui.label("Nothing waiting.");
-        }
+
         let mut open = None;
         let mut dismiss = None;
-        egui::Grid::new("pending").striped(true).num_columns(4).spacing([16.0, 6.0]).show(ui, |ui| {
-            for (i, p) in self.pending.iter().enumerate() {
-                ui.strong(&p.part.mpn);
-                ui.label(&p.part.manufacturer);
-                ui.weak(&p.part.source);
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(!cx.busy, egui::Button::new("Import…")).clicked() {
-                        open = Some(i);
-                    }
-                    if ui.add_enabled(!cx.busy, egui::Button::new("Dismiss")).clicked() {
-                        dismiss = Some(i);
-                    }
+        let mut batch = false;
+        let mut discard = false;
+        let bar_h = if n > 0 { 52.0 } else { 0.0 };
+        let (full_w, h) = (ui.available_width(), (ui.available_height() - bar_h).max(120.0));
+        let detail_w = if wide && n > 0 { 470.0 } else { 0.0 };
+        ui.horizontal_top(|ui| {
+            let gap = ui.spacing().item_spacing.x;
+            let left = if detail_w > 0.0 { full_w - detail_w - gap } else { full_w };
+            ui.allocate_ui_with_layout(egui::vec2(left, h), egui::Layout::top_down(egui::Align::Min), |ui| self.list_ui(ui, cx, &mut open, &mut dismiss));
+            if detail_w > 0.0 {
+                ui.allocate_ui_with_layout(egui::vec2(detail_w, h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    egui::Frame::new().fill(pal.panel).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
+                        ui.set_min_size(egui::vec2(detail_w - 24.0, h - 24.0));
+                        self.detail_ui(ui, cx, &mut open, &mut dismiss);
+                    });
                 });
-                ui.end_row();
             }
         });
+        if n > 0 {
+            let ready: Vec<usize> = (0..n).filter(|i| !self.unchecked.contains(&self.pending[*i].id)).collect();
+            let conflicts = self.pending.iter().filter(|p| !p.existing.is_empty()).count();
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(format!("{} part{} ready", ready.len(), if ready.len() == 1 { "" } else { "s" })).strong());
+                if conflicts > 0 {
+                    ui.label(egui::RichText::new(format!("· {conflicts} already in your library")).color(pal.muted));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let label = format!("Import {} part{}", ready.len(), if ready.len() == 1 { "" } else { "s" });
+                    if ui.add_enabled(!cx.busy && !ready.is_empty(), shell::primary(ui, &label)).on_hover_text("Import the checked parts in one go, after a preview").clicked() {
+                        batch = true;
+                    }
+                    if ui.add_enabled(!cx.busy, egui::Button::new("Discard all").frame(false)).on_hover_text("Drop every waiting part (the ZIPs stay where they are)").clicked() {
+                        discard = true;
+                    }
+                });
+            });
+        }
         if let Some(i) = open {
             self.open_dialog(i, cx);
         }
@@ -505,7 +638,185 @@ impl ImportTab {
             let p = self.pending.remove(i);
             let _ = std::fs::remove_dir_all(p.work);
         }
+        if discard {
+            for p in self.pending.drain(..) {
+                let _ = std::fs::remove_dir_all(p.work);
+            }
+        }
+        if batch {
+            let ready: Vec<&Pending> = self.pending.iter().filter(|p| !self.unchecked.contains(&p.id)).collect();
+            self.batch_works = ready.iter().map(|p| p.work.clone()).collect();
+            let parts = ready.iter().map(|p| p.part.clone()).collect();
+            self.batch_setup = Some(ImportAllSetup::new(parts, categories(cx), cx.global_root().is_some(), cx.project.is_some()));
+        }
     }
+
+    /// The left column: the drop target, the MPN box and the table of waiting parts.
+    fn list_ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx, open: &mut Option<usize>, dismiss: &mut Option<usize>) {
+        let pal = theme::palette(ui.visuals());
+        let n = self.pending.len();
+        self.drop_zone(ui, cx);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("No file? Search for a part by MPN").color(pal.muted));
+            let r = ui.add(egui::TextEdit::singleline(&mut self.mpn).hint_text("MPN").desired_width(160.0));
+            let go = (ui.button("Search").clicked() || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))) && !self.mpn.trim().is_empty();
+            if go {
+                cx.send(AppMsg::Search(super::search::Msg::Query(self.mpn.trim().to_string())));
+                cx.tab = crate::Tab::Search;
+            }
+        });
+        ui.add_space(8.0);
+        if n == 0 {
+            ui.label(egui::RichText::new("Nothing waiting.").color(pal.muted));
+            self.recent_line(ui, cx);
+            return;
+        }
+        ui.label(egui::RichText::new("Waiting to import").strong().size(15.0));
+        ui.add_space(4.0);
+        let mut sort = Sort { col: usize::MAX, asc: true };
+        let mut cols = vec![Col::new("", 28.0).no_sort(), Col::new("MPN", 120.0).no_sort()];
+        cols.extend([Col::rest("Detected as").no_sort(), Col::new("Includes", 140.0).no_sort(), Col::new("Status", 118.0).no_sort(), Col::new("", 126.0).no_sort()]);
+        let mut toggled = None;
+        let mut picked = None;
+        ui_kit::table(ui, "pending", &cols, &mut sort, n, |i, row| {
+            let p = &self.pending[i];
+            row.set_selected(self.selected == Some(p.id));
+            row.col(|ui| {
+                let mut on = !self.unchecked.contains(&p.id);
+                if ui.checkbox(&mut on, "").on_hover_text("Include in \"Import N parts\"").changed() {
+                    toggled = Some((p.id, on));
+                }
+            });
+            row.col(|ui| drop(ui.label(egui::RichText::new(&p.part.mpn).monospace().strong())));
+            row.col(|ui| drop(ui.label(&p.part.source)));
+            row.col(|ui| { ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 3.0;
+                let have = [("SYM", p.part.symbol_file.is_some()), ("FP", !p.part.footprint_files.is_empty()), ("3D", !p.part.model_files.is_empty()), ("DS", p.part.datasheet_file.is_some() || !p.part.datasheet_url.is_empty())];
+                for (t, ok) in have {
+                    ui_kit::badge(ui, t, if ok { Level::Ok } else { Level::Warn });
+                }
+            }); });
+            row.col(|ui| {
+                if p.existing.is_empty() {
+                    ui_kit::badge(ui, "New", Level::Ok);
+                } else {
+                    ui_kit::badge(ui, "Already in library", Level::Warn).on_hover_text(format!("In {}", p.existing.join(" and ")));
+                }
+            });
+            row.col(|ui| { ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if ui.add_enabled(!cx.busy, egui::Button::new("Import…").small()).clicked() {
+                    *open = Some(i);
+                }
+                if ui.add_enabled(!cx.busy, egui::Button::new("Dismiss").small()).clicked() {
+                    *dismiss = Some(i);
+                }
+            }); });
+            if row.response().clicked() {
+                picked = Some(p.id);
+            }
+        });
+        if let Some((id, on)) = toggled {
+            if on {
+                self.unchecked.remove(&id);
+            } else {
+                self.unchecked.insert(id);
+            }
+        }
+        if picked.is_some() {
+            self.selected = picked;
+        }
+    }
+
+    /// "Drop anything here": the dashed target, which also lights up while files are dragged over the window.
+    fn drop_zone(&mut self, ui: &mut egui::Ui, cx: &AppCtx) {
+        let pal = theme::palette(ui.visuals());
+        let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
+        let dirs = cx.settings.downloads();
+        let inner = egui::Frame::new().fill(if hovering { pal.accent.gamma_multiply(0.1) } else { pal.bg }).inner_margin(egui::Margin::symmetric(16, 14)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("Drop anything here").strong().size(15.0));
+                ui.label(egui::RichText::new("Vendor ZIPs (SnapMagic, Ultra Librarian, SamacSys), KiCad libraries and 3D models, or Altium/Eagle libraries. KLM works out what each one is.").color(pal.muted));
+                let watched = match dirs.as_slice() {
+                    [] => "No watch folder set: download a part's KiCad ZIP and use Import ZIP….".to_string(),
+                    d => format!("New ZIPs in {} appear here on their own.", d.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")),
+                };
+                ui.label(egui::RichText::new(watched).monospace().size(11.5).color(pal.muted));
+            });
+        });
+        let r = inner.response.rect;
+        let c = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+        let stroke = egui::Stroke::new(1.0, if hovering { pal.accent } else { pal.line });
+        ui.painter().extend(egui::Shape::dashed_line(&c, stroke, 6.0, 4.0));
+        ui.add_space(8.0);
+    }
+
+    /// The selected waiting part: previews of its files and what it would replace.
+    fn detail_ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx, open: &mut Option<usize>, dismiss: &mut Option<usize>) {
+        let Some(i) = self.selected.and_then(|id| self.pending.iter().position(|p| p.id == id)).or((!self.pending.is_empty()).then_some(0)) else {
+            return;
+        };
+        let pal = theme::palette(ui.visuals());
+        let p = &self.pending[i];
+        if self.preview.as_ref().is_none_or(|(id, _)| *id != p.id) {
+            self.preview = Some((p.id, PreviewPanel::for_part(&cx.ctx, &p.part)));
+        }
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            ui.label(egui::RichText::new(&p.part.mpn).monospace().strong().size(16.0));
+            ui.label(egui::RichText::new(format!("{} · {} (guessed from your naming rules)", if p.part.manufacturer.is_empty() { "unknown maker" } else { &p.part.manufacturer }, p.category)).color(pal.muted));
+            ui.add_space(8.0);
+            if let Some((_, panel)) = &mut self.preview {
+                panel.show(ui);
+            }
+            if !p.existing.is_empty() {
+                ui.add_space(8.0);
+                shell::caption(ui, "Already in your library");
+                ui.colored_label(Level::Warn.color(ui.visuals()), format!("{} is already in {}. Import… asks before overwriting it.", p.part.mpn, p.existing.join(" and ")));
+            }
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!cx.busy, shell::primary(ui, "Import…")).clicked() {
+                    *open = Some(i);
+                }
+                if ui.add_enabled(!cx.busy, egui::Button::new("Dismiss")).clicked() {
+                    *dismiss = Some(i);
+                }
+            });
+        });
+    }
+
+    /// "Imported earlier": the last few imports with a link to the Library.
+    fn recent_line(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
+        let recent = self.recent.get_or_insert_with(|| klm_core::store::Store::default_path().and_then(|p| klm_core::store::Store::open(&p).ok()).and_then(|s| s.recent_imports(6).ok()).unwrap_or_default());
+        if recent.is_empty() {
+            return;
+        }
+        ui.add_space(10.0);
+        shell::caption(ui, "Imported earlier");
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(recent.join(" · ")).monospace().color(theme::palette(ui.visuals()).muted));
+            if ui.link("Open Library").clicked() {
+                cx.tab = crate::Tab::Library;
+            }
+        });
+    }
+}
+
+/// One numbered card of the first-run page.
+fn step(ui: &mut egui::Ui, n: usize, title: &str, body: impl FnOnce(&mut egui::Ui)) {
+    let pal = theme::palette(ui.visuals());
+    shell::card(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal_top(|ui| {
+            ui.label(egui::RichText::new(format!(" {n} ")).monospace().size(11.0).color(pal.accent).background_color(pal.accent.gamma_multiply(0.16)));
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new(title).strong().size(14.0));
+                body(ui);
+            });
+        });
+    });
+    ui.add_space(8.0);
 }
 
 enum DialogAction {

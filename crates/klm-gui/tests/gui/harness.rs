@@ -105,6 +105,7 @@ pub fn app<'a>(size: (f32, f32), tab: Tab) -> Gui<'a> {
 pub fn app_checked<'a>(size: (f32, f32), tab: Tab, a11y: bool) -> Gui<'a> {
     let mut h = Harness::builder().with_size(eframe::egui::vec2(size.0, size.1)).allow_missing_glyphs().with_accessibility_check(a11y).wgpu().build_eframe(|cc| App::new(&cc.egui_ctx, None));
     h.state_mut().cx.tab = tab;
+    h.state_mut().log_open = true; // the tests read the log; the real app starts with it collapsed into the status bar
     h.run_ok();
     h
 }

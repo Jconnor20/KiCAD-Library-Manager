@@ -5,7 +5,7 @@ use crate::library::property;
 use crate::rules::Rules;
 use crate::sexpr::Sexpr;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Class {
     Resistor,
     Capacitor,
@@ -18,6 +18,8 @@ pub enum Class {
 }
 
 impl Class {
+    pub const ALL: [Class; 8] = [Class::Resistor, Class::Capacitor, Class::Inductor, Class::Diode, Class::Led, Class::Npn, Class::Pnp, Class::Ic];
+
     /// Reference designator prefix.
     pub fn prefix(self) -> &'static str {
         match self {

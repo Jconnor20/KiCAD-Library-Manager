@@ -1,5 +1,6 @@
-//! One function per Settings page; each edits the popup's copy of `Settings`.
+//! One function per Settings page; each edits the page's copy of `Settings`.
 
+use super::super::page_kit;
 use super::super::ui_kit::{Level, Section, Status, badge, status_cell};
 use super::super::{part_info, standards};
 use super::{Cmd, KICAD_CLI, SettingsTab};
@@ -20,17 +21,17 @@ pub fn title(s: Section) -> &'static str {
         Section::Mouser => "Sources › Mouser",
         Section::Nexar => "Sources › Nexar",
         Section::SnapMagic => "Sources › SnapMagic",
-        Section::Search => "Search",
-        Section::Import => "Import",
+        Section::Search => "Workflow › Search",
+        Section::Import => "Workflow › Import",
         Section::Standards | Section::Symbols => "Standards › Symbols",
         Section::Footprints => "Standards › Footprints",
         Section::PartInfo => "Standards › Part information",
-        Section::Bom => "BOM",
-        Section::History => "History",
+        Section::Bom => "Workflow › BOM",
+        Section::History => "Workflow › History",
     }
 }
 
-fn source_info(s: Section) -> Option<&'static SourceInfo> {
+pub(super) fn source_info(s: Section) -> Option<&'static SourceInfo> {
     let name = match s {
         Section::Lcsc | Section::Sources => "LCSC",
         Section::DigiKey => "DigiKey",
@@ -67,16 +68,11 @@ pub fn restore(d: &mut Settings, s: Section) {
     }
 }
 
-/// A titled group of options filling the row.
+/// A titled card of options filling the row.
 fn group<R>(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    egui::Frame::group(ui.style())
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.strong(title);
-            ui.add_space(2.0);
-            add(ui)
-        })
-        .inner
+    let r = page_kit::card(ui, Some(title), add);
+    ui.add_space(8.0);
+    r
 }
 
 /// Two groups side by side when there is room, else one under the other.
@@ -96,7 +92,8 @@ impl SettingsTab {
     pub(super) fn page(&mut self, ui: &mut Ui, d: &mut Settings, live: &Settings) -> Option<Cmd> {
         let mut cmd = None;
         match self.section {
-            Section::General | Section::Libraries => group(ui, "Global library", |ui| {
+            Section::General | Section::Libraries => {
+                group(ui, "Global library", |ui| {
                 ui.label(live.global_root.as_ref().map_or("Not set up yet: import a part to choose one.".into(), |g| g.display().to_string()));
                 ui.weak("Where KLM keeps the parts that every project shares.");
                 if live.global_root.is_some() && ui.button("Change location…").on_hover_text("Move the library, or point KLM at where you moved it").clicked() {
@@ -104,7 +101,20 @@ impl SettingsTab {
                         cmd = Some(Cmd::MoveLibrary(dir));
                     }
                 }
-            }),
+                });
+                group(ui, "Appearance", |ui| {
+                    let (mut pref, before) = (ui.ctx().options(|o| o.theme_preference), ui.ctx().options(|o| o.theme_preference));
+                    ui.horizontal(|ui| {
+                        for (p, label) in [(egui::ThemePreference::System, "System"), (egui::ThemePreference::Light, "Light"), (egui::ThemePreference::Dark, "Dark")] {
+                            ui.selectable_value(&mut pref, p, label);
+                        }
+                    });
+                    ui.weak("Dark is Bench, light is Datasheet; System follows the OS. Applied at once, not part of Save.");
+                    if pref != before {
+                        ui.ctx().set_theme(pref);
+                    }
+                });
+            }
             Section::WatchFolders => group(ui, "Folders watched for vendor ZIPs", |ui| {
                 ui.weak("KLM watches these for downloads from SnapMagic, Ultra Librarian and SamacSys. With none added, the OS Downloads folder is used.");
                 let mut remove = None;
@@ -351,7 +361,7 @@ impl SettingsTab {
                 ui.weak(format!("{} needs no keys.", info.name));
                 return;
             }
-            ui.weak("Kept in Windows Credential Manager, not in the settings file. Saved at once, whether or not you press OK.");
+            ui.weak("Kept in Windows Credential Manager, not in the settings file. Saved at once, whether or not you press Save.");
             for (key, label) in info.fields {
                 let id = (info.name, *key);
                 ui.horizontal(|ui| {

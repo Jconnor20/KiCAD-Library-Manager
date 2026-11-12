@@ -1,4 +1,4 @@
-//! W7.1: the Settings popup. docs/ui-review/W7.1.md has the plan (S1-S17).
+//! W7.1: the Settings page (it was a popup until the wireframe redesign). docs/ui-review/W7.1.md has the plan (S1-S17).
 
 use super::harness::*;
 use crate::tabs::settings::Msg as SettingsMsg;
@@ -42,21 +42,26 @@ fn has(h: &Gui, text: &str) -> bool {
     h.query_all_by_label(text).next().is_some() || h.query_all_by_label_contains(text).next().is_some()
 }
 
-fn window(h: &Gui) -> egui::Rect {
-    h.get_by_role_and_label(Role::Window, "Settings").rect()
+/// Leaves the page (the shell's other tabs), which throws away edits Save didn't take.
+fn close(h: &mut Gui) {
+    h.state_mut().cx.tab = Tab::Library;
+    h.run_ok();
 }
 
-/// The text boxes of the popup, top to bottom: the search box first.
+fn on_settings(h: &Gui) -> bool {
+    h.state().cx.tab == Tab::Settings
+}
+
+/// The text boxes of the page, top to bottom: the tree's search box first (the top bar's omnibox is left out).
 fn boxes<'a>(h: &'a Gui) -> Vec<egui_kittest::Node<'a>> {
-    let w = window(h);
-    let mut v: Vec<_> = h.get_all_by_role(Role::TextInput).filter(|n| w.contains_rect(n.rect())).collect();
+    let mut v: Vec<_> = h.get_all_by_role(Role::TextInput).filter(|n| n.rect().min.y > 50.0).collect();
     v.sort_by(|a, b| a.rect().min.y.total_cmp(&b.rect().min.y));
     v
 }
 
 /// Types into the first page text box (right of the tree), after the search box.
 fn type_in_page(h: &mut Gui, text: &str) {
-    let b = boxes(h).into_iter().find(|n| n.rect().min.x > 270.0).expect("a page text box");
+    let b = boxes(h).into_iter().find(|n| n.rect().min.x > 300.0).expect("a page text box");
     b.click();
     b.type_text(text);
     h.run_ok();
@@ -88,15 +93,15 @@ fn edit_everything(h: &mut Gui) {
 }
 
 #[test]
-fn s1_popup_size_and_first_page() {
+fn s1_page_and_first_page() {
     let _env = setup();
     for size in SIZES {
         let mut h = app(size, Tab::Library);
-        assert!(h.query_by_role_and_label(Role::Window, "Settings").is_none());
+        assert!(!on_settings(&h));
         open(&mut h);
-        let w = window(&h);
-        assert!((w.width() / size.0 - 0.8).abs() < 0.03 && (w.height() / size.1 - 0.8).abs() < 0.03, "popup is {:?} in {size:?}", w.size());
+        assert!(on_settings(&h), "the Settings item did not open the page");
         assert!(has(&h, "General › Libraries"), "does not open on Libraries");
+        assert!(has(&h, "Appearance"), "no theme choice on General");
         snap(&mut h, "settings-open");
     }
 }
@@ -124,7 +129,7 @@ fn s3_every_page_opens_from_search() {
         search(&mut h, label);
         tree(&mut h, label);
         assert!(has(&h, marker), "{label}: no {marker:?} after searching for it");
-        click(&mut h, "Cancel");
+        close(&mut h);
     }
 }
 
@@ -138,14 +143,14 @@ fn s4_search_filters_the_tree() {
     for gone in ["DigiKey", "Libraries", "Symbols", "Nexar"] {
         assert!(h.query_by_role_and_label(Role::Button, gone).is_none(), "{gone} is still in the tree");
     }
-    assert!(has(&h, "Sources"), "the group header of the match is kept");
+    assert!(has(&h, "SOURCES"), "the group header of the match is kept");
     snap(&mut h, "search-filter");
     // A group's name finds all its pages.
-    click(&mut h, "Cancel");
+    close(&mut h);
     open(&mut h);
     search(&mut h, "standards");
     assert!(h.query_by_role_and_label(Role::Button, "Symbols").is_some() && h.query_by_role_and_label(Role::Button, "Footprints").is_some());
-    click(&mut h, "Cancel");
+    close(&mut h);
     open(&mut h);
     search(&mut h, "xyzzy");
     assert!(has(&h, "No page matches"));
@@ -153,57 +158,57 @@ fn s4_search_filters_the_tree() {
 }
 
 #[test]
-fn s5_cancel_leaves_settings_json_identical() {
+fn s5_discard_leaves_settings_json_identical() {
     let env = setup();
     let before = settings_file(&env);
     let mut h = app(SIZES[1], Tab::Library);
     let live = format!("{:?}", h.state().cx.settings);
     open(&mut h);
     edit_everything(&mut h);
-    click(&mut h, "Cancel");
-    assert!(h.query_by_role_and_label(Role::Window, "Settings").is_none());
+    assert!(has(&h, "unsaved changes"));
+    click(&mut h, "Discard");
+    assert!(on_settings(&h), "Discard leaves the page");
+    assert!(!has(&h, "unsaved changes"));
     assert_eq!(settings_file(&env), before, "settings.json changed");
     assert_eq!(format!("{:?}", h.state().cx.settings), live, "the live settings changed");
-    // Reopening shows the saved values, not the abandoned edits.
-    open(&mut h);
+    // The page shows the saved values, not the abandoned edits.
     tree(&mut h, "BOM");
     assert!(boxes(&h).iter().all(|b| b.value().unwrap_or_default() != "ZZ"));
 }
 
 #[test]
-fn s6_close_button_and_escape_discard() {
+fn s6_leaving_the_page_discards() {
     let env = setup();
     let before = settings_file(&env);
     let mut h = app(SIZES[1], Tab::Library);
     open(&mut h);
     edit_everything(&mut h);
-    h.get_by_role_and_label(Role::Button, "Close window").click();
+    // The rail's own Settings item while on the page keeps the edits.
+    click(&mut h, "Settings…");
+    assert!(has(&h, "unsaved changes"), "the rail item dropped the edits");
+    h.state_mut().cx.tab = Tab::History;
     h.run_ok();
-    assert!(h.query_by_role_and_label(Role::Window, "Settings").is_none(), "✕ did not close");
+    assert!(!on_settings(&h));
     assert_eq!(settings_file(&env), before);
     open(&mut h);
-    edit_everything(&mut h);
-    h.key_press(egui::Key::Escape);
-    h.run_ok();
-    assert!(h.query_by_role_and_label(Role::Window, "Settings").is_none(), "Esc did not close");
-    assert_eq!(settings_file(&env), before);
+    assert!(!has(&h, "unsaved changes"), "the abandoned edits came back");
 }
 
 #[test]
-fn s7_apply_and_ok_save() {
+fn s7_save_keeps_the_page_open() {
     let env = setup();
     let mut h = app(SIZES[1], Tab::Library);
     open(&mut h);
     tree(&mut h, "BOM");
     type_in_page(&mut h, "DE");
-    click(&mut h, "Apply");
-    assert!(h.query_by_role_and_label(Role::Window, "Settings").is_some(), "Apply closed the popup");
+    click(&mut h, "Save");
+    assert!(on_settings(&h), "Save left the page");
+    assert!(!has(&h, "unsaved changes"));
     assert_eq!(saved(&env)["shipping_region"], "DE");
     assert_eq!(h.state().cx.settings.shipping_region, "DE");
     tree(&mut h, "Import");
     click(&mut h, "Add category rule");
-    click(&mut h, "OK");
-    assert!(h.query_by_role_and_label(Role::Window, "Settings").is_none(), "OK did not close");
+    click(&mut h, "Save");
     assert_eq!(saved(&env)["rules"]["categories"].as_array().unwrap().len(), 1);
     assert_eq!(saved(&env)["shipping_region"], "DE");
 }
@@ -235,8 +240,9 @@ fn s9_keys_are_saved_at_once() {
     h.run_ok();
     click(&mut h, "Save keys");
     assert_eq!(klm_core::credentials::get("Mouser", "api_key").as_deref(), Some("test-key-123"));
-    click(&mut h, "Cancel");
-    assert!(klm_core::credentials::get("Mouser", "api_key").is_some(), "Cancel took the key back");
+    click(&mut h, "Discard");
+    assert!(klm_core::credentials::get("Mouser", "api_key").is_some(), "Discard took the key back");
+    close(&mut h);
     open(&mut h);
     tree(&mut h, "Mouser");
     assert!(h.get_by_role(Role::PasswordInput).value().unwrap_or_default().is_empty(), "a stored key was read back into the box");
@@ -273,7 +279,7 @@ fn s11_restore_defaults_is_per_page() {
     type_in_page(&mut h, "FR");
     tree(&mut h, "History");
     click(&mut h, "Restore defaults");
-    click(&mut h, "Apply");
+    click(&mut h, "Save");
     let s = saved(&env);
     assert_eq!(s["history"]["keep_minors"], 10);
     assert_eq!(s["history"]["auto_version"], "Weekly");
@@ -290,7 +296,7 @@ fn s12_open_settings_at_a_section() {
         h.state().cx.open_settings(section);
         h.run_ok();
         assert!(has(&h, marker), "{section:?}: no {marker:?}");
-        click(&mut h, "Cancel");
+        close(&mut h);
     }
 }
 
@@ -302,11 +308,10 @@ fn s13_pages_fit_and_have_no_tofu() {
         open(&mut h);
         for (label, _, _) in PAGES {
             tree(&mut h, label);
-            let w = window(&h);
-            assert!(w.min.x >= 0.0 && w.min.y >= 0.0 && w.max.x <= size.0 && w.max.y <= size.1, "{label}: popup {w:?} outside {size:?}");
-            for b in ["Restore defaults", "OK", "Cancel", "Apply"] {
+            let w = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size.0, size.1));
+            for b in ["Restore defaults", "Save", "Discard"] {
                 let r = h.get_by_role_and_label(Role::Button, b).rect();
-                assert!(w.contains_rect(r), "{label}: {b} at {r:?} is outside the popup {w:?}");
+                assert!(w.contains_rect(r), "{label}: {b} at {r:?} is outside the window {w:?}");
             }
             let missing = missing_glyphs(&h);
             assert!(missing.is_empty(), "{label} at {size:?} draws {missing:?} as boxes");
@@ -321,7 +326,7 @@ fn s14_history_page() {
     h.state_mut().cx.settings.history.keep_minors = 33;
     open(&mut h);
     tree(&mut h, "History");
-    click(&mut h, "Apply");
+    click(&mut h, "Save");
     assert_eq!(saved(&env)["history"]["keep_minors"], 33);
 }
 
@@ -348,7 +353,7 @@ fn s16_apply_keeps_a_moved_library() {
     h.state_mut().cx.settings.global_root = Some(moved.clone());
     tree(&mut h, "BOM");
     type_in_page(&mut h, "DE");
-    click(&mut h, "OK");
+    click(&mut h, "Save");
     assert_eq!(h.state().cx.settings.global_root.as_ref(), Some(&moved));
     assert_eq!(saved(&env)["global_root"], serde_json::json!(moved));
 }
@@ -379,12 +384,11 @@ fn s17_part_information_edits_save_with_the_profile() {
     boxes(&h).into_iter().find(|n| n.value().is_some_and(|v| v.starts_with("Resistor {Resistance}"))).unwrap().type_text(" {New field}");
     h.run_ok();
     assert!(has(&h, "Preview: Resistor 10kΩ 5% 100mW Temp coefficient 0603 New field"));
-    click(&mut h, "OK");
+    click(&mut h, "Save");
     let p = klm_core::standardise::profile::load(klm_core::standardise::profile::BUILT_IN).unwrap();
     let r = &p.classes["Resistor"];
     assert!(r.fields.iter().any(|f| f.name == "New field") && r.description.ends_with("{New field}"));
     assert!(!p.classes.contains_key("Capacitor"), "only the edited class is customised");
-    open(&mut h);
     tree(&mut h, "Part information");
     click(&mut h, "Restore defaults");
     assert!(has(&h, "Built-in default"));

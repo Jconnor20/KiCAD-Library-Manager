@@ -113,3 +113,71 @@ pub fn reset_footprints(rules: &mut Rules) {
     let d = Rules::default();
     (rules.silk_width, rules.fab_width, rules.courtyard_width, rules.footprint_ref_value, rules.footprint_origin, rules.pin1_marker) = (d.silk_width, d.fab_width, d.courtyard_width, d.footprint_ref_value, d.footprint_origin, d.pin1_marker);
 }
+
+/// A row of exclusive choices drawn as one segmented control. `items` are (label, enabled, why not); returns the index clicked.
+pub fn seg(ui: &mut egui::Ui, on: usize, items: &[(&str, bool, &str)]) -> Option<usize> {
+    let mut hit = None;
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.horizontal(|ui| {
+            for (i, (label, enabled, why)) in items.iter().enumerate() {
+                let r = ui.add_enabled(*enabled, egui::Button::new(*label).selected(i == on));
+                if r.clicked() {
+                    hit = Some(i);
+                }
+                if !enabled {
+                    r.on_disabled_hover_text(*why);
+                }
+            }
+        });
+    });
+    hit
+}
+
+/// "Profile: Standard ▾  Import…  Export…", right-aligned in a page header: the active profile from Settings, switched live.
+pub fn profile_bar(ui: &mut egui::Ui, cx: &mut crate::AppCtx) {
+    use crate::tabs::ui_kit::Level;
+    let current = cx.settings.profile_name().to_string();
+    let mut adopt: Option<Profile> = None;
+    let mut err = None;
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if ui.button("Export…").on_hover_text("Save this profile as a file to share").clicked() {
+            if let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).set_file_name(format!("{current}.json")).save_file() {
+                let p = Profile { name: current.clone(), ..cx.settings.standard.clone() };
+                err = profile::export(&p, &f).err();
+            }
+        }
+        if ui.button("Import…").on_hover_text("Add a profile file someone shared").clicked() {
+            if let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).pick_file() {
+                match profile::import(&f) {
+                    Ok(p) => adopt = Some(p),
+                    Err(e) => err = Some(e),
+                }
+            }
+        }
+        egui::ComboBox::from_id_salt("page_profile").selected_text(format!("Profile: {current}")).show_ui(ui, |ui| {
+            for name in profile::list() {
+                if ui.selectable_label(name == current, &name).clicked() && name != current {
+                    match profile::load(&name) {
+                        Ok(p) => adopt = Some(p),
+                        Err(e) => err = Some(e),
+                    }
+                }
+            }
+        });
+    });
+    if let Some(p) = adopt {
+        (cx.settings.profile, cx.settings.standard) = (p.name.clone(), p);
+        cx.save_settings();
+        klm_core::symbols::configure(&cx.settings);
+    }
+    if let Some(e) = err {
+        cx.log(Level::Error, format!("{e:#}"));
+    }
+}
+
+/// What a page's scan depends on: the libraries and the profile and rules they are held to. A change means scan again.
+pub fn state_key(cx: &crate::AppCtx) -> String {
+    let dirs: Vec<_> = cx.roots().iter().map(|r| r.dir.display().to_string()).collect();
+    format!("{dirs:?}{:?}{:?}", cx.settings.standard, cx.settings.rules)
+}

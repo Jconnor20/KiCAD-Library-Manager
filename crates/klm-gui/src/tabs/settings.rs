@@ -1,12 +1,14 @@
-//! The Settings popup: a search box over a tree of pages on the left, the chosen page on the right.
-//! It edits a copy of `Settings` that Apply or OK saves and Cancel or ✕ throws away. API keys are the one
-//! exception: "Save keys" writes to the credential store at once.
+//! The Settings page: a search box over a tree of pages on the left, the chosen page on the right.
+//! It edits a copy of `Settings` that Save writes and Discard (or leaving the page) throws away. API keys are the one
+//! exception: "Save keys" writes to the credential store at once, and the theme choice is applied at once too.
 
 mod pages;
 
+use super::page_kit;
 use super::ui_kit::{Level, Section};
 use super::{import, search};
-use crate::{AppCtx, Msg as AppMsg};
+use crate::theme;
+use crate::{AppCtx, Msg as AppMsg, Tab};
 use eframe::egui;
 use klm_core::credentials::{self, SOURCES};
 use klm_core::kicad_env;
@@ -20,7 +22,7 @@ pub enum Msg {
     Tested(&'static str, Result<String, String>),
 }
 
-/// Something a page asks the popup to do that needs the app.
+/// Something a page asks the page to do that needs the app.
 enum Cmd {
     /// Stored credentials changed: rebuild the sources from them.
     Rebuild,
@@ -31,9 +33,8 @@ enum Cmd {
 
 enum Footer {
     None,
-    Ok,
-    Apply,
-    Cancel,
+    Save,
+    Discard,
 }
 
 const KICAD_CLI: &str = "kicad-cli";
@@ -41,11 +42,8 @@ const KICAD_CLI: &str = "kicad-cli";
 const TREE: &[(&str, &[(Section, &str)])] = &[
     ("General", &[(Section::Libraries, "Libraries"), (Section::WatchFolders, "Watch folders"), (Section::KiCad, "KiCad")]),
     ("Sources", &[(Section::Lcsc, "LCSC"), (Section::DigiKey, "DigiKey"), (Section::Mouser, "Mouser"), (Section::Nexar, "Nexar"), (Section::SnapMagic, "SnapMagic")]),
-    ("Search", &[(Section::Search, "Search")]),
-    ("Import", &[(Section::Import, "Import")]),
+    ("Workflow", &[(Section::Search, "Search"), (Section::Import, "Import"), (Section::Bom, "BOM"), (Section::History, "History")]),
     ("Standards", &[(Section::Symbols, "Symbols"), (Section::Footprints, "Footprints"), (Section::PartInfo, "Part information")]),
-    ("BOM", &[(Section::Bom, "BOM")]),
-    ("History", &[(Section::History, "History")]),
 ];
 
 /// The page a section opens: a group opens on its first page.
@@ -58,10 +56,10 @@ fn page_of(s: Section) -> Section {
     }
 }
 
-/// The Settings popup. Credential entry boxes only ever hold what the user is typing; stored secrets are never read back into the UI.
+/// The Settings page. Credential entry boxes only ever hold what the user is typing; stored secrets are never read back into the UI.
 #[derive(Default)]
 pub struct SettingsTab {
-    /// The copy being edited; `None` while the popup is closed.
+    /// The copy being edited; `None` while the page isn't showing.
     draft: Option<Settings>,
     section: Section,
     /// The class shown on the Part information page (an index into `part_info::CLASSES`).
@@ -81,7 +79,12 @@ impl SettingsTab {
         Self::default()
     }
 
+    /// Starts editing a copy of `live` at `section`. Asking for the General page while already editing (the rail's
+    /// Settings item) keeps what is on screen.
     pub fn open(&mut self, section: Section, live: &Settings) {
+        if self.draft.is_some() && section == Section::General {
+            return;
+        }
         self.draft = Some(live.clone());
         self.section = page_of(section);
         self.query.clear();
@@ -101,39 +104,30 @@ impl SettingsTab {
         self.results.insert(what, result);
     }
 
-    /// The popup itself; shown whatever tab is selected.
+    /// Called every frame whatever tab is showing: leaving the page drops the edits Save didn't take.
     pub fn dialogs(&mut self, cx: &mut AppCtx) {
-        let Some(mut draft) = self.draft.take() else { return };
-        let ctx = cx.ctx.clone();
-        let screen = ctx.content_rect();
-        egui::Area::new(egui::Id::unique("settings_backdrop")).order(egui::Order::Middle).fixed_pos(screen.min).show(&ctx, |ui| {
-            let (rect, _) = ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
-            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_black_alpha(110));
-        });
-        let escape = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-        let mut open = true;
-        let (mut footer, mut cmd) = (Footer::None, None);
-        egui::Window::new("Settings")
-            .order(egui::Order::Foreground)
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(screen.center())
-            .default_size(screen.size() * 0.8)
-            .min_size(egui::vec2(520.0, 320.0))
-            .max_size(screen.size())
-            .show(&ctx, |ui| (footer, cmd) = self.contents(ui, &mut draft, &cx.settings));
+        if cx.tab != Tab::Settings && self.draft.is_some() {
+            self.discard(cx);
+        }
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
+        if self.draft.is_none() {
+            self.open(Section::General, &cx.settings);
+        }
+        let mut draft = self.draft.take().expect("opened above");
+        let (footer, cmd) = self.contents(ui, &mut draft, &cx.settings);
         match footer {
-            Footer::Ok => {
-                self.apply(draft, cx);
-            }
-            Footer::Apply => {
+            Footer::Save => {
                 self.apply(draft, cx);
                 self.draft = Some(cx.settings.clone());
             }
-            Footer::Cancel => self.discard(cx),
-            Footer::None if !open || escape => self.discard(cx),
+            Footer::Discard => {
+                // A kicad-cli test may have tried the draft's path.
+                kicad_env::set_kicad_cli_override(cx.settings.kicad_cli.clone());
+                self.draft = Some(cx.settings.clone());
+                self.inputs.clear();
+            }
             Footer::None => self.draft = Some(draft),
         }
         match cmd {
@@ -155,7 +149,7 @@ impl SettingsTab {
     }
 
     /// Makes `draft` the live settings and saves it. The library's location and the open project are changed
-    /// elsewhere while the popup is open, so those two keep their live values.
+    /// elsewhere while the page is open, so those two keep their live values.
     fn apply(&mut self, mut draft: Settings, cx: &mut AppCtx) {
         draft.global_root = cx.settings.global_root.clone();
         draft.last_project = cx.settings.last_project.clone();
@@ -202,35 +196,63 @@ impl SettingsTab {
     }
 
     fn contents(&mut self, ui: &mut egui::Ui, d: &mut Settings, live: &Settings) -> (Footer, Option<Cmd>) {
+        let pal = theme::palette(ui.visuals());
         let mut footer = Footer::None;
-        egui::Panel::bottom("settings_footer").show(ui, |ui| {
-            ui.add_space(6.0);
+        let footer_frame = egui::Frame::new().fill(pal.panel).inner_margin(egui::Margin::symmetric(16, 8));
+        let bar = egui::Panel::bottom("settings_footer").frame(footer_frame).show(ui, |ui| {
             ui.horizontal(|ui| {
-                if ui.add_enabled(pages::has_defaults(self.section), egui::Button::new("Restore defaults")).on_hover_text("Puts this page's options back to their defaults; Apply or OK saves them").clicked() {
-                    pages::restore(d, self.section);
+                // The library's place and the open project change elsewhere while this is open, so they don't count.
+                let mut compare = live.clone();
+                (compare.global_root, compare.last_project) = (d.global_root.clone(), d.last_project.clone());
+                if format!("{compare:?}") != format!("{d:?}") {
+                    ui.label(egui::RichText::new("unsaved changes").monospace().size(11.0).color(Level::Warn.color(ui.visuals())));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("OK").clicked() {
-                        footer = Footer::Ok;
+                    if page_kit::primary(ui, true, "Save").on_hover_text("Saves every page, not just this one").clicked() {
+                        footer = Footer::Save;
                     }
-                    if ui.button("Cancel").clicked() {
-                        footer = Footer::Cancel;
+                    if ui.button("Discard").on_hover_text("Puts every page back to what is saved").clicked() {
+                        footer = Footer::Discard;
                     }
-                    if ui.button("Apply").clicked() {
-                        footer = Footer::Apply;
+                    if ui.add_enabled(pages::has_defaults(self.section), egui::Button::new("Restore defaults").frame(false)).on_hover_text("Puts this page's options back to their defaults; Save keeps them").clicked() {
+                        pages::restore(d, self.section);
                     }
                 });
             });
-            ui.add_space(2.0);
         });
-        egui::Panel::left("settings_tree").resizable(true).default_size(170.0).size_range(120.0..=300.0).show(ui, |ui| self.tree(ui));
+        let line = egui::Stroke::new(1.0, pal.line);
+        ui.painter().line_segment([bar.response.rect.left_top(), bar.response.rect.right_top()], line);
+        let tree_frame = egui::Frame::new().inner_margin(egui::Margin { right: 12, ..Default::default() });
+        let tree = egui::Panel::left("settings_tree").resizable(true).default_size(210.0).size_range(150.0..=300.0).frame(tree_frame).show(ui, |ui| self.tree(ui));
+        ui.painter().line_segment([tree.response.rect.right_top(), tree.response.rect.right_bottom()], line);
         let mut cmd = None;
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.heading(pages::title(self.section));
-            ui.separator();
+        egui::CentralPanel::default().frame(egui::Frame::new().inner_margin(egui::Margin { left: 4, ..Default::default() })).show(ui, |ui| {
+            self.breadcrumb(ui);
+            ui.add_space(4.0);
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| cmd = self.page(ui, d, live));
         });
         (footer, cmd)
+    }
+
+    /// "Sources › DigiKey" with the group muted, and whether the page's keys are stored.
+    fn breadcrumb(&self, ui: &mut egui::Ui) {
+        let pal = theme::palette(ui.visuals());
+        let title = pages::title(self.section);
+        let (group, page) = title.split_once(" › ").map_or(("", title), |(g, p)| (g, p));
+        let mut job = egui::text::LayoutJob::default();
+        let font = |size| egui::FontId::proportional(size);
+        if !group.is_empty() {
+            job.append(&format!("{group} › "), 0.0, egui::TextFormat { font_id: font(14.0), color: pal.muted, ..Default::default() });
+        }
+        job.append(page, 0.0, egui::TextFormat { font_id: font(17.0), color: pal.fg, ..Default::default() });
+        ui.horizontal(|ui| {
+            ui.label(job);
+            if let Some(info) = pages::source_info(self.section).filter(|i| !i.fields.is_empty()) {
+                let complete = info.fields.iter().all(|f| self.stored.contains(&(info.name, f.0)));
+                super::ui_kit::badge(ui, if complete { "keys stored" } else { "no keys" }, if complete { Level::Ok } else { Level::Warn });
+            }
+        });
+        ui.separator();
     }
 
     fn tree(&mut self, ui: &mut egui::Ui) {
@@ -238,9 +260,7 @@ impl SettingsTab {
         ui.add_space(4.0);
         let q = self.query.trim().to_lowercase();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            // Compact, so the whole tree fits at the default window size.
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.spacing_mut().button_padding.y = 0.0;
+            ui.spacing_mut().item_spacing.y = 1.0;
             let mut any = false;
             for (group, pages) in TREE {
                 let group_hit = group.to_lowercase().contains(&q);
@@ -249,16 +269,12 @@ impl SettingsTab {
                     continue;
                 }
                 any = true;
-                let nested = pages.len() > 1;
-                if nested {
-                    ui.add_space(4.0);
-                    ui.strong(*group);
-                }
+                ui.add_space(8.0);
+                page_kit::caption(ui, group);
+                ui.add_space(2.0);
                 for (section, label) in shown {
                     ui.horizontal(|ui| {
-                        if nested {
-                            ui.add_space(10.0);
-                        }
+                        ui.add_space(8.0);
                         if ui.selectable_label(self.section == *section, *label).clicked() {
                             self.section = *section;
                         }

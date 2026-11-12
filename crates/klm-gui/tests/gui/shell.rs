@@ -54,8 +54,11 @@ fn s3_start_tab() {
     first_run(&env);
     let mut h = fresh(SIZES[1]);
     assert!(h.state().cx.tab == Tab::Import, "first run should open on Import");
-    assert!(h.query_by_label("Set up:").is_some());
-    snap(&mut h, "first-run");
+    assert!(h.query_by_label("Set up your global library").is_some());
+    let m = snap(&mut h, "first-run");
+    assert!(m.is_empty(), "missing glyphs {m:?}");
+    click(&mut h, "Skip for now");
+    assert!(h.query_by_label("Set up:").is_some(), "skipping leaves the checklist");
 }
 
 #[test]
@@ -72,7 +75,7 @@ fn s6_error_badge_opens_log() {
     assert!(h.state().log_open && h.query_by_label("Copy").is_some(), "the badge did not open the log");
     h.state_mut().cx.log(Level::Error, "again");
     h.run_ok();
-    assert!(h.query_by_label("2 errors").is_some());
+    assert!(h.query_all_by_label("2 errors").next().is_some(), "{}", dump(&h));
     snap(&mut h, "log-badge");
 }
 
@@ -92,7 +95,6 @@ fn s8_buttons() {
     for tab in [Tab::Library, Tab::Search, Tab::History] {
         let h = app(SIZES[1], tab);
         assert!(h.query_by_label("Relink libraries").is_none() || h.query_all_by_label("Relink libraries").count() == 1);
-        assert!(h.query_by_label("Close project").is_some());
         assert_eq!(h.query_all_by_label("Clear").count(), 1, "only the log has Clear");
     }
 }
@@ -102,10 +104,11 @@ fn s9_first_run_checklist() {
     let env = setup();
     first_run(&env);
     let mut h = fresh(SIZES[1]);
+    click(&mut h, "Skip for now");
     assert_eq!(h.query_all_by_label("Open").count(), 2, "KiCad and the (default-on) sources are fine; the library and watch folder are open");
     assert!(h.query_by_label("✔ KiCad found").is_some());
     click(&mut h, "Open");
-    assert!(h.query_by_label("Settings").is_some(), "Open did not show Settings");
+    assert!(h.state().cx.tab == Tab::Settings, "Open did not show Settings");
     assert!(h.query_all_by_label_contains("General › Libraries").next().is_some(), "the first Open goes to Libraries");
 }
 
@@ -115,14 +118,37 @@ fn s10_nothing_clipped_on_any_tab() {
     first_run(&env); // the checklist is the tallest the top area gets
     for size in SIZES {
         for tab in [Tab::Search, Tab::Import, Tab::Library, Tab::Bom, Tab::History, Tab::Cleanup] {
-            let h = app(size, tab);
-            for label in ["Global library", "Project", "Settings…", "Copy"] {
+            let mut h = app(size, tab);
+            click(&mut h, "Skip for now");
+            for label in ["KLM", "Settings…", "Copy"] {
                 let r = h.get_all_by_label(label).last().unwrap().rect();
                 assert!(r.min.y >= 0.0 && r.max.y <= size.1 && r.max.x <= size.0, "{size:?}: {label:?} is outside the window: {r:?}");
             }
-            let tabs = h.get_by_label("Library").rect();
+            let tabs = h.get_by_label("KLM").rect();
             let log = h.get_all_by_label("Copy").last().unwrap().rect();
             assert!(log.min.y > tabs.max.y + 100.0, "{size:?}: log leaves no room for the tab: {tabs:?} vs {log:?}");
         }
+    }
+}
+
+/// Ctrl+K finds library parts and offers a supplier search; Enter opens the first hit.
+#[test]
+fn s11_omnibox_finds_library_parts() {
+    let _env = setup();
+    for size in SIZES {
+        let mut h = app(size, Tab::Search);
+        with_probe(&mut h);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::K);
+        h.run_ok();
+        h.event(egui::Event::Text("lm3".into()));
+        h.run_ok();
+        assert!(h.query_by_label("LM358").is_some(), "no library hit:
+{}", dump(&h));
+        assert!(h.query_by_label_contains("Search Probe for").is_some(), "no supplier hit");
+        let m = snap(&mut h, "omnibox");
+        assert!(m.is_empty(), "missing glyphs {m:?}");
+        h.key_press(egui::Key::Enter);
+        settle(&mut h);
+        assert!(h.state().cx.tab == Tab::Library, "Enter did not open the part");
     }
 }

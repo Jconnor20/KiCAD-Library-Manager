@@ -40,9 +40,11 @@ fn s1_header_is_not_cut_off() {
     for size in SIZES {
         let h = with_results(size, &THREE);
         for title in ["Source", "MPN", "Manufacturer", "Description", "Package", "Stock", "Price (as listed)", "CAD"] {
-            let n = h.get_by_label(title);
-            let r = n.rect();
-            assert!(r.max.x <= size.0, "{title} runs off the right edge at {size:?}: {r:?}");
+            // The detail pane repeats a few of these words (Package, ...) so check every match.
+            for n in h.get_all_by_label(title) {
+                let r = n.rect();
+                assert!(r.max.x <= size.0, "{title} runs off the right edge at {size:?}: {r:?}");
+            }
         }
         let mut h = h;
         let m = snap(&mut h, "search-results");
@@ -88,6 +90,7 @@ fn s4_save_and_unsave_a_recent_search() {
     store.log("search", "lm358").unwrap();
     let mut h = app(SIZES[1], Tab::Search);
     with_probe(&mut h);
+    click(&mut h, "Saved & recent ▾");
     assert!(h.query_by_label_contains("Click ☆").is_some(), "empty Saved list explains itself");
     snap(&mut h, "search-side-before-save");
     h.get_all_by_label("☆").next().unwrap().click();
@@ -104,7 +107,7 @@ fn s4_save_and_unsave_a_recent_search() {
 fn s5_cad_availability_is_text() {
     let _env = setup();
     let mut h = with_results(SIZES[1], &THREE);
-    assert_eq!(h.query_all_by_label("Sym").count(), 2);
+    assert_eq!(h.query_all_by_label("SYM").count(), 2);
     assert_eq!(h.query_all_by_label("FP").count(), 2);
     assert_eq!(h.query_all_by_label("3D").count(), 2);
     assert!(h.query_by_label_contains("not known").is_some());
@@ -118,10 +121,10 @@ fn s6_no_sources_links_to_settings() {
     for size in SIZES {
         let mut h = app(size, Tab::Search);
         snap(&mut h, "search-no-sources");
-        assert!(h.query_by_label("Settings").is_none());
-        h.get_by_label("Enable one in Settings").click();
+        assert!(h.state().cx.tab == Tab::Search);
+        h.get_by_label("Open Settings · Sources").click();
         h.run_ok();
-        assert!(h.query_by_label("Settings").is_some(), "Settings did not open");
+        assert!(h.state().cx.tab == Tab::Settings, "Settings did not open");
         assert!(h.query_all_by_label_contains("LCSC needs no keys.").next().is_some(), "Settings isn't on Sources");
     }
 }
@@ -144,6 +147,7 @@ fn s8_recently_imported_icons_work() {
     let store = Store::open(&Store::default_path().unwrap()).unwrap();
     let mut h = app(SIZES[1], Tab::Search);
     with_probe(&mut h);
+    click(&mut h, "Saved & recent ▾");
     assert!(!store.favourites().unwrap().contains(&"LM358".to_string()));
     // Newest first: RC0603FR-0710KL, RP2040 (already starred), LM358; the first ☆ is the newest import.
     h.get_all_by_label("☆").next().unwrap().click();

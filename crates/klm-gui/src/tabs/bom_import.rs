@@ -1,8 +1,8 @@
 //! The "BOM to library" tab: pick a BOM CSV, check the detected columns, see how each line resolves
 //! (standard library, a source, not found, ambiguous), then generate a library from it.
 
-use super::ui_kit::{self, Level};
-use crate::{AppCtx, Msg as AppMsg};
+use super::ui_kit::{self, Col, Level, Sort};
+use crate::{AppCtx, Msg as AppMsg, shell, theme};
 use eframe::egui;
 use klm_core::batch::Target;
 use klm_core::bom_import::{self as bi, Generated, Item, Mapping, Resolved};
@@ -101,6 +101,7 @@ impl BomImportTab {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
+        let pal = theme::palette(ui.visuals());
         ui.horizontal_wrapped(|ui| {
             if ui.add_enabled(!self.running, egui::Button::new("Open BOM…")).on_hover_text("A CSV with one row per line (KiCad, JLCPCB, DigiKey and similar exports). XLSX: save as CSV first.").clicked() {
                 if let Some(p) = rfd::FileDialog::new().add_filter("BOM CSV", &["csv"]).pick_file() {
@@ -115,7 +116,12 @@ impl BomImportTab {
             }
         });
         if self.rows.is_empty() {
-            ui.weak("Open a BOM to build a library from it. Each line is looked up in the standard library first, then at the enabled sources.");
+            ui.add_space(12.0);
+            shell::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(egui::RichText::new("Build a library from a BOM").strong().size(15.0));
+                ui.label(egui::RichText::new("Open a BOM CSV. Each line is looked up in the standard library first, then at the enabled sources, and the parts found are added to your library.").color(pal.muted));
+            });
             return;
         }
         let mut changed = false;
@@ -148,7 +154,7 @@ impl BomImportTab {
             let ready = !self.resolved.is_empty() && !self.running;
             let closed = !kicad_env::kicad_running();
             let has_root = if self.project { cx.project_root().is_some() } else { cx.global_root().is_some() };
-            if ui.add_enabled(ready && closed && has_root, egui::Button::new("Generate")).on_disabled_hover_text("Look up the lines first, have a library to write into, and close KiCad").clicked() {
+            if ui.add_enabled(ready && closed && has_root, shell::primary(ui, "Generate")).on_disabled_hover_text("Look up the lines first, have a library to write into, and close KiCad").clicked() {
                 self.generate(cx);
             }
             if ui.add_enabled(self.generated.is_some(), egui::Button::new("Save BOM with library parts…")).clicked() {
@@ -168,38 +174,34 @@ impl BomImportTab {
             let count = |l: &str| self.resolved.iter().filter(|r| r.label() == l).count();
             ui.label(format!("{} standard library, {} from sources, {} not found, {} ambiguous. Lines not found or ambiguous are left out.", count("stdlib"), count("source"), count("not found"), count("ambiguous")));
         }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Grid::new("bom_import").striped(true).show(ui, |ui| {
-                for h in ["Refs", "Qty", "MPN / value", "Status", "Result"] {
-                    ui.strong(h);
+        let cols = [Col::new("Refs", 150.0).no_sort(), Col::new("Qty", 48.0).no_sort(), Col::new("MPN / value", 190.0).no_sort(), Col::new("Status", 90.0).no_sort(), Col::rest("Result").no_sort()];
+        let mut sort = Sort { col: usize::MAX, asc: true };
+        ui_kit::table(ui, "bom_import", &cols, &mut sort, self.items.len(), |n, row| {
+            let it = &self.items[n];
+            row.col(|ui| drop(ui.label(egui::RichText::new(it.line.refs.join(" ")).monospace())));
+            row.col(|ui| drop(ui.label(it.qty.to_string())));
+            row.col(|ui| drop(ui.label(egui::RichText::new(if it.line.mpn.is_empty() { &it.line.value } else { &it.line.mpn }).monospace().strong())));
+            match self.resolved.get(n) {
+                Some(r) => {
+                    let level = match r {
+                        Resolved::Stdlib { .. } | Resolved::Source(_) => Level::Ok,
+                        Resolved::NotFound(_) => Level::Error,
+                        Resolved::Ambiguous(_) => Level::Warn,
+                    };
+                    row.col(|ui| drop(ui_kit::badge(ui, r.label(), level)));
+                    let done = self.generated.as_ref().and_then(|g| g.lines.get(n));
+                    row.col(|ui| {
+                        ui.label(match done {
+                            Some(d) => d.error.clone().or(d.library_part.clone()).unwrap_or_else(|| r.detail()),
+                            None => r.detail(),
+                        });
+                    });
                 }
-                ui.end_row();
-                for (n, it) in self.items.iter().enumerate() {
-                    ui.label(it.line.refs.join(" "));
-                    ui.label(it.qty.to_string());
-                    ui.label(if it.line.mpn.is_empty() { &it.line.value } else { &it.line.mpn });
-                    match self.resolved.get(n) {
-                        Some(r) => {
-                            let level = match r {
-                                Resolved::Stdlib { .. } | Resolved::Source(_) => Level::Ok,
-                                Resolved::NotFound(_) => Level::Error,
-                                Resolved::Ambiguous(_) => Level::Warn,
-                            };
-                            ui_kit::badge(ui, r.label(), level);
-                            let done = self.generated.as_ref().and_then(|g| g.lines.get(n));
-                            ui.label(match done {
-                                Some(d) => d.error.clone().or(d.library_part.clone()).unwrap_or_else(|| r.detail()),
-                                None => r.detail(),
-                            });
-                        }
-                        None => {
-                            ui.weak("");
-                            ui.weak("");
-                        }
-                    }
-                    ui.end_row();
+                None => {
+                    row.col(|_| {});
+                    row.col(|_| {});
                 }
-            });
+            }
         });
     }
 }
