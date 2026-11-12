@@ -31,7 +31,7 @@ const USAGE: &str = "usage:
   klm-cli lookup <mpn>... [--json]   (what every enabled source knows about each MPN)
   klm-cli stdlib verify [<category>...] [--manifest <dir>] [--offline] [--json]   (checks the standard library's manifest against live sources)
   klm-cli stdlib build [<category>...] [--manifest <dir>]   (builds KLM_STD_<category> libraries in the global library)
-  klm-cli bom-import <bom.csv> [--map <field>=<column>]... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--manifest <dir>] [--out <csv>] [--dry-run]   (stdlib, then sources; builds a library from a BOM)
+  klm-cli bom-import <bom.csv|bom.xlsx> [--sheet <name>] [--header-row <n>] [--map <field>=<column>]... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--manifest <dir>] [--out <csv>] [--dry-run]   (stdlib, then sources; builds a library from a BOM)
   --config <dir> (or KLM_CONFIG_DIR) keeps all of KLM's files, KiCad's library tables and API keys in <dir>";
 
 #[derive(Debug, PartialEq)]
@@ -52,7 +52,7 @@ enum Command {
     Lookup { mpns: Vec<String>, json: bool },
     StdlibVerify { categories: Vec<String>, manifest: Option<PathBuf>, offline: bool, json: bool },
     StdlibBuild { categories: Vec<String>, manifest: Option<PathBuf> },
-    BomImport { bom: PathBuf, maps: Vec<(String, String)>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, manifest: Option<PathBuf>, out: Option<PathBuf>, dry_run: bool },
+    BomImport { bom: PathBuf, sheet: Option<String>, header_row: Option<usize>, maps: Vec<(String, String)>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, manifest: Option<PathBuf>, out: Option<PathBuf>, dry_run: bool },
 }
 
 fn parse_lookup(args: &[String]) -> Result<Command> {
@@ -68,12 +68,14 @@ fn parse_lookup(args: &[String]) -> Result<Command> {
 }
 
 fn parse_bom_import(args: &[String]) -> Result<Command> {
-    let (mut bom, mut maps, mut category, mut to, mut project, mut overwrite, mut manifest, mut out, mut dry_run) = (None, vec![], None, Target::Global, None, false, None, None, false);
+    let (mut bom, mut sheet, mut header_row, mut maps, mut category, mut to, mut project, mut overwrite, mut manifest, mut out, mut dry_run) = (None, None, None, vec![], None, Target::Global, None, false, None, None, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || it.next().cloned().with_context(|| format!("{a} needs a value"));
         match a.as_str() {
             "--map" => maps.push(value()?.split_once('=').map(|(f, c)| (f.to_string(), c.to_string())).context("--map needs <field>=<column>")?),
+            "--sheet" => sheet = Some(value()?),
+            "--header-row" => header_row = Some(value()?.parse().ok().filter(|n| *n > 0).context("--header-row needs a row number, 1 or more")?),
             "--category" => category = Some(value()?),
             "--to" => {
                 to = match value()?.as_str() {
@@ -92,7 +94,7 @@ fn parse_bom_import(args: &[String]) -> Result<Command> {
             _ => bom = Some(PathBuf::from(a)),
         }
     }
-    Ok(Command::BomImport { bom: bom.context("bom-import needs a BOM CSV")?, maps, category, to, project, overwrite, manifest, out, dry_run })
+    Ok(Command::BomImport { bom: bom.context("bom-import needs a BOM file (CSV or spreadsheet)")?, sheet, header_row, maps, category, to, project, overwrite, manifest, out, dry_run })
 }
 
 fn parse_stdlib(args: &[String]) -> Result<Command> {
@@ -854,10 +856,10 @@ fn stdlib_verify(categories: &[String], manifest: Option<PathBuf>, offline: bool
 /// Resolves each BOM line (standard library, then sources), prints the report and, unless `dry_run`, builds the library.
 /// Fails when any line is unresolved or couldn't be imported.
 #[allow(clippy::too_many_arguments)]
-fn bom_import(bom: &Path, maps: &[(String, String)], category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, manifest: Option<PathBuf>, out: Option<&Path>, dry_run: bool) -> Result<ExitCode> {
+fn bom_import(bom: &Path, sheet: Option<&str>, header_row: Option<usize>, maps: &[(String, String)], category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, manifest: Option<PathBuf>, out: Option<&Path>, dry_run: bool) -> Result<ExitCode> {
     use klm_core::bom_import as bi;
     let s = settings()?;
-    let rows = bi::load(bom)?;
+    let rows = bi::load(bom, sheet, header_row)?;
     let mut map = bi::detect(&rows[0]);
     for (f, c) in maps {
         bi::set_column(&mut map, &rows[0], f, c)?;
@@ -946,7 +948,7 @@ fn main() -> ExitCode {
         Command::Lookup { mpns, json } => lookup(&mpns, json),
         Command::StdlibVerify { categories, manifest, offline, json } => stdlib_verify(&categories, manifest, offline, json),
         Command::StdlibBuild { categories, manifest } => stdlib_build(&categories, manifest).map(|_| ExitCode::SUCCESS),
-        Command::BomImport { bom, maps, category, to, project, overwrite, manifest, out, dry_run } => bom_import(&bom, &maps, category, to, project, overwrite, manifest, out.as_deref(), dry_run),
+        Command::BomImport { bom, sheet, header_row, maps, category, to, project, overwrite, manifest, out, dry_run } => bom_import(&bom, sheet.as_deref(), header_row, &maps, category, to, project, overwrite, manifest, out.as_deref(), dry_run),
     });
     result.unwrap_or_else(|e| {
         eprintln!("error: {e:#}\n{USAGE}");
