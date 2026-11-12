@@ -1,7 +1,7 @@
 //! Import a BOM (CSV) and build a library from it: detect the columns, resolve each line to a
 //! standard-library part or a part from the enabled sources, and import the resolved parts through
 //! the batch path. Lines with no match or several candidates are reported, never guessed.
-//! XLSX isn't read (no reader dependency); save the sheet as CSV.
+//! Reads CSV and spreadsheets (xlsx, xlsm, xlsb, xls, ods): the sheet and header row are detected, or given.
 
 use crate::batch::{self, Op, Target};
 use crate::bom::{Line, parse_csv};
@@ -94,16 +94,83 @@ pub fn items_of(rows: &[Vec<String>], map: &Mapping) -> (Vec<Item>, Vec<usize>) 
     rows.iter().enumerate().skip(1).filter_map(|(n, r)| read_row(r, map).map(|it| (it, n))).unzip()
 }
 
-/// Reads a BOM file as rows, header first.
-pub fn load(path: &Path) -> Result<Vec<Vec<String>>> {
-    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("xlsx")) {
-        anyhow::bail!("XLSX isn't supported; save the sheet as CSV");
+/// One sheet of a BOM file (a CSV is a single sheet), every row as read. Row and column numbers
+/// match the spreadsheet's, so rows above the data (titles) are kept.
+pub struct Sheet {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+}
+
+impl Sheet {
+    /// The rows from `header` (0-based) down, header first; fails when no data row follows it.
+    pub fn table(&self, header: usize) -> Result<&[Vec<String>]> {
+        match self.rows.get(header..) {
+            Some(t) if t.len() >= 2 => Ok(t),
+            _ => anyhow::bail!("{} has no BOM rows below row {}", self.name, header + 1),
+        }
     }
-    let rows = parse_csv(&std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?);
-    if rows.len() < 2 {
-        anyhow::bail!("{} has no BOM rows", path.display());
+}
+
+/// Reads every sheet of a CSV or spreadsheet; any other extension is read as CSV.
+pub fn read_sheets(path: &Path) -> Result<Vec<Sheet>> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !["xlsx", "xlsm", "xlsb", "xls", "ods"].contains(&ext.as_str()) {
+        let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        return Ok(vec![Sheet { name: "CSV".into(), rows: parse_csv(&text) }]);
     }
-    Ok(rows)
+    let mut book = calamine::open_workbook_auto(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(calamine::Reader::worksheets(&mut book)
+        .into_iter()
+        .map(|(name, range)| {
+            // The range starts at its first used cell; pad back to A1 so numbers match Excel's.
+            let (top, left) = range.start().map_or((0, 0), |(r, c)| (r as usize, c as usize));
+            let rows = std::iter::repeat_n(vec![], top)
+                .chain(range.rows().map(|r| std::iter::repeat_n(String::new(), left).chain(r.iter().map(|c| c.to_string().trim().to_string())).collect()))
+                .collect();
+            Sheet { name, rows }
+        })
+        .collect())
+}
+
+/// How many BOM fields a row's cells name.
+fn score(row: &[String]) -> usize {
+    detect(row).iter().flatten().count()
+}
+
+/// The header row (0-based) of `rows`: the first of the top 50 that names the most fields. When none
+/// names any (a headerless sheet), the first row with anything in it.
+pub fn header_of(rows: &[Vec<String>]) -> usize {
+    let mut best = (rows.iter().position(|r| r.iter().any(|c| !c.is_empty())).unwrap_or(0), 0);
+    for (i, r) in rows.iter().enumerate().take(50) {
+        if score(r) > best.1 {
+            best = (i, score(r));
+        }
+    }
+    best.0
+}
+
+/// The sheet whose header row names the most fields (the first on a tie; sheets with data beat empty ones), and that row.
+pub fn auto(sheets: &[Sheet]) -> (usize, usize) {
+    let pick = |(i, s): (usize, &Sheet)| {
+        let h = header_of(&s.rows);
+        ((s.rows.get(h).map_or(0, |r| score(r)), s.rows.len() > 1), i, h)
+    };
+    // `rev` so that on a tie `max_by_key`, which keeps the last, lands on the first sheet.
+    sheets.iter().enumerate().rev().map(pick).max_by_key(|t| t.0).map_or((0, 0), |t| (t.1, t.2))
+}
+
+/// Reads a BOM file as a table, header first. `sheet` (a name) and `header` (1-based row) override what is detected.
+pub fn load(path: &Path, sheet: Option<&str>, header: Option<usize>) -> Result<Vec<Vec<String>>> {
+    let sheets = read_sheets(path)?;
+    let (i, h) = match sheet {
+        Some(n) => {
+            let i = sheets.iter().position(|s| s.name.eq_ignore_ascii_case(n.trim())).with_context(|| format!("no sheet {n} (sheets: {})", sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")))?;
+            (i, header_of(&sheets[i].rows))
+        }
+        None => auto(&sheets),
+    };
+    let h = header.map_or(h, |n| n.saturating_sub(1));
+    Ok(sheets[i].table(h)?.to_vec())
 }
 
 /// The standard library's manifests: the `stdlib` folder shipped beside the executable, else `./stdlib`; none if neither exists.
@@ -385,5 +452,51 @@ mod tests {
         let done = vec![Done { library_part: Some("KLM_ICs:X1".into()), error: None }];
         let out = write_back(&rows, &[1], &[Resolved::NotFound(vec![])], &done);
         assert_eq!(out, "MPN,Value,KLM status,Library part\nX1,\"1,5\",not found,KLM_ICs:X1\n,,\n");
+    }
+
+    /// A minimal workbook: sheet "Notes" with prose, sheet "BOM" whose header is on row 3 and starts in column B.
+    fn write_xlsx(path: &Path) {
+        use std::io::Write;
+        let cell = |r: &str, t: &str| format!(r#"<c r="{r}" t="inlineStr"><is><t>{t}</t></is></c>"#);
+        let sheet = |rows: &[&[(&str, &str)]]| {
+            let body: String = rows.iter().enumerate().map(|(n, r)| format!(r#"<row r="{}">{}</row>"#, n + 1, r.iter().map(|(a, t)| cell(a, t)).collect::<String>())).collect();
+            format!(r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{body}</sheetData></worksheet>"#)
+        };
+        let files = [
+            ("[Content_Types].xml", r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#.to_string()),
+            ("_rels/.rels", r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#.to_string()),
+            ("xl/workbook.xml", r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Notes" sheetId="1" r:id="rId1"/><sheet name="BOM" sheetId="2" r:id="rId2"/></sheets></workbook>"#.to_string()),
+            ("xl/_rels/workbook.xml.rels", r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>"#.to_string()),
+            ("xl/worksheets/sheet1.xml", sheet(&[&[("A1", "Read me first")], &[("A2", "Not a BOM")]])),
+            ("xl/worksheets/sheet2.xml", sheet(&[&[("B1", "Board rev C")], &[], &[("B3", "Designator"), ("C3", "MPN"), ("D3", "Quantity")], &[("B4", "R1, R2"), ("C4", "RC0603FR-0710KL"), ("D4", "2")]])),
+        ];
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, xml) in files {
+            zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(xml.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn reads_a_workbook_finding_the_sheet_and_header_row() {
+        let path = std::env::temp_dir().join(format!("klm-bom-import-test-{}.xlsx", std::process::id()));
+        write_xlsx(&path);
+        let rows = load(&path, None, None).unwrap();
+        // Rows 1-2 above the header are skipped; the header is Excel's row 3, and column A is padding.
+        assert_eq!(rows[0], h(",Designator,MPN,Quantity"));
+        let (items, at) = items_of(&rows, &detect(&rows[0]));
+        assert_eq!((at, items[0].qty, items[0].line.mpn.as_str()), (vec![1], 2, "RC0603FR-0710KL"));
+        // Both overrides: a named sheet, and a header row given by hand.
+        assert_eq!(load(&path, Some("bom"), Some(3)).unwrap(), rows);
+        assert!(load(&path, Some("Nope"), None).is_err());
+        assert!(load(&path, Some("Notes"), Some(2)).is_err(), "a header on the last row leaves no data");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn headerless_sheet_falls_back_to_its_first_filled_row() {
+        let rows = vec![vec![], h("foo,bar"), h("1,2")];
+        assert_eq!(header_of(&rows), 1);
     }
 }

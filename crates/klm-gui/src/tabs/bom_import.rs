@@ -1,4 +1,4 @@
-//! The "BOM to library" tab: pick a BOM CSV, check the detected columns, see how each line resolves
+//! The "BOM to library" tab: pick a BOM (CSV or spreadsheet), check the detected sheet, header row and columns, see how each line resolves
 //! (standard library, a source, not found, ambiguous), then generate a library from it.
 
 use super::ui_kit::{self, Level};
@@ -17,6 +17,11 @@ pub enum Msg {
 #[derive(Default)]
 pub struct BomImportTab {
     path: Option<PathBuf>,
+    sheets: Vec<bi::Sheet>,
+    /// The sheet and header row (0-based) `rows` was cut from.
+    sheet: usize,
+    header: usize,
+    /// The table: the rows from the header row down, header first.
     rows: Vec<Vec<String>>,
     map: Mapping,
     items: Vec<Item>,
@@ -52,11 +57,25 @@ impl BomImportTab {
     }
 
     fn open(&mut self, path: PathBuf, cx: &mut AppCtx) {
-        match bi::load(&path) {
-            Ok(rows) => {
-                self.map = bi::detect(&rows[0]);
-                self.rows = rows;
+        match bi::read_sheets(&path) {
+            Ok(sheets) => {
+                let (sheet, header) = bi::auto(&sheets);
+                self.sheets = sheets;
                 self.path = Some(path);
+                self.rows.clear();
+                self.select(sheet, header, cx);
+            }
+            Err(e) => cx.log(Level::Error, format!("BOM to library: {e:#}")),
+        }
+    }
+
+    /// Cuts the table from `sheet` at row `header` and re-detects the columns; leaves everything as it was if that row has no data below it.
+    fn select(&mut self, sheet: usize, header: usize, cx: &mut AppCtx) {
+        match self.sheets[sheet].table(header) {
+            Ok(t) => {
+                self.rows = t.to_vec();
+                (self.sheet, self.header) = (sheet, header);
+                self.map = bi::detect(&self.rows[0]);
                 self.remap();
             }
             Err(e) => cx.log(Level::Error, format!("BOM to library: {e:#}")),
@@ -102,8 +121,8 @@ impl BomImportTab {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!self.running, egui::Button::new("Open BOM…")).on_hover_text("A CSV with one row per line (KiCad, JLCPCB, DigiKey and similar exports). XLSX: save as CSV first.").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("BOM CSV", &["csv"]).pick_file() {
+            if ui.add_enabled(!self.running, egui::Button::new("Open BOM…")).on_hover_text("A CSV or Excel/OpenDocument sheet with one row per line (KiCad, JLCPCB, DigiKey and similar exports). The sheet, header row and columns are detected; change them below if they are wrong.").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("BOM (CSV or spreadsheet)", &["csv", "xlsx", "xlsm", "xlsb", "xls", "ods"]).pick_file() {
                     self.open(p, cx);
                 }
             }
@@ -117,6 +136,28 @@ impl BomImportTab {
         if self.rows.is_empty() {
             ui.weak("Open a BOM to build a library from it. Each line is looked up in the standard library first, then at the enabled sources.");
             return;
+        }
+        let (mut sheet, mut header, mut moved) = (self.sheet, self.header + 1, false);
+        ui.add_enabled_ui(!self.running, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                if self.sheets.len() > 1 {
+                    egui::ComboBox::from_label("Sheet").selected_text(&self.sheets[sheet].name).show_ui(ui, |ui| {
+                        for (i, s) in self.sheets.iter().enumerate() {
+                            if ui.selectable_value(&mut sheet, i, &s.name).changed() {
+                                // A new sheet gets its own detected header row.
+                                header = bi::header_of(&s.rows) + 1;
+                                moved = true;
+                            }
+                        }
+                    });
+                }
+                ui.label("Header row");
+                moved |= ui.add(egui::DragValue::new(&mut header).range(1..=self.sheets[sheet].rows.len().max(1))).on_hover_text("The row (as numbered in the spreadsheet) holding the column titles. Rows above it are ignored.").changed();
+                ui.weak(self.rows[0].iter().filter(|c| !c.is_empty()).take(8).cloned().collect::<Vec<_>>().join(" | "));
+            });
+        });
+        if moved {
+            self.select(sheet, header.saturating_sub(1), cx);
         }
         let mut changed = false;
         ui.collapsing("Columns", |ui| {
