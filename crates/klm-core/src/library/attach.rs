@@ -1,6 +1,6 @@
 //! Adding a datasheet, SPICE model or 3D model to a part already in a library.
 
-use super::fields::{datasheet_name, same_geometry, set_footprint, spice_model_name};
+use super::fields::{datasheet_name, same_geometry, set_footprint};
 use super::{LibraryRoot, copy_file, has_ext, property, sanitize, set_property};
 use crate::kicad_env::{self, write_atomic};
 use crate::sexpr::{self, Sexpr};
@@ -18,13 +18,13 @@ pub enum AttachKind {
 }
 
 /// Extensions [`AttachKind::of`] recognises (for file pickers).
-pub const ATTACH_EXTENSIONS: &[&str] = &["pdf", "lib", "cir", "sub", "sp", "spi", "ibs", "step", "stp", "wrl", "stl", "zip"];
+pub const ATTACH_EXTENSIONS: &[&str] = &["pdf", "lib", "cir", "sub", "sp", "spi", "ckt", "mod", "ibs", "step", "stp", "wrl", "stl", "zip"];
 
 impl AttachKind {
     pub fn of(path: &Path) -> Option<Self> {
         match path.extension()?.to_str()?.to_lowercase().as_str() {
             "pdf" => Some(Self::Datasheet),
-            "lib" | "cir" | "sub" | "sp" | "spi" | "ibs" => Some(Self::Sim),
+            ext if crate::spice::is_spice_ext(ext) => Some(Self::Sim),
             "step" | "stp" | "wrl" | "stl" => Some(Self::Model),
             "zip" => Some(Self::Zip),
             _ => None,
@@ -40,13 +40,86 @@ impl LibraryRoot {
         let dest = self.dir.join("simulation").join(&name);
         copy_file(src, &dest)?;
         set_property(symbol, "Sim.Library", &format!("{}/simulation/{name}", self.var()));
-        if let Some((kind, model)) = spice_model_name(&std::fs::read_to_string(&dest).unwrap_or_default()) {
-            set_property(symbol, "Sim.Name", &model);
-            if kind == "subckt" {
-                set_property(symbol, "Sim.Device", "SUBCKT");
+        let text = std::fs::read_to_string(&dest).unwrap_or_default();
+        let models = crate::spice::parse_models(&text);
+        let hint_mpn = property(symbol, "MPN").unwrap_or(mpn);
+        let sim_name_hint = property(symbol, "Sim.Name");
+        if let Some(model) = crate::spice::pick_model(&models, hint_mpn, sim_name_hint) {
+            set_property(symbol, "Sim.Name", &model.name);
+            let pins = crate::spice::pins::extract_pins(symbol, None);
+            let sym_ref = property(symbol, "Reference").unwrap_or("");
+            let (sim_pins, device) = crate::spice::pins::map_sim_pins(&pins, model, sym_ref, "");
+            if !device.is_empty() {
+                set_property(symbol, "Sim.Device", &device);
+            }
+            if let Some(sub_type) = &model.sub_type {
+                set_property(symbol, "Sim.Type", sub_type);
+            }
+            if let Some(sp) = sim_pins {
+                set_property(symbol, "Sim.Pins", &sp);
             }
         }
         Ok(())
+    }
+
+    /// Resolves an existing close SPICE model or generates one from the component's datasheet/specs and attaches it.
+    /// Returns the resolution details if a model was found or generated and saved.
+    pub fn resolve_and_attach_sim(
+        &self,
+        category: &str,
+        name: &str,
+        spice_dirs: &[std::path::PathBuf],
+        allow_generate: bool,
+    ) -> Result<Option<crate::spice::SimResolution>> {
+        let cat = sanitize(category);
+        let (mut lib, idx) = self.load_symbol(&cat, name)?;
+        let sym_snap = lib.items()[idx].clone();
+
+        let field = |k: &str| property(&sym_snap, k).unwrap_or("").trim().to_string();
+        let mut ds_file = None;
+        let ds_raw = field("Datasheet");
+        if !ds_raw.is_empty() && !ds_raw.starts_with("http://") && !ds_raw.starts_with("https://") {
+            ds_file = crate::spice::matcher::resolve_sim_library_path(&ds_raw, self).or_else(|| {
+                let expanded = if ds_raw.contains("${KIPRJMOD}")
+                    && let Some(p) = self.dir.parent()
+                {
+                    ds_raw.replace("${KIPRJMOD}", &p.to_string_lossy().replace('\\', "/"))
+                } else {
+                    ds_raw.clone()
+                };
+                Some(std::path::PathBuf::from(expanded))
+            });
+        }
+        let part = crate::part::Part {
+            mpn: Some(field("MPN")).filter(|m| !m.is_empty()).unwrap_or_else(|| name.to_string()),
+            manufacturer: field("Manufacturer"),
+            description: field("Description"),
+            datasheet_file: ds_file.filter(|p| p.is_file()),
+            ..Default::default()
+        };
+        let work = std::env::temp_dir().join("klm-sim");
+        let Some(res) = crate::spice::resolve_or_generate(
+            &part,
+            Some(&sym_snap),
+            Some(&lib),
+            &cat,
+            Some(self),
+            spice_dirs,
+            allow_generate,
+            &work,
+        )?
+        else {
+            return Ok(None);
+        };
+
+        let _guard = crate::snapshot::guard(self, &format!("attach sim for {name}"))?;
+        let sym_mut = &mut lib.items_mut()[idx];
+        self.attach_sim(sym_mut, &res.file, name)?;
+        if let Some(sp) = &res.pins {
+            set_property(sym_mut, "Sim.Pins", sp);
+        }
+        write_atomic(&self.symbol_lib(&cat), &sexpr::to_string(&lib))?;
+        Ok(Some(res))
     }
 
 

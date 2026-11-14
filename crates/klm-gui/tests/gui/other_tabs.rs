@@ -290,6 +290,31 @@ fn c2_standards_pages() {
     }
 }
 
+/// The graphical template editor opens from Classes, draws on a grid, and Save puts the template in the profile.
+#[test]
+fn c3_template_editor_saves_to_the_profile() {
+    let _env = setup();
+    let mut h = app(SIZES[1], Tab::Classes);
+    settle(&mut h);
+    click(&mut h, "Edit symbol…");
+    settle(&mut h);
+    assert!(h.query_by_label("Save to standard").is_some() && h.query_by_label("Show pin numbers").is_some(), "{}", dump(&h));
+    assert!(snap(&mut h, "standards-template-editor").is_empty());
+    let shown = |h: &Gui| h.get_by_label("Show pin numbers").accesskit_node().toggled();
+    assert_eq!(shown(&h), Some(eframe::egui::accesskit::Toggled::False));
+    click(&mut h, "Show pin numbers");
+    click(&mut h, "Save to standard");
+    settle(&mut h);
+    assert!(h.query_by_label("Save to standard").is_none(), "the editor stayed open");
+    assert!(h.state().cx.settings.standard.templates.contains_key("Resistor"), "nothing stored: {:?}", h.state().cx.settings.standard.templates.keys().collect::<Vec<_>>());
+    // Editing again starts from what was saved, not from the built-in.
+    click(&mut h, "Edit symbol…");
+    settle(&mut h);
+    assert_eq!(shown(&h), Some(eframe::egui::accesskit::Toggled::True), "the saved template was not reopened");
+    click(&mut h, "Reset to default");
+    assert_eq!(shown(&h), Some(eframe::egui::accesskit::Toggled::False));
+}
+
 /// Every labelled widget is inside the window, and no tab shows a glyph the fonts lack.
 #[test]
 fn x1_nothing_clipped_or_missing() {
@@ -387,4 +412,29 @@ fn w1_light_theme_and_bom_inspector() {
         h.run_ok();
         assert!(snap(&mut h, "settings-light").is_empty());
     }
+}
+
+/// Open a BOM: the resistor already in the library is marked and unticked straight away, with no lookup. Look up the selected lines:
+/// only they are looked up (the test point and the resistor are deselected). Generate is available without the lookup.
+#[test]
+fn i6_bom_lookup_only_selected_lines() {
+    let env = setup();
+    let bom = env.dir.join("b.csv");
+    std::fs::write(&bom, "Reference,Value,Footprint,MPN,LCSC
+R1,10k,R_0603,RC0603FR-0710KL,C25804
+C1,100nF,C_0603,,C14663
+TP1,TestPoint,TP,,
+").unwrap();
+    let mut h = app((1280.0, 800.0), Tab::BomImport);
+    let s = h.state_mut();
+    s.bom_import_tab.open(bom, &mut s.cx);
+    h.run_ok();
+    assert!(!h.get_by_label("Generate").accesskit_node().is_disabled(), "Generate does its own lookup, so it needs no Look up first");
+    assert!(h.query_by_label("In library").is_some(), "the resistor is in the library before any lookup: {}", dump(&h));
+    assert!(h.query_by_label("1 line(s) already in your library, so they start unticked. Tick one to import it again.").is_some(), "{}", dump(&h));
+    click(&mut h, "Look up selected (1)");
+    settle(&mut h);
+    settle(&mut h);
+    assert!(h.query_by_label("0 standard library, 0 from sources, 1 not found, 0 ambiguous. Lines not found or ambiguous are left out.").is_some(), "{}", dump(&h));
+    assert!(h.query_by_label("Generate: none of the ticked lines was found").is_some(), "nothing found, so nothing to generate: {}", dump(&h));
 }

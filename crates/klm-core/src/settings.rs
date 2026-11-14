@@ -40,6 +40,30 @@ pub struct Settings {
     pub bom_fields: crate::bom::BomFields,
     /// How many snapshots are kept and when versions are made on their own.
     pub history: History,
+    /// SPICE simulation library folders and automatic model resolution.
+    pub sim: SimSettings,
+}
+
+/// Settings for finding or generating SPICE simulation models during import.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SimSettings {
+    /// Automatically resolve missing SPICE models during import (exact/close match first).
+    pub auto_sim: bool,
+    /// Fall back to generating a SPICE model from datasheet PDF / parametric specs + similar models.
+    pub auto_generate_from_datasheet: bool,
+    /// Extra local folders searched for SPICE `.lib`/`.cir`/`.sub`/`.sp`/`.mod` models.
+    pub spice_dirs: Vec<PathBuf>,
+}
+
+impl Default for SimSettings {
+    fn default() -> Self {
+        Self {
+            auto_sim: true,
+            auto_generate_from_datasheet: true,
+            spice_dirs: Vec::new(),
+        }
+    }
 }
 
 /// How often a snapshot is promoted to a version without being asked.

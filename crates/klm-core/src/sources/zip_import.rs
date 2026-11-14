@@ -9,7 +9,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const MAX_ENTRY: u64 = 200 * 1024 * 1024;
-const SIM_EXTS: &[&str] = &["cir", "sub", "sp", "spi", "ckt", "ibs"];
+const SIM_EXTS: &[&str] = &["cir", "sub", "sp", "spi", "ckt", "mod", "ibs"];
 
 /// Reads a ZIP and extracts the part's files into `work`. `Ok(None)` means it holds no KiCad files at all;
 /// a ZIP with only footprints or 3D models gives a part without `symbol_file`, to be attached to an existing part.
@@ -69,7 +69,7 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         v.first().map(|(_, f)| f.clone())
     };
     let symbol_file = pick(&mut sym_new).or_else(|| pick(&mut sym_legacy));
-    if symbol_file.is_none() && fps.is_empty() && steps.is_empty() && wrls.is_empty() {
+    if symbol_file.is_none() && fps.is_empty() && steps.is_empty() && wrls.is_empty() && sims.is_empty() {
         return Ok(None);
     }
 
@@ -107,14 +107,14 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         }
     }
     if part.mpn.is_empty() {
-        let any = symbol_file.as_ref().or(part.footprint_files.first()).or(part.model_files.first());
+        let any = symbol_file.as_ref().or(part.footprint_files.first()).or(part.model_files.first()).or(part.sim_files.first());
         part.mpn = any.and_then(|f| f.file_stem()).unwrap_or_default().to_string_lossy().into();
     }
     if part.model_files.iter().any(|m| m.extension().is_some_and(|e| e.eq_ignore_ascii_case("stl"))) {
         part.warnings.push("STL 3D models are not shown by KiCad's 3D viewer (it reads STEP and WRL); the file is kept with the part".into());
     }
     if symbol_file.is_none() {
-        part.warnings.push("no symbol in this ZIP: attach its footprint/3D model to an existing part".into());
+        part.warnings.push("no symbol in this ZIP: attach its footprint/3D/SPICE model to an existing part".into());
     }
     if part.category_hint.is_empty() {
         part.category_hint = part.description.clone();
@@ -154,8 +154,7 @@ pub fn extract_foreign(zip_path: &Path, dir: &Path) -> Result<(usize, bool)> {
 }
 
 fn is_spice(bytes: &[u8]) -> bool {
-    let t = String::from_utf8_lossy(bytes).to_lowercase();
-    t.contains(".subckt") || t.contains(".model")
+    crate::spice::is_spice_text(&String::from_utf8_lossy(bytes))
 }
 
 #[cfg(test)]

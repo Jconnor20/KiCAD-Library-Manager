@@ -28,6 +28,7 @@ const USAGE: &str = "usage:
   klm-cli import <zip>... [--category <c>] [--to global|project|both] [--project <dir>] [--overwrite] [--dry-run]
   klm-cli remove <part> [--category <c>] [--project <dir>] [--yes]   (dry run unless --yes)
   klm-cli export <out.zip> [<part>...] [--category <c>] [--project <dir>]
+  klm-cli sim [<part>] [--generate] [--category <c>] [--project <dir>]   (find close SPICE models, or generate from datasheet + similar parts with --generate)
   klm-cli lookup <mpn>... [--json]   (what every enabled source knows about each MPN)
   klm-cli stdlib verify [<category>...] [--manifest <dir>] [--offline] [--json]   (checks the standard library's manifest against live sources)
   klm-cli stdlib build [<category>...] [--manifest <dir>]   (builds KLM_STD_<category> libraries in the global library)
@@ -48,6 +49,7 @@ enum Command {
     Cleanup { projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, moves: Vec<String>, apply: bool },
     Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
     Export { zip: PathBuf, parts: Vec<String>, category: Option<String>, project: Option<PathBuf> },
+    Sim { part: Option<String>, generate: bool, category: Option<String>, project: Option<PathBuf> },
     Remove { part: String, category: Option<String>, project: Option<PathBuf>, yes: bool },
     Lookup { mpns: Vec<String>, json: bool },
     StdlibVerify { categories: Vec<String>, manifest: Option<PathBuf>, offline: bool, json: bool },
@@ -65,6 +67,22 @@ fn parse_lookup(args: &[String]) -> Result<Command> {
         bail!("lookup needs at least one MPN");
     }
     Ok(Command::Lookup { mpns, json })
+}
+
+fn parse_sim(args: &[String]) -> Result<Command> {
+    let (mut part, mut generate, mut category, mut project) = (None, false, None, None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut value = || it.next().cloned().with_context(|| format!("{a} needs a value"));
+        match a.as_str() {
+            "--generate" => generate = true,
+            "--category" => category = Some(value()?),
+            "--project" => project = Some(PathBuf::from(value()?)),
+            _ if a.starts_with("--") || part.is_some() => bail!("{a} is not valid for sim"),
+            _ => part = Some(a.clone()),
+        }
+    }
+    Ok(Command::Sim { part, generate, category, project })
 }
 
 fn parse_bom_import(args: &[String]) -> Result<Command> {
@@ -224,6 +242,9 @@ fn parse(args: &[String]) -> Result<Command> {
     }
     if name == "bom-import" {
         return parse_bom_import(rest);
+    }
+    if name == "sim" {
+        return parse_sim(rest);
     }
     let (mut csv, mut json, mut deep, mut overwrite, mut dry_run, mut yes) = (false, false, false, false, false, false);
     let (mut project, mut category, mut to, mut zips) = (None, None, None, vec![]);
@@ -745,6 +766,39 @@ fn export(zip: &Path, names: Vec<String>, category: Option<String>, project: Opt
     Ok(())
 }
 
+fn sim_cmd(part_filter: Option<String>, generate: bool, category: Option<String>, project: Option<&Path>) -> Result<()> {
+    let cfg = settings()?;
+    let root = roots(&cfg, project)?.pop().context("no library")?;
+    let allow_generate = generate || cfg.sim.auto_generate_from_datasheet;
+    let targets: Vec<_> = root
+        .list_parts()
+        .into_iter()
+        .filter(|p| {
+            p.sim != Check::Ok
+                && category.as_deref().is_none_or(|c| c == p.category)
+                && part_filter.as_deref().is_none_or(|n| n.eq_ignore_ascii_case(&p.name) || n.eq_ignore_ascii_case(&p.mpn))
+        })
+        .collect();
+    if targets.is_empty() {
+        println!("No matching parts missing a SPICE simulation model.");
+        return Ok(());
+    }
+    let mut resolved = 0usize;
+    for p in &targets {
+        match root.resolve_and_attach_sim(&p.category, &p.name, &cfg.sim.spice_dirs, allow_generate)? {
+            Some(r) => {
+                resolved += 1;
+                println!("{} ({}): {} -> {} ({})", p.name, p.category, r.origin.summary(), r.model_name, r.device);
+            }
+            None => {
+                println!("{} ({}): no close SPICE match or datasheet specs found", p.name, p.category);
+            }
+        }
+    }
+    println!("Resolved SPICE models for {resolved} of {} part(s).", targets.len());
+    Ok(())
+}
+
 /// Every enabled source's results for `mpn` that are that exact MPN, plus a message per source that failed.
 fn lookup_one(sources: &[Box<dyn klm_core::sources::Source>], mpn: &str) -> (Vec<klm_core::part::Part>, Vec<String>) {
     let (mut hits, mut errors) = (vec![], vec![]);
@@ -871,7 +925,8 @@ fn bom_import(bom: &Path, sheet: Option<&str>, header_row: Option<usize>, maps: 
     if sources.is_empty() {
         eprintln!("note: no sources are enabled; only the standard library can match");
     }
-    let resolved: Vec<_> = items.iter().map(|i| bi::resolve(&i.line, &manifests, &sources)).collect();
+    let lines: Vec<_> = items.iter().enumerate().map(|(n, i)| (n, i.line.clone())).collect();
+    let resolved: Vec<_> = bi::resolve_all(&lines, bi::By::Auto, &manifests, &sources, &|_, _, _| {}, &bi::Control::default()).into_iter().map(|(_, r)| r).collect();
     for (i, r) in items.iter().zip(&resolved) {
         println!("{:<10} {:<24} x{:<4} {}", r.label(), if i.line.mpn.is_empty() { &i.line.value } else { &i.line.mpn }, i.qty, r.detail());
     }
@@ -890,8 +945,8 @@ fn bom_import(bom: &Path, sheet: Option<&str>, header_row: Option<usize>, maps: 
         .transpose()?;
     ensure_kicad_closed()?;
     let work = std::env::temp_dir().join(format!("klm-bom-import-{}", std::process::id()));
-    let opts = bi::Options { target: to, category, overwrite };
-    let done = bi::generate(&resolved, &sources, global.as_ref(), project.as_ref(), &opts, &s, &work);
+    let opts = bi::Options { target: to, category, overwrite, alternatives: false };
+    let done = bi::generate(&resolved, &items.iter().map(|i| i.alts.clone()).collect::<Vec<_>>(), &[], &sources, global.as_ref(), project.as_ref(), &opts, &s, &work, &|_, _, _| {}, &bi::Control::default());
     let _ = std::fs::remove_dir_all(&work);
     let g = done?;
     for (i, d) in items.iter().zip(&g.lines) {
@@ -945,6 +1000,7 @@ fn main() -> ExitCode {
         Command::Cleanup { projects, remove, fix, moves, apply } => cleanup_cmd(projects, remove, fix, moves, apply),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
         Command::Export { zip, parts, category, project } => export(&zip, parts, category, project.as_deref()).map(|_| ExitCode::SUCCESS),
+        Command::Sim { part, generate, category, project } => sim_cmd(part, generate, category, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Lookup { mpns, json } => lookup(&mpns, json),
         Command::StdlibVerify { categories, manifest, offline, json } => stdlib_verify(&categories, manifest, offline, json),
         Command::StdlibBuild { categories, manifest } => stdlib_build(&categories, manifest).map(|_| ExitCode::SUCCESS),
@@ -1011,6 +1067,10 @@ mod tests {
         assert_eq!(
             parse(&args("import a.zip b.zip --to both --dry-run")).unwrap(),
             Command::Import { zips: vec!["a.zip".into(), "b.zip".into()], category: None, to: Target::Both, project: None, overwrite: false, dry_run: true }
+        );
+        assert_eq!(
+            parse(&args("sim LM358 --generate --category Amplifiers")).unwrap(),
+            Command::Sim { part: Some("LM358".into()), generate: true, category: Some("Amplifiers".into()), project: None }
         );
     }
 

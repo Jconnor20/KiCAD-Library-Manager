@@ -10,6 +10,8 @@
 
 pub mod edit;
 mod class;
+pub(crate) mod pintype;
+pub mod shapes;
 mod template;
 
 pub use class::{Class, detect};
@@ -355,7 +357,7 @@ fn identity(pins: &[Sexpr]) -> Vec<String> {
 }
 
 /// The profile's house template for `class` (drawn by the user), if it has one.
-fn house_template(profile: &Profile, class: Class) -> Result<Option<Template>> {
+pub fn house_template(profile: &Profile, class: Class) -> Result<Option<Template>> {
     let Some(text) = profile.templates.get(&format!("{class:?}")) else { return Ok(None) };
     let t = sexpr::parse(text).and_then(|s| Template::from_symbol(&s, class));
     t.map(Some).with_context(|| format!("the {class:?} house template of profile {} can't be used", profile.name))
@@ -382,8 +384,18 @@ pub fn restyle(sym: &Sexpr, class: Class, profile: &Profile) -> Result<Sexpr> {
     // The house template's field positions win over the generic above/below rule.
     for (key, (x, y, r)) in ["Reference", "Value"].into_iter().zip(tpl.and_then(|t| t.fields).into_iter().flatten()) {
         let prop = new.items_mut().iter_mut().find(|p| p.head() == Some("property") && p.arg(0) == Some(key));
-        if let Some(at) = prop.and_then(|p| p.items_mut().iter_mut().find(|c| c.head() == Some("at"))) {
+        let Some(prop) = prop else { continue };
+        // Text to the right of the body reads from the body outwards, as in KiCad's Device library.
+        standardise::symbol::justify(prop, x > 0.0 && r == 0.0);
+        if let Some(at) = prop.items_mut().iter_mut().find(|c| c.head() == Some("at")) {
             *at = Sexpr::list("at", vec![atom(x), atom(y), atom(r)]);
+        }
+    }
+    if let Some(sizes) = tpl.and_then(|t| t.field_sizes) {
+        for (key, size) in ["Reference", "Value"].into_iter().zip(sizes) {
+            if let Some(prop) = new.items_mut().iter_mut().find(|p| p.head() == Some("property") && p.arg(0) == Some(key)) {
+                standardise::symbol::set_font_size(prop, size);
+            }
         }
     }
     Ok(new)
@@ -487,7 +499,7 @@ thread_local! {
 
 /// Turns the import step on or off from the settings (`house_symbols_on_import`); call when they load or change.
 pub fn configure(s: &Settings) {
-    crate::fields::configure(&s.standard, s.house_symbols_on_import);
+    crate::fields::configure(&s.standard);
     *CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = s.house_symbols_on_import.then(|| Config { naming: s.rules.clone(), profile: s.standard.clone() });
 }
 
@@ -499,6 +511,11 @@ pub(crate) fn restyle_imported(category: &str, symbol: &mut Sexpr) {
         Some(c) => (c.naming.clone(), c.profile.clone()),
         None => return,
     };
+    // ICs keep the vendor's drawing: redrawing them to fit their pins mangles real parts.
+    if class_of(category, symbol, &naming).is_ok_and(|c| c == Class::Ic) {
+        NOTE.with(|n| *n.borrow_mut() = Some("Kept the vendor symbol (ICs are not restyled on import)".into()));
+        return;
+    }
     let note = match class_of(category, symbol, &naming).and_then(|class| restyle(symbol, class, &profile).map(|new| (class, new)))
     {
         Ok((class, new)) => {

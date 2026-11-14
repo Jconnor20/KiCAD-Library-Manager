@@ -24,11 +24,14 @@ fn tick(h: &mut Gui, mpn: &str, mods: Modifiers) {
 
 /// "N selected" from the selection bar; 0 when the bar isn't there.
 fn selected(h: &Gui) -> usize {
-    h.query_by_label_contains(" selected").map_or(0, |n| {
-        let a = n.accesskit_node();
-        let text = a.label().or_else(|| a.value()).unwrap_or_default().to_string();
-        text.split(' ').next().and_then(|n| n.parse().ok()).unwrap_or(0)
-    })
+    // The Standardise button also says "N selected", but starts with a word.
+    h.query_all_by_label_contains(" selected")
+        .find_map(|n| {
+            let a = n.accesskit_node();
+            let text = a.label().or_else(|| a.value()).unwrap_or_default().to_string();
+            text.split(' ').next().and_then(|n| n.parse().ok())
+        })
+        .unwrap_or(0)
 }
 
 /// Every file under `dir` with its bytes, to prove a dry run wrote nothing.
@@ -199,6 +202,18 @@ fn l11_standardise_dry_run_then_apply() {
     assert!(log_has(&h, "Standardised"), "nothing logged: {:?}", h.state().cx.log.lines);
     assert_ne!(files(&root.dir), before, "Apply changed nothing");
     assert!(!klm_core::snapshot::list(&root).is_empty(), "no snapshot to roll back to");
+}
+
+#[test]
+fn l11b_standardise_selected_only() {
+    let _env = setup();
+    let mut h = library(SIZES[1]);
+    tick(&mut h, "LM358", Modifiers::NONE);
+    assert!(h.query_by_label("Standardise…").is_none(), "the button should name the selection");
+    click(&mut h, "Standardise 1 selected…");
+    settle(&mut h);
+    assert!(h.query_by_label("Standardise").is_some(), "no review dialog");
+    assert!(h.query_by_label_contains("ICs / RP2040").is_none(), "an unticked part is in the plan");
 }
 
 #[test]

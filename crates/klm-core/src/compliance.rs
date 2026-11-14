@@ -26,12 +26,23 @@ pub struct Compliance {
 
 /// Compliance of every part in `root` for `profile`, keyed by (category, symbol name). Reads files only.
 pub fn compute(root: &LibraryRoot, profile: &Profile, naming: &Rules) -> HashMap<Key, Compliance> {
-    let plan = standardise::plan(root, profile, naming);
+    judge(root, standardise::plan(root, profile, naming), checks::check_library(root))
+}
+
+/// [`compute`] for only the given parts (those that exist in `root`), reading just what they need.
+pub fn compute_for(root: &LibraryRoot, profile: &Profile, naming: &Rules, parts: &[Key]) -> HashMap<Key, Compliance> {
+    judge(root, standardise::plan_for(root, profile, naming, Some(parts)), checks::check_parts(root, parts))
+}
+
+fn judge(root: &LibraryRoot, plan: standardise::Plan, checked: HashMap<Key, Vec<checks::Issue>>) -> HashMap<Key, Compliance> {
     let mut out = HashMap::new();
-    for (key, issues) in checks::check_library(root) {
+    // Each symbol library is read once, not once per part.
+    let mut libs: HashMap<String, Option<crate::sexpr::Sexpr>> = HashMap::new();
+    for (key, issues) in checked {
         let (cat, name) = &key;
         let mut reasons = vec![];
-        let fp = footprint_name(root, cat, name);
+        let lib = libs.entry(cat.clone()).or_insert_with(|| std::fs::read_to_string(symbol_lib(root, cat)).ok().and_then(|t| crate::sexpr::parse(&t).ok()));
+        let fp = lib.as_ref().and_then(|l| l.children("symbol").find(|s| s.arg(0) == Some(name.as_str()))).and_then(|s| Some(crate::library::property(s, "Footprint")?.rsplit(':').next()?.to_string()));
         let prefix = format!("{name}: ");
         for f in &plan.files {
             let own_symbols = f.path == symbol_lib(root, cat);

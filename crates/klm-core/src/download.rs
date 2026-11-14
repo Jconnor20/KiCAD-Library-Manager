@@ -4,16 +4,113 @@ use crate::library::{AttachKind, Check, LibraryRoot};
 use crate::sources::Source;
 use anyhow::{Context, Result, bail};
 use std::path::Path;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// Set to cut short every rate-limit wait (a stop in a bulk import); waits then end and the last answer is passed on.
+static ABORT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_abort(on: bool) {
+    ABORT.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn aborted() -> bool {
+    ABORT.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Sleeps `dur` in short steps, ending early on [`set_abort`]. True when it was cut short.
+pub fn sleep_unless_aborted(dur: Duration) -> bool {
+    let end = Instant::now() + dur;
+    while let Some(left) = end.checked_duration_since(Instant::now()).filter(|l| !l.is_zero()) {
+        if aborted() {
+            return true;
+        }
+        std::thread::sleep(left.min(Duration::from_millis(200)));
+    }
+    aborted()
+}
+
+/// Every download request in the process (whichever thread, whichever source) starts at least `gap` after the previous one, and
+/// a refusal pushes the next start back for all of them, so a burst of workers cannot keep hitting a host that has just said stop.
+/// The gap doubles (up to 4 s) with each refusal and shrinks back as requests succeed.
+const BASE_GAP: Duration = Duration::from_millis(350);
+static GATE: Mutex<(Option<Instant>, Duration)> = Mutex::new((None, BASE_GAP));
+
+fn take_turn() {
+    let wait = {
+        let mut g = GATE.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        let start = g.0.map_or(now, |n| n.max(now));
+        g.0 = Some(start + g.1);
+        start - now
+    };
+    note_wait("the server", wait, false);
+    sleep_unless_aborted(wait);
+}
+
+fn backed_off(wait: Duration) {
+    let mut g = GATE.lock().unwrap_or_else(|e| e.into_inner());
+    g.0 = Some(g.0.unwrap_or_else(Instant::now).max(Instant::now() + wait));
+    g.1 = (g.1 * 2).min(Duration::from_secs(4));
+}
+
+fn went_fine() {
+    let mut g = GATE.lock().unwrap_or_else(|e| e.into_inner());
+    g.1 = g.1.mul_f32(0.9).max(BASE_GAP);
+}
+
+/// Waits in progress because of a rate limit: who, until when, and whether the host refused (else it is our own pacing).
+static WAITS: Mutex<Vec<(&'static str, Instant, bool)>> = Mutex::new(Vec::new());
+
+/// Records that `who` is waiting `dur` on a rate limit, for [`held`]. Short pacing gaps are not worth showing.
+pub fn note_wait(who: &'static str, dur: Duration, refused: bool) {
+    if refused || dur >= Duration::from_millis(400) {
+        let mut w = WAITS.lock().unwrap_or_else(|e| e.into_inner());
+        w.retain(|(_, until, _)| *until > Instant::now());
+        w.push((who, Instant::now() + dur, refused));
+    }
+}
+
+/// The rate-limit wait with the most time left, if any: who, how long, and whether the host refused (429/403) rather than us pacing ourselves.
+pub fn held() -> Option<(&'static str, Duration, bool)> {
+    let now = Instant::now();
+    let mut w = WAITS.lock().unwrap_or_else(|e| e.into_inner());
+    w.retain(|(_, until, _)| *until > now);
+    w.iter().max_by_key(|(_, until, _)| *until).map(|(who, until, refused)| (*who, *until - now, *refused))
+}
 
 // Some datasheet hosts turn away anything that doesn't look like a browser.
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+/// Sends the request `build` makes, paced with every other download (see [`take_turn`]), and again after a wait (the server's
+/// `Retry-After`, else 3 s, 6 s, 12 s, 24 s) while the host answers 429, so a burst of imports slows down instead of failing.
+/// With `blocks_with_403` (EasyEDA's CDN answers a burst with 403, not 429) a 403 is retried too, after 10 s, 20 s, 40 s, 60 s.
+/// A stop ([`set_abort`]) ends the waiting and hands back the refusal.
+pub(crate) fn send_retrying(blocks_with_403: bool, build: impl Fn() -> reqwest::blocking::RequestBuilder) -> reqwest::Result<reqwest::blocking::Response> {
+    for attempt in 0..5u32 {
+        take_turn();
+        let resp = build().send()?;
+        let code = resp.status().as_u16();
+        if code != 429 && !(blocks_with_403 && code == 403) {
+            went_fine();
+            return Ok(resp);
+        }
+        let wait = Duration::from_secs(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or((if code == 403 { 10 } else { 3 }) << attempt).min(60));
+        backed_off(wait);
+        note_wait("the server", wait, true);
+        if sleep_unless_aborted(wait) {
+            return Ok(resp);
+        }
+    }
+    take_turn();
+    build().send()
+}
 
 /// Saves the PDF at `url` to `dest`. Redirects are followed. Many "datasheet" links lead to an HTML
 /// viewer page, so anything that doesn't start with `%PDF` is refused; `dest` is only written for a PDF.
 pub fn download_pdf(url: &str, dest: &Path) -> Result<()> {
     let http = reqwest::blocking::Client::builder().user_agent(BROWSER_USER_AGENT).timeout(Duration::from_secs(60)).build().expect("HTTP client");
-    let resp = http.get(url).send().with_context(|| format!("requesting {url}"))?;
+    let resp = send_retrying(false, || http.get(url)).with_context(|| format!("requesting {url}"))?;
     if !resp.status().is_success() {
         let hint = if matches!(resp.status().as_u16(), 403 | 429) { " (the server is refusing requests, likely rate limiting; try again in a few minutes)" } else { "" };
         bail!("{url}: HTTP {}{hint}", resp.status());
@@ -227,5 +324,14 @@ mod tests {
             assert!(p.datasheet_target.unwrap().starts_with(&base));
         }
         assert!(root.download_missing_datasheets().iter().all(|(mpn, _)| mpn != "GOOD"), "already local");
+    }
+
+    #[test]
+    fn waits_are_reported_while_they_last_and_short_pacing_is_not() {
+        note_wait("Quiet", Duration::from_millis(50), false);
+        assert!(held().is_none_or(|(who, ..)| who != "Quiet"), "a short pacing gap is not worth showing");
+        note_wait("Busy", Duration::from_secs(30), true);
+        let (who, left, refused) = held().expect("a 30 s refusal is held");
+        assert!(who == "Busy" && refused && left > Duration::from_secs(25));
     }
 }

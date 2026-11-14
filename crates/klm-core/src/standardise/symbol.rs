@@ -85,6 +85,36 @@ fn line_width(sym: &mut Sexpr, width: f64) -> Option<String> {
     (n > 0).then(|| format!("{n} line width(s) set to {} mm", fmt(width)))
 }
 
+/// Two-pin discretes (a TVS, a polarised capacitor) show neither pin names nor numbers, as in KiCad's
+/// Device library. Hidden pins don't count: two visible terminals make a two-pin part. Not for
+/// connectors, whose pin numbers matter: the caller picks by category.
+pub(crate) fn two_pin_labels(sym: &mut Sexpr) -> Option<String> {
+    let pins = sym.children("symbol").flat_map(|u| u.children("pin")).filter(|p| !p.child("hide").is_some_and(|h| h.arg(0) != Some("no")) && !p.items().contains(&Sexpr::Atom("hide".into()))).count();
+    if sym.child("power").is_some() || pins != 2 {
+        return None;
+    }
+    let yes = || Sexpr::list("hide", vec![Sexpr::Atom("yes".into())]);
+    let mut n = 0;
+    for head in ["pin_numbers", "pin_names"] {
+        match child_mut(sym, head) {
+            Some(Sexpr::List(v)) => {
+                // `(hide no)` or nothing shows them; a bare `hide` (old files) or `(hide yes)` hides them.
+                if v.iter().any(|c| *c == Sexpr::Atom("hide".into()) || (c.head() == Some("hide") && c.arg(0) != Some("no"))) {
+                    continue;
+                }
+                v.retain(|c| c.head() != Some("hide"));
+                v.push(yes());
+            }
+            _ => {
+                let at = 2.min(sym.items().len());
+                sym.items_mut().insert(at, Sexpr::list(head, vec![yes()]));
+            }
+        }
+        n += 1;
+    }
+    (n > 0).then(|| "pin names and numbers hidden (two-pin part)".to_string())
+}
+
 fn xy(x: &Sexpr) -> Option<(f64, f64)> {
     Some((num(x, 0)?, num(x, 1)?))
 }
@@ -121,9 +151,11 @@ pub(crate) fn field_positions(sym: &mut Sexpr) -> Option<String> {
     let cx = (x0 + x1) / 2.0;
     let mut moved = vec![];
     for (key, y) in [("Reference", y1 + 1.27), ("Value", y0 - 1.27)] {
-        let Some(at) = sym.items_mut().iter_mut().find(|p| p.head() == Some("property") && p.arg(0) == Some(key)).and_then(|p| child_mut(p, "at")) else { continue };
+        let Some(prop) = sym.items_mut().iter_mut().find(|p| p.head() == Some("property") && p.arg(0) == Some(key)) else { continue };
+        let centred = justify(prop, false);
+        let Some(at) = child_mut(prop, "at") else { continue };
         let turned = num(at, 2).is_some_and(|r| differs(r, 0.0));
-        if move_to(at, (cx, y)) | turned {
+        if move_to(at, (cx, y)) | turned | centred {
             if turned {
                 set_num(at, 2, 0.0);
             }
@@ -133,13 +165,60 @@ pub(crate) fn field_positions(sym: &mut Sexpr) -> Option<String> {
     (!moved.is_empty()).then(|| format!("{} moved {}", moved.join(" and "), if moved.len() == 2 { "above and below the body" } else { "next to the body" }))
 }
 
+/// Sets the text height of a property, adding the font if it has none.
+pub(crate) fn set_font_size(prop: &mut Sexpr, size: f64) {
+    let want = Sexpr::list("size", vec![Sexpr::Atom(fmt(size)), Sexpr::Atom(fmt(size))]);
+    let Some(Sexpr::List(fx)) = child_mut(prop, "effects") else {
+        prop.items_mut().push(Sexpr::list("effects", vec![Sexpr::list("font", vec![want])]));
+        return;
+    };
+    match fx.iter_mut().find(|c| c.head() == Some("font")) {
+        Some(Sexpr::List(font)) => match font.iter().position(|c| c.head() == Some("size")) {
+            Some(i) => font[i] = want,
+            None => font.push(want),
+        },
+        _ => fx.insert(0, Sexpr::list("font", vec![want])),
+    }
+}
+
+/// Left-justifies a property's text, or centres it. Returns whether that changed anything.
+pub(crate) fn justify(prop: &mut Sexpr, left: bool) -> bool {
+    let want = left.then(|| Sexpr::list("justify", vec![Sexpr::Atom("left".into())]));
+    let Some(Sexpr::List(fx)) = child_mut(prop, "effects") else {
+        if let (Sexpr::List(v), Some(w)) = (prop, want) {
+            v.push(Sexpr::list("effects", vec![w]));
+            return true;
+        }
+        return false;
+    };
+    match (fx.iter().position(|c| c.head() == Some("justify")), want) {
+        (Some(i), Some(w)) if fx[i] != w => fx[i] = w,
+        (Some(i), None) => _ = fx.remove(i),
+        (None, Some(w)) => fx.push(w),
+        _ => return false,
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sexpr::{parse, to_string};
 
     fn only(r: Rules) -> Rules {
-        Rules { symbol_text_size: None, pin_length_min: None, symbol_line_width: None, symbol_field_positions: false, ..r }
+        Rules { symbol_text_size: None, pin_length_min: None, symbol_line_width: None, symbol_field_positions: false, house_symbols: false, ..r }
+    }
+
+    #[test]
+    fn two_pin_parts_hide_pin_labels() {
+        let mut d = parse(r#"(symbol "D" (pin_names (offset 1.016) (hide no)) (symbol "D_1_1" (pin passive line (at -3.81 0 0) (length 2.54) (name "A") (number "1")) (pin passive line (at 3.81 0 180) (length 2.54) (name "K") (number "2"))))"#).unwrap();
+        assert_eq!(two_pin_labels(&mut d).as_deref(), Some("pin names and numbers hidden (two-pin part)"));
+        let s: String = to_string(&d).split_whitespace().collect();
+        assert!(s.contains("(pin_numbers(hideyes))") && s.contains("(pin_names(offset1.016)(hideyes))"), "{s}");
+        assert!(two_pin_labels(&mut d).is_none(), "second run changes nothing");
+        // Three visible pins (an IC) keep their labels; a hidden third pin does not make one.
+        assert!(two_pin_labels(&mut parse(&SYM.replace("(hide yes) ", "")).unwrap()).is_none());
+        assert!(two_pin_labels(&mut parse(SYM).unwrap()).is_some());
     }
 
     const SYM: &str = r#"(symbol "U1"

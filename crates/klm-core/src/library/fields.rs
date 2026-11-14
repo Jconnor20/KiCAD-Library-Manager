@@ -110,20 +110,6 @@ pub(super) fn same_geometry(a: &str, b: &str) -> bool {
     }
 }
 
-/// First `.subckt NAME` or `.model NAME` in a SPICE file.
-pub(super) fn spice_model_name(text: &str) -> Option<(&'static str, String)> {
-    text.lines().find_map(|l| {
-        let mut w = l.split_whitespace();
-        let kw = w.next()?.to_lowercase();
-        let name = w.next()?.to_string();
-        match kw.as_str() {
-            ".subckt" => Some(("subckt", name)),
-            ".model" => Some(("model", name)),
-            _ => None,
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,9 +140,4 @@ mod tests {
         assert_eq!(fp.arg(0), Some("Y"));
     }
 
-    #[test]
-    fn spice_names() {
-        assert_eq!(spice_model_name("* hi\n.SUBCKT LM358 1 2 3\n"), Some(("subckt", "LM358".into())));
-        assert_eq!(spice_model_name(".model D1N4148 D(Is=1n)"), Some(("model", "D1N4148".into())));
-    }
 }

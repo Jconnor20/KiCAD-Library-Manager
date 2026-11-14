@@ -253,6 +253,20 @@ fn step_box(text: &str) -> Option<Box3> {
             }
         }
     }
+    // A circle backing a single open edge is a trimmed arc (a fillet, a rounded body), which reaches
+    // nowhere near the full circle; its end points are already counted. Two or more open edges on one
+    // circle are a full circle split at its seam, so that still counts.
+    let (mut open, mut closed) = (HashMap::<String, usize>::new(), std::collections::HashSet::new());
+    for (_, args) in ents.values().filter(|e| e.0 == "EDGE_CURVE") {
+        if let [a, b, curve] = &refs(args)[..] {
+            if a == b {
+                closed.insert(curve.clone());
+            } else {
+                *open.entry(curve.clone()).or_default() += 1;
+            }
+        }
+    }
+    let arcs: std::collections::HashSet<_> = open.into_iter().filter(|(c, n)| *n == 1 && !closed.contains(c)).map(|(c, _)| c).collect();
     let mut b = None;
     for (id, (name, args)) in &ents {
         match *name {
@@ -261,7 +275,7 @@ fn step_box(text: &str) -> Option<Box3> {
                     grow(&mut b, p.map(|v| v * unit));
                 }
             }
-            "CIRCLE" => {
+            "CIRCLE" if closed.contains(*id) || !arcs.contains(*id) => {
                 let radius = numbers(args.rsplit(',').next().unwrap_or_default()).first().copied();
                 if let (Some(r), Some((c, d))) = (radius, refs(args).first().and_then(|a| placement.get(a))) {
                     let len = d.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
@@ -398,5 +412,42 @@ mod tests {
         let inch = "ISO-10303-21;\nDATA;\n#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=AXIS2_PLACEMENT_3D('',#1,#3,#4);\n#3=DIRECTION('',(0.,0.,1.));\n#4=DIRECTION('',(1.,0.,0.));\n#5=CIRCLE('',#2,0.5);\n#6=( NAMED_UNIT(*) SI_UNIT($,.METRE.) LENGTH_UNIT() 'INCH' );\nENDSEC;\n";
         let b = step_box(inch).unwrap();
         assert!((b.1[0] - 12.7).abs() < 1e-9 && b.1[2].abs() < 1e-9, "{b:?}");
+    }
+
+    #[test]
+    fn trimmed_arcs_do_not_count_as_full_circles() {
+        let head = "ISO-10303-21;
+DATA;
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=AXIS2_PLACEMENT_3D('',#1,#3,#4);
+#3=DIRECTION('',(0.,0.,1.));
+#4=DIRECTION('',(1.,0.,0.));
+#5=CIRCLE('',#2,5.);
+#6=CARTESIAN_POINT('',(1.,1.,1.));
+#7=VERTEX_POINT('',#6);
+#8=VERTEX_POINT('',#6);
+";
+        let arc = step_box(&format!("{head}#9=EDGE_CURVE('',#7,#7,#5,.T.);
+#10=VERTEX_POINT('',#11);
+#11=CARTESIAN_POINT('',(2.,1.,1.));
+#12=EDGE_CURVE('',#7,#10,#5,.T.);
+ENDSEC;
+")).unwrap();
+        // closed (#7 to #7) and open (#7 to #10) on the same circle: still treated as full
+        assert!((arc.1[0] - 5.0).abs() < 1e-9, "{arc:?}");
+        let arc = step_box(&format!("{head}#10=VERTEX_POINT('',#11);
+#11=CARTESIAN_POINT('',(2.,1.,1.));
+#12=EDGE_CURVE('',#7,#10,#5,.T.);
+ENDSEC;
+")).unwrap();
+        assert!((arc.1[0] - 2.0).abs() < 1e-9 && (arc.0[0] - 1.0).abs() < 1e-9, "{arc:?}");
+        // Two half edges on one circle (a seam split, as on a cylinder): still the full circle.
+        let split = step_box(&format!("{head}#10=VERTEX_POINT('',#11);
+#11=CARTESIAN_POINT('',(2.,1.,1.));
+#12=EDGE_CURVE('',#7,#10,#5,.T.);
+#13=EDGE_CURVE('',#10,#7,#5,.T.);
+ENDSEC;
+")).unwrap();
+        assert!((split.1[0] - 5.0).abs() < 1e-9, "{split:?}");
     }
 }

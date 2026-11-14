@@ -35,6 +35,7 @@ pub mod standardise;
 pub mod stdlib;
 pub mod sexpr;
 pub mod sources;
+pub mod spice;
 pub mod store;
 pub mod symbols;
 

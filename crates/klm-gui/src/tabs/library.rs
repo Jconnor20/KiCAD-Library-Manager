@@ -37,8 +37,12 @@ pub enum Msg {
     Attach { from: LibraryRoot, targets: Vec<LibraryRoot>, category: String, name: String, path: PathBuf },
     /// The datasheet finder has finished: (part, URL used or why not).
     DatasheetsDone(Vec<(String, Result<String, String>)>),
+    /// SPICE close-match / synthesis finished: (part, summary or error).
+    SimsDone(Vec<(String, Result<String, String>)>),
     /// Apply a batch plan (KiCad is closed, or the plan doesn't touch its tables).
     Batch(Progress),
+    /// A reimport finished: the part and the sources that supplied files, or why not.
+    Reimported(String, Result<Vec<String>, String>),
 }
 
 /// Something the user asked for on a row; `ui` carries it out and refreshes the view.
@@ -56,12 +60,16 @@ enum Action {
     Restyle { category: String, name: String },
     /// Make the part the active profile's house template for its class.
     HouseTemplate { category: String, name: String },
+    /// Ask before fetching the part's files from the sources again.
+    Reimport(Key),
     CopyToProject { category: String, name: String, overwrite: bool },
     FindDatasheets(LibraryRoot),
+    FindSims { root: LibraryRoot, targets: Option<Vec<Key>> },
     /// Show the dry run of these operations.
     Batch(Vec<Op>),
     Alternatives(Option<Key>),
-    Standardise(LibraryRoot),
+    /// `None` is the whole library, `Some` only those parts (and the footprints they use).
+    Standardise(LibraryRoot, Option<Vec<Key>>),
     Export(LibraryRoot),
     /// Show what deleting these parts would remove and keep.
     Delete(LibraryRoot, Vec<Key>),
@@ -110,6 +118,10 @@ pub struct LibraryTab {
     compliance_cache: std::sync::Arc<std::sync::Mutex<compliance::Cache>>,
     /// Files open in KiCad; a save reloads (the compliance cache is keyed on mtimes, so it re-runs by itself).
     kicad_edits: Vec<FileWatch>,
+    /// Library folder, when its files were last fingerprinted, and the fingerprint.
+    /// The part waiting for the user to confirm its reimport.
+    reimport: Option<Key>,
+    lib_watch: Option<(PathBuf, std::time::Instant, (usize, Option<std::time::SystemTime>))>,
     /// The profile and naming rules compliance is judged by; a change reloads.
     standard: (standardise::profile::Profile, klm_core::rules::Rules),
     /// The next frame starts a reload.
@@ -159,6 +171,8 @@ impl Default for LibraryTab {
             compliance_rx: None,
             compliance_cache: Default::default(),
             kicad_edits: vec![],
+            reimport: None,
+            lib_watch: None,
             standard: Default::default(),
             stale: true,
             generation: 0,
@@ -326,7 +340,15 @@ fn file_chips(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, downloading: bool
     }
     // Sim models are optional: the inspector always lists the slot, the table only when there is something to say.
     if with_sim || p.sim != Check::Missing {
-        chip(ui, "SIM", "Sim model", if p.sim == Check::Missing { Cell::Optional } else { cell(p.sim) });
+        let r = chip(ui, "SIM", "Sim model", if p.sim == Check::Missing { Cell::Optional } else { cell(p.sim) });
+        if p.sim != Check::Ok
+            && !downloading
+            && r.on_hover_text("Click to find a close SPICE model or generate one from datasheet & similar models")
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+        {
+            *action = Action::FindSims { root: root.clone(), targets: Some(vec![(p.category.clone(), p.name.clone())]) };
+        }
     }
 }
 
@@ -408,6 +430,17 @@ impl LibraryTab {
             self.stale |= self.kicad_edits.iter_mut().fold(false, |a, w| w.changed() | a);
             ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
         }
+        // Anything saved in KiCad (or by hand) comes back: poll the shown library's files every couple of seconds.
+        if let Some(root) = if self.scope == Scope::Global { &global } else { &project } {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs(2));
+            if self.lib_watch.as_ref().is_none_or(|(_, t, _)| t.elapsed() > std::time::Duration::from_secs(2)) {
+                let sig = root.signature();
+                if self.lib_watch.as_ref().is_some_and(|(d, _, s)| *d == root.dir && *s != sig) {
+                    self.stale = true;
+                }
+                self.lib_watch = Some((root.dir.clone(), std::time::Instant::now(), sig));
+            }
+        }
         match self.show(ui, global.as_ref(), project.as_ref()) {
             Action::None => {}
             Action::EditInKicad { editor, category, name } => {
@@ -425,6 +458,7 @@ impl LibraryTab {
                 }
             }
             Action::FindDatasheets(root) => self.find_datasheets(root, cx),
+            Action::FindSims { root, targets } => self.find_sims(root, targets, cx),
             Action::Batch(ops) => self.batch = Some(BatchDialog::Review(batch::plan(ops, global.as_ref(), project.as_ref()))),
             Action::Alternatives(open_on) => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
@@ -432,11 +466,11 @@ impl LibraryTab {
                     self.alternatives = Some(AlternativesPanel::new(root, &cx.ctx, open_on));
                 }
             }
-            Action::Standardise(root) => {
+            Action::Standardise(root, only) => {
                 let (tx, rx) = mpsc::channel();
                 let (profile, naming, ctx) = (cx.settings.standard.clone(), cx.settings.rules.clone(), cx.ctx.clone());
                 std::thread::spawn(move || {
-                    let _ = tx.send(standardise::plan(&root, &profile, &naming));
+                    let _ = tx.send(standardise::plan_for(&root, &profile, &naming, only.as_deref()));
                     ctx.request_repaint();
                 });
                 self.dry = Some(Dry::Planning(rx));
@@ -500,6 +534,7 @@ impl LibraryTab {
                     }
                 }
             }
+            Action::Reimport(key) => self.reimport = Some(key),
             Action::Attach { scope, category, name, path } => self.attach_dialog = Some(AttachDialog::new(scope, category, name, path)),
             Action::CopyToProject { category, name, overwrite } => {
                 // Only a library new to the project touches KiCad's tables.
@@ -541,9 +576,22 @@ impl LibraryTab {
                 self.stale = true;
                 self.finder_results = Some(results);
             }
+            Msg::SimsDone(results) => {
+                self.downloading = false;
+                self.stale = true;
+                self.finder_results = Some(results);
+            }
             Msg::Batch(p) => {
                 if batch_dialog::progress(&mut self.batch, p, cx).is_some() {
                     self.stale = true;
+                }
+            }
+            Msg::Reimported(name, result) => {
+                cx.busy = false;
+                self.stale = true;
+                match result {
+                    Ok(used) => cx.log(Level::Info, format!("Reimported {name} from {}", used.join(", "))),
+                    Err(e) => cx.log(Level::Error, format!("Could not reimport {name}: {e}")),
                 }
             }
             Msg::Edit { scope, targets, edit } => self.edit(scope, &targets, &edit, cx),
@@ -559,6 +607,36 @@ impl LibraryTab {
             batch_dialog::start(&mut self.batch, plan, cx, |p| AppMsg::Library(Msg::Batch(p)));
         }
         self.dry_run(cx);
+        if let Some((category, name)) = self.reimport.clone() {
+            let mut choice = None;
+            egui::Window::new("Reimport part").collapsible(false).resizable(false).show(&cx.ctx, |ui| {
+                ui.label(format!("Fetch {name} from the enabled sources again and replace its symbol, footprint, 3D model and datasheet?"));
+                ui.weak("Edits you made to this part are replaced. Undo it in History.");
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(!cx.busy, egui::Button::new("Reimport")).clicked() {
+                        choice = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        choice = Some(false);
+                    }
+                });
+            });
+            if let Some(go) = choice {
+                self.reimport = None;
+                let root = if self.scope == Scope::Global { &global } else { &project };
+                if let (true, Some(root)) = (go, root) {
+                    cx.busy = true;
+                    cx.log(Level::Info, format!("Reimporting {name}…"));
+                    let (root, sources, tx, ctx, work) = (root.clone(), cx.sources.clone(), cx.tx.clone(), cx.ctx.clone(), crate::new_work_dir());
+                    std::thread::spawn(move || {
+                        let result = root.reimport(&category, &name, &sources, &work).map_err(|e| format!("{e:#}"));
+                        let _ = std::fs::remove_dir_all(&work);
+                        let _ = tx.send(AppMsg::Library(Msg::Reimported(name, result)));
+                        ctx.request_repaint();
+                    });
+                }
+            }
+        }
         if let Some(results) = &self.finder_results {
             let mut open = true;
             let found = results.iter().filter(|(_, r)| r.is_ok()).count();
@@ -891,6 +969,35 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
         std::thread::spawn(move || {
             let results = root.find_missing_datasheets(&sources).into_iter().map(|(mpn, r)| (mpn, r.map_err(|e| format!("{e:#}")))).collect();
             let _ = tx.send(AppMsg::Library(Msg::DatasheetsDone(results)));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Finds close SPICE matches or generates SPICE models from datasheets & similar parts on a worker thread.
+    fn find_sims(&mut self, root: LibraryRoot, targets: Option<Vec<Key>>, cx: &mut AppCtx) {
+        self.downloading = true;
+        let (tx, ctx, sim_cfg) = (cx.tx.clone(), cx.ctx.clone(), cx.settings.sim.clone());
+        cx.log.push("Looking for close SPICE models or generating from datasheets…".into());
+        std::thread::spawn(move || {
+            let todo: Vec<(String, String)> = match targets {
+                Some(t) => t,
+                None => root
+                    .list_parts()
+                    .into_iter()
+                    .filter(|p| p.sim != Check::Ok)
+                    .map(|p| (p.category, p.name))
+                    .collect(),
+            };
+            let mut results = Vec::with_capacity(todo.len());
+            for (cat, name) in todo {
+                let res = match root.resolve_and_attach_sim(&cat, &name, &sim_cfg.spice_dirs, sim_cfg.auto_generate_from_datasheet) {
+                    Ok(Some(r)) => Ok(r.origin.summary()),
+                    Ok(None) => Err("no matching SPICE model or datasheet specs".into()),
+                    Err(e) => Err(format!("{e:#}")),
+                };
+                results.push((name, res));
+            }
+            let _ = tx.send(AppMsg::Library(Msg::SimsDone(results)));
             ctx.request_repaint();
         });
     }
@@ -1335,11 +1442,24 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
     /// The buttons on the right of the header, laid out right to left: Standardise, More, then the ghosts.
     fn tools(&mut self, ui: &mut egui::Ui, root: Option<&LibraryRoot>, project: Option<&LibraryRoot>, narrow: bool, action: &mut Action) {
         let style = ui.style().clone();
-        let std = ui.add_enabled(root.is_some(), ui_kit::primary("Standardise…", &style.visuals)).on_hover_text("Fix symbols and footprints to the rules in Settings → Standards. Shows what changes first.");
+        // Ticked parts narrow Standardise to them; the whole library stays one menu click away.
+        let picked = sorted(&self.selected);
+        let (label, hover) = if picked.is_empty() {
+            ("Standardise…".to_string(), "Fix symbols and footprints to the rules in Settings → Standards. Shows what changes first. Tick parts to standardise only those.")
+        } else {
+            (format!("Standardise {} selected…", picked.len()), "Fix only the ticked parts and the footprints they use to the rules in Settings → Standards. Shows what changes first. More → Standardise whole library does everything.")
+        };
+        let std = ui.add_enabled(root.is_some(), ui_kit::primary(&label, &style.visuals)).on_hover_text(hover);
         if let (true, Some(root)) = (std.clicked(), root) {
-            *action = Action::Standardise(root.clone());
+            *action = Action::Standardise(root.clone(), (!picked.is_empty()).then_some(picked.clone()));
         }
         ui.menu_button("More", |ui| {
+            if !picked.is_empty() && ui.add_enabled(root.is_some(), egui::Button::new("Standardise whole library…")).on_hover_text("Fix every symbol and footprint, not just the ticked parts").clicked() {
+                if let Some(root) = root {
+                    *action = Action::Standardise(root.clone(), None);
+                }
+                ui.close();
+            }
             if narrow {
                 if ui.add_enabled(project.is_some(), egui::Button::new("Health report…")).on_hover_text("Everything wrong or untidy in the project's library").on_disabled_hover_text("Choose a project first").clicked() {
                     *action = Action::Health;
@@ -1353,6 +1473,12 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             if ui.add_enabled(root.is_some() && !self.downloading, egui::Button::new("Find missing datasheets")).on_hover_text("For parts with no working datasheet, try the existing link, then search the enabled sources by MPN, and save the first real PDF").clicked() {
                 if let Some(root) = root {
                     *action = Action::FindDatasheets(root.clone());
+                }
+                ui.close();
+            }
+            if ui.add_enabled(root.is_some() && !self.downloading, egui::Button::new("Find / Generate SPICE models")).on_hover_text("For parts without a simulation model, find a close match in the library/KiCad/SPICE folders or generate one from datasheet & similar models").clicked() {
+                if let Some(root) = root {
+                    *action = Action::FindSims { root: root.clone(), targets: None };
                 }
                 ui.close();
             }
@@ -1406,6 +1532,9 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 let fill = ui.add_enabled(!self.downloading, small("Fill missing files…"));
                 if fill.on_hover_text("For every part in this library with no working datasheet, try the existing link, then search the enabled sources by MPN").clicked() {
                     *action = Action::FindDatasheets(root.clone());
+                }
+                if ui.add_enabled(!self.downloading, small("Find SPICE…")).on_hover_text("Find close SPICE models or generate from datasheet & similar models for the ticked parts").clicked() {
+                    *action = Action::FindSims { root: root.clone(), targets: Some(targets.clone()) };
                 }
                 if ui.add(small("Export…")).on_hover_text("Write the ticked parts, with their footprints and 3D models, to one ZIP").clicked() {
                     *action = Action::Export(root.clone());
@@ -1463,6 +1592,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                             ui.ctx().request_repaint();
                         }
                         ui.menu_button("Actions", |ui| {
+                            if ui.button("Reimport…").on_hover_text("Fetch this part's symbol, footprint, 3D model and datasheet from the sources again, replacing the library copy").clicked() {
+                                *action = Action::Reimport(key.clone());
+                                ui.close();
+                            }
                             if ui.button("Preview").on_hover_text("Show the symbol, footprint and 3D model large").clicked() {
                                 *action = Action::Preview { category: key.0.clone(), name: key.1.clone() };
                                 ui.close();

@@ -126,7 +126,7 @@ pub fn default_class(key: &str) -> ClassInfo {
                 f("Temp range", false, None, &["Operating Temperature"]),
             ],
             "{MPN} {Interface} {Supply range}",
-            "",
+            "{Short MPN}",
             "ic {Interface}",
         ),
         _ => (vec![], "", "", ""),
@@ -251,15 +251,33 @@ pub fn field(sym: &Sexpr, name: &str) -> Option<String> {
     property(sym, name).map(str::trim).filter(|v| !v.is_empty()).map(String::from)
 }
 
+/// The MPN without its ordering suffix (package, tape, grade): cut after the last digit when 2+ letters
+/// follow, so `INA226AIDGSR` -> `INA226`; a single trailing letter (`RP2350B`) is a variant and stays.
+pub fn short_mpn(mpn: &str) -> String {
+    let Some(i) = mpn.char_indices().rev().find(|(_, c)| c.is_ascii_digit()).map(|(i, _)| i + 1) else { return mpn.into() };
+    let tail = &mpn[i..];
+    let ok = tail.chars().all(|c| c.is_alphabetic() || "-#/".contains(c)) && tail.chars().filter(|c| c.is_alphabetic()).count() >= 2;
+    if ok { mpn[..i].into() } else { mpn.into() }
+}
+
 /// What `info`'s templates give for this symbol: (property, rendered text). A template none of whose
 /// fields the symbol has is skipped, so a bare part isn't given a Description of just "Resistor".
+/// `{Short MPN}` is computed from the MPN field.
 pub fn rebuilt(sym: &Sexpr, info: &ClassInfo) -> Vec<(&'static str, String)> {
+    let get = |n: &str| if n == "Short MPN" { field(sym, "MPN").map(|m| short_mpn(&m)) } else { field(sym, n) };
     [("Description", &info.description), ("Value", &info.value), ("ki_keywords", &info.keywords)]
         .into_iter()
         .filter(|(_, t)| !t.is_empty())
-        .filter(|(_, t)| find_placeholders(t).any(|n| field(sym, n).is_some()))
-        .map(|(k, t)| (k, render(t, &|n| field(sym, n))))
+        .filter(|(_, t)| find_placeholders(t).any(|n| get(n).is_some()))
+        .map(|(k, t)| (k, render(t, &get)))
         .collect()
+}
+
+/// Whether `t` reads as a number in `unit` ("2.2uF", "10kΩ", "50V", "10%"): starts with a digit, ends in the unit.
+fn carries_unit(t: &str, unit: &str) -> bool {
+    let l = t.to_lowercase();
+    let ends = if unit == "Ω" { l.ends_with('ω') || l.ends_with("ohm") || l.ends_with("ohms") } else { l.ends_with(&unit.to_lowercase()) };
+    ends && t.starts_with(|c: char| c.is_ascii_digit() || c == '.')
 }
 
 /// Each field of `info` with the value `part` gives it, in the house form: the part's own data
@@ -303,6 +321,22 @@ pub fn fix(sym: &mut Sexpr, category: &str, profile: &Profile, part: Option<&Par
         if field(sym, &name).is_none() {
             set_property(sym, &name, &v);
             changes.push(format!("{name}: added {v}"));
+        }
+    }
+    // Library symbols often carry "2.2uF 50V X7R ±10% 1206 ..." in the Description only: take a unit's value
+    // from there when the class has one field in that unit and the Description exactly one token in it.
+    let desc = field(sym, "Description").unwrap_or_default();
+    for fd in &info.fields {
+        let Some(unit) = &fd.unit else { continue };
+        if field(sym, &fd.name).is_some() || info.fields.iter().filter(|o| o.unit.as_ref() == Some(unit)).count() != 1 {
+            continue;
+        }
+        let mut hits = desc.split(|c: char| c.is_whitespace() || c == ',' || c == ';').map(|t| t.trim_start_matches(['±', '+'])).filter(|t| carries_unit(t, unit));
+        if let (Some(tok), None) = (hits.next(), hits.next()) {
+            if let Some(v) = normalise(unit, tok) {
+                set_property(sym, &fd.name, &v);
+                changes.push(format!("{}: added {v} (from Description)", fd.name));
+            }
         }
     }
     for fd in &info.fields {
@@ -366,24 +400,22 @@ fn set_hidden(sym: &mut Sexpr, name: &str, hide: bool, nth: usize) {
     }
 }
 
-/// The profile the library features use, and whether imports apply it. Set by `symbols::configure`.
-static ACTIVE: Mutex<Option<(Profile, bool)>> = Mutex::new(None);
+/// The profile the library features use. Set by `symbols::configure`.
+static ACTIVE: Mutex<Option<Profile>> = Mutex::new(None);
 
-pub fn configure(profile: &Profile, on_import: bool) {
-    *ACTIVE.lock().unwrap_or_else(|e| e.into_inner()) = Some((profile.clone(), on_import));
+/// Part information is always filled on import; only the symbol redraw is a setting.
+pub fn configure(profile: &Profile) {
+    *ACTIVE.lock().unwrap_or_else(|e| e.into_inner()) = Some(profile.clone());
 }
 
 /// The configured profile, or the built-in one before anything is configured.
 pub fn active() -> Profile {
-    ACTIVE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|a| a.0.clone()).unwrap_or_default()
+    ACTIVE.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default()
 }
 
-/// Import step: fills and rebuilds the part information of the symbol about to be written, if house style on import is on.
+/// Import step: fills and rebuilds the part information (fields, Description, Value, Keywords) of the symbol about to be written.
 pub(crate) fn fix_imported(category: &str, symbol: &mut Sexpr, part: &Part) {
-    let on = ACTIVE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|a| (a.0.clone(), a.1));
-    if let Some((profile, true)) = on {
-        fix(symbol, category, &profile, Some(part));
-    }
+    fix(symbol, category, &active(), Some(part));
 }
 
 #[cfg(test)]
@@ -478,5 +510,50 @@ mod tests {
         assert_eq!(property(&sym, "ki_keywords"), Some("capacitor cap 100nF 16V 0603"));
         assert!(changes.contains(&"Capacitance: 0.1uF -> 100nF".to_string()), "{changes:?}");
         assert!(fix(&mut sym, "Capacitors", &Profile::default(), None).is_empty(), "second run is a no-op");
+    }
+
+    #[test]
+    fn missing_unit_fields_come_from_the_description() {
+        let mut sym = parse(r#"(symbol "C1" (property "Value" "C1") (property "Description" "2.2uF 50V X7R ±10% 1206 Multilayer Ceramic Capacitors MLCC - SMD/SMT ROHS") (property "MPN" "CL31"))"#).unwrap();
+        let changes = fix(&mut sym, "Capacitors", &Profile::default(), None);
+        assert_eq!(property(&sym, "Capacitance"), Some("2.2uF"));
+        assert_eq!(property(&sym, "Voltage"), Some("50V"));
+        assert_eq!(property(&sym, "Tolerance"), Some("10%"));
+        assert_eq!(property(&sym, "Value"), Some("2.2uF"));
+        assert!(changes.contains(&"Capacitance: added 2.2uF (from Description)".to_string()), "{changes:?}");
+        // Resistor and inductor descriptions as the libraries have them; Inductor's two "A" fields stay empty.
+        let mut r = parse(r#"(symbol "R1" (property "Description" "-55℃~+155℃ 100mW 10kΩ 75V Thick Film Resistor ±1% ±100ppm/℃ 0603 Chip Resistor"))"#).unwrap();
+        fix(&mut r, "Resistors", &Profile::default(), None);
+        assert_eq!((property(&r, "Resistance"), property(&r, "Power"), property(&r, "Tolerance")), (Some("10kΩ"), Some("100mW"), Some("1%")));
+        let mut l = parse(r#"(symbol "L1" (property "Description" "1.2A 1.4A 22uH 363mΩ ±20% SMD,4.4x4.2mm Power Inductors ROHS"))"#).unwrap();
+        fix(&mut l, "Inductors", &Profile::default(), None);
+        assert_eq!((property(&l, "Inductance"), property(&l, "DCR"), property(&l, "Tolerance")), (Some("22uH"), Some("363mΩ"), Some("20%")));
+        assert!(property(&l, "Current").is_none() && property(&l, "Saturation current").is_none());
+        // Two tokens in one unit, or a bare number: nothing is guessed.
+        let mut a = parse(r#"(symbol "C2" (property "Description" "10uF 100nF 16 X7R"))"#).unwrap();
+        fix(&mut a, "Capacitors", &Profile::default(), None);
+        assert!(property(&a, "Capacitance").is_none() && property(&a, "Voltage").is_none());
+    }
+
+    #[test]
+    fn short_mpn_drops_the_ordering_suffix() {
+        for (mpn, short) in [
+            ("INA226AIDGSR", "INA226"),
+            ("TPS62933DRLR", "TPS62933"),
+            ("LMR54406DBVR", "LMR54406"),
+            ("W25Q128JVSIQ", "W25Q128"),
+            ("LSM6DSV320XTR", "LSM6DSV320"),
+            ("MMC5983MA", "MMC5983"),
+            ("RP2350B", "RP2350B"),
+            ("LM358P", "LM358P"),
+            ("RP2040", "RP2040"),
+            ("AT32F421G8U7", "AT32F421G8U7"),
+            ("ABC", "ABC"),
+        ] {
+            assert_eq!(short_mpn(mpn), short, "{mpn}");
+        }
+        let mut sym = parse(r#"(symbol "U1" (property "Value" "INA226AIDGSR") (property "MPN" "INA226AIDGSR"))"#).unwrap();
+        fix(&mut sym, "ICs", &Profile::default(), None);
+        assert_eq!(property(&sym, "Value"), Some("INA226"));
     }
 }

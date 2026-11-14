@@ -47,6 +47,8 @@ struct Files {
     fps: HashMap<String, Vec<(String, PathBuf)>>,
     /// File name (lowercase) → paths.
     models: HashMap<String, Vec<PathBuf>>,
+    /// SPICE / simulation files (`.lib`, `.cir`, `.sub`, `.sp`, `.spi`, `.ckt`, `.mod`, `.ibs`).
+    sims: Vec<PathBuf>,
     foreign: Vec<PathBuf>,
     /// Altium projects, which hold no library data themselves.
     libpkgs: Vec<PathBuf>,
@@ -72,6 +74,7 @@ fn walk(dir: &Path, f: &mut Files) {
         match ext.as_str() {
             "kicad_sym" => f.syms.push(p),
             "lib" if std::fs::read(&p).is_ok_and(|b| String::from_utf8_lossy(&b[..b.len().min(64)]).to_lowercase().starts_with("eeschema-library")) => f.legacy_syms.push(p),
+            "lib" if std::fs::read_to_string(&p).is_ok_and(|t| crate::spice::is_spice_text(&t)) => f.sims.push(p),
             "kicad_mod" if pretty => {
                 let lib = p.parent().and_then(|d| d.file_stem()).unwrap_or_default().to_string_lossy().to_lowercase();
                 let stem = p.file_stem().unwrap_or_default().to_string_lossy().to_lowercase();
@@ -79,6 +82,7 @@ fn walk(dir: &Path, f: &mut Files) {
             }
             "step" | "stp" | "wrl" => f.models.entry(name.to_lowercase()).or_default().push(p),
             "libpkg" => f.libpkgs.push(p),
+            ext if crate::spice::is_spice_ext(ext) => f.sims.push(p),
             _ if is_foreign(&p) => f.foreign.push(p),
             _ => {}
         }
@@ -216,6 +220,7 @@ fn part_from(sym: &Sexpr, lib: &str, files: &Files, root: &Path) -> Part {
         supplier_ids: ["LCSC", "DigiKey", "Mouser", "Farnell"].iter().filter_map(|k| Some((k.to_string(), field(&[k])?))).collect(),
         ..Part::default()
     };
+    part.sim_files = find_sim_files(sym, &part.mpn, files, root);
     if fp_name.is_empty() {
         return part;
     }
@@ -285,6 +290,60 @@ fn find_model(fp: &Path, files: &Files, root: &Path) -> Option<Vec<PathBuf>> {
         }
     }
     Some(all)
+}
+
+/// Resolves a SPICE file referenced by `Sim.Library` on `sym`, or a matching walked SPICE file in `files.sims`.
+fn find_sim_files(sym: &Sexpr, mpn: &str, files: &Files, root: &Path) -> Vec<PathBuf> {
+    if let Some(raw) = property(sym, "Sim.Library").map(str::trim).filter(|s| !s.is_empty()) {
+        let uri = raw.replace('\\', "/");
+        let tail = match uri.strip_prefix("${") {
+            Some(rest) => rest.split_once('}').map_or("", |(_, t)| t).trim_start_matches('/').to_string(),
+            None => uri.clone(),
+        };
+        // Check expanded env vars like ${KICAD9_SYMBOL_DIR} first, then paths relative to `root` or direct file.
+        if let Some(rest) = uri.strip_prefix("${").and_then(|s| s.split_once('}'))
+            && let Some(base) = crate::kicad_env::default_var_dir(rest.0)
+        {
+            let p = base.join(rest.1.trim_start_matches('/'));
+            if p.is_file() {
+                return vec![p];
+            }
+        }
+        let abs = PathBuf::from(&uri);
+        for cand in [root.join(&tail), abs] {
+            if cand.is_file() {
+                return vec![cand];
+            }
+        }
+        if let Some(fname) = Path::new(&tail).file_name().and_then(|f| f.to_str())
+            && let Some(found) = files.sims.iter().find(|p| {
+                p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case(fname))
+            })
+        {
+            return vec![found.clone()];
+        }
+    }
+
+    let sim_name = property(sym, "Sim.Name").map(str::trim).unwrap_or("");
+    let want_key = crate::matching::key(if sim_name.is_empty() { mpn } else { sim_name });
+    if want_key.is_empty() {
+        return Vec::new();
+    }
+    for sim_path in &files.sims {
+        let stem_key = sim_path.file_stem().and_then(|s| s.to_str()).map(crate::matching::key).unwrap_or_default();
+        if stem_key == want_key {
+            return vec![sim_path.clone()];
+        }
+        if let Ok(text) = std::fs::read_to_string(sim_path) {
+            let models = crate::spice::parse_models(&text);
+            if models.iter().any(|m| {
+                crate::matching::same_mpn(&m.name, mpn) || (!sim_name.is_empty() && m.name.eq_ignore_ascii_case(sim_name))
+            }) {
+                return vec![sim_path.clone()];
+            }
+        }
+    }
+    Vec::new()
 }
 
 #[cfg(test)]

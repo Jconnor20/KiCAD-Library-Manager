@@ -29,7 +29,9 @@ impl Lcsc {
     }
 
     fn get_bytes(&self, url: &str) -> Result<Vec<u8>> {
-        let resp = self.http.get(url).send().with_context(|| format!("requesting {url}"))?;
+        // A part is several requests (component, 3D model, datasheet); keep them apart so the CDN doesn't see a burst.
+        std::thread::sleep(Duration::from_millis(800));
+        let resp = crate::download::send_retrying(true, || self.http.get(url)).with_context(|| format!("requesting {url}"))?;
         if !resp.status().is_success() {
             let hint = if matches!(resp.status().as_u16(), 403 | 429) { " (the server is refusing requests, likely rate limiting; try again in a few minutes)" } else { "" };
             bail!("{url}: HTTP {}{hint}", resp.status());
@@ -116,7 +118,7 @@ impl Source for Lcsc {
 
     fn search(&self, query: &str) -> Result<Vec<Part>> {
         let body = json!({"keyword": query, "currentPage": 1, "pageSize": SEARCH_LIMIT});
-        let resp = self.http.post(SEARCH_URL).json(&body).send().context("LCSC search")?;
+        let resp = crate::download::send_retrying(false, || self.http.post(SEARCH_URL).json(&body)).context("LCSC search")?;
         if !resp.status().is_success() {
             bail!("LCSC search: HTTP {}", resp.status());
         }

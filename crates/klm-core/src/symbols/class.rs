@@ -65,7 +65,8 @@ pub fn detect(category: &str, sym: &Sexpr, pins: usize, rules: &Rules) -> Result
         "Capacitors" => (Class::Capacitor, 2),
         "Inductors" if has(&["ferrite", "bead", "transformer", "choke", "array", "emi", "filter"]) => return Err("ferrite beads, chokes and transformers have no house style".into()),
         "Inductors" => (Class::Inductor, 2),
-        "Diodes" if has(&["zener", "tvs", "schottky", "varactor", "bridge", "array", "dual", "photo", "esd", "bidirectional"]) => return Err("only plain diodes have a house style".into()),
+        // Vendor descriptions often say only "Diode <MPN>", so well-known TVS and Schottky families are told by part number.
+        "Diodes" if has(&["zener", "tvs", "schottky", "varactor", "bridge", "array", "dual", "photo", "esd", "bidirectional", "smaj", "smbj", "smcj", "smf", "p6ke", "sm6t", "ss1", "ss2", "ss3", "ss5", "1n58", "b5819", "bat4", "bat5", "rclamp"]) => return Err("only plain diodes have a house style".into()),
         "Diodes" | "Optoelectronics" if exact(&["led", "leds"]) => (Class::Led, 2),
         "Diodes" => (Class::Diode, 2),
         "Transistors" if has(&["mosfet", "fet", "jfet", "igbt", "nmos", "pmos", "darlington", "array", "digital", "brt", "biased", "prebiased", "phototransistor", "photo", "resistor"]) => return Err("only plain bipolar transistors have a house style".into()),
@@ -106,6 +107,8 @@ mod tests {
         assert!(detect("Transistors", &sym("transistor"), 3, &r).is_err(), "polarity unknown");
         assert!(detect("Capacitors", &sym("Tantalum"), 2, &r).is_err());
         assert!(detect("Diodes", &sym("Zener diode"), 2, &r).is_err());
+        assert!(detect("Diodes", &sym("Diode SMCJ18A-13-F"), 2, &r).is_err(), "TVS by part number");
+        assert!(detect("Diodes", &sym("Diode SS14"), 2, &r).is_err(), "Schottky by part number");
         assert!(detect("Connectors", &sym(""), 4, &r).is_err());
         assert!(detect("Power", &sym("Coin cell battery"), 3, &r).is_err());
     }

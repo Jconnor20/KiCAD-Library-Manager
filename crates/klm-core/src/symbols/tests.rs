@@ -94,16 +94,52 @@ fn every_class_is_redrawn_and_keeps_its_fields() {
 fn pins_go_where_their_role_says() {
     // Diode: the pin named K is the cathode, whatever its number.
     let (_, d, _) = restyled("D1", "D", "Diode", "Diodes", &[("passive", "1", "A", false), ("passive", "2", "K", false)]);
-    assert_eq!(pin_at(&d, "2"), "(at -3.81 0 0)");
-    assert_eq!(pin_at(&d, "1"), "(at 3.81 0 180)");
+    assert_eq!(pin_at(&d, "2"), "(at -2.54 0 0)");
+    assert_eq!(pin_at(&d, "1"), "(at 2.54 0 180)");
     // Resistor: lowest number on top.
     let (_, r, _) = restyled("R1", "R", "Resistor", "Resistors", &[("passive", "2", "2", false), ("passive", "1", "1", false)]);
-    assert_eq!(pin_at(&r, "1"), "(at 0 3.81 270)");
+    assert_eq!(pin_at(&r, "1"), "(at 0 5.08 270)");
     // BJT by name, not number.
     let (_, q, _) = restyled("Q1", "Q", "NPN", "Transistors", &[("passive", "1", "C", false), ("passive", "2", "B", false), ("passive", "3", "E", false)]);
     assert_eq!(pin_at(&q, "2"), "(at -5.08 0 0)");
     assert_eq!(pin_at(&q, "1"), "(at 2.54 5.08 270)");
     assert_eq!(pin_at(&q, "3"), "(at 2.54 -5.08 90)");
+}
+
+#[test]
+fn built_in_two_pin_pins_are_on_the_100_mil_grid_and_unlabelled() {
+    for (name, desc, cat, pins) in [("R1", "Resistor", "Resistors", ("1", "2")), ("C1", "Capacitor", "Capacitors", ("1", "2")), ("L1", "Inductor", "Inductors", ("1", "2")), ("D1", "Diode", "Diodes", ("A", "K")), ("LED1", "Red LED", "Optoelectronics", ("K", "A"))] {
+        let (_, new, _) = restyled(name, "U", desc, cat, &[("passive", "1", pins.0, false), ("passive", "2", pins.1, false)]);
+        let on = |v: f64| ((v / 2.54).round() * 2.54 - v).abs() < 1e-6;
+        for p in source_pins(&new).unwrap() {
+            let at = p.child("at").unwrap();
+            assert!(on(at.arg(0).unwrap().parse().unwrap()) && on(at.arg(1).unwrap().parse().unwrap()), "{name} pin {} off the grid", pin_number(&p));
+        }
+        let s: String = to_string(&new).split_whitespace().collect();
+        assert!(s.contains("(pin_numbers(hideyes))") && s.contains("(hideyes))"), "{name} shows its pin labels");
+    }
+}
+
+#[test]
+fn an_edited_built_in_template_is_what_restyle_uses() {
+    let mut t = template::of(Class::Resistor).unwrap().clone();
+    let mut shapes = t.shapes();
+    shapes[0].geo = shapes::Geo::Rect((-1.016, -5.08), (1.016, 5.08));
+    t.set_shapes(&shapes);
+    t.field_sizes = Some([2.0, 1.5]);
+    t.slots.to_mut()[0].1 = 7.62;
+    t.slots.to_mut()[1].1 = -7.62;
+    t.fields = Some([(-2.54, 2.54, 0.0), (-2.54, -2.54, 0.0)]);
+    let mut profile = Profile::default();
+    profile.templates.insert("Resistor".into(), to_string(&t.to_symbol(Class::Resistor).unwrap()));
+    let sym = parse(&vendor("R1", "U", "Resistor", &[("passive", "1", "~", false), ("passive", "2", "~", false)])).unwrap();
+    let new = restyle(&sym, Class::Resistor, &profile).unwrap();
+    assert_eq!(pin_at(&new, "1"), "(at 0 7.62 270)");
+    let at = |k: &str| to_string(new.children("property").find(|p| p.arg(0) == Some(k)).unwrap().child("at").unwrap()).trim().to_string();
+    assert_eq!((at("Reference"), at("Value")), ("(at -2.54 2.54 0)".into(), "(at -2.54 -2.54 0)".into()));
+    let size = |k: &str| new.children("property").find(|p| p.arg(0) == Some(k)).unwrap().child("effects").unwrap().child("font").unwrap().child("size").unwrap().arg(0).unwrap().to_string();
+    assert_eq!((size("Reference"), size("Value")), ("2".into(), "1.5".into()));
+    assert!(to_string(&new).contains("(start -1.016 -5.08)"), "the edited body is drawn");
 }
 
 #[test]

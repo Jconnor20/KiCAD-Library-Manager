@@ -92,11 +92,15 @@ pub fn symbols(ui: &mut egui::Ui, rules: &mut Rules) {
     mm_rule(ui, "Minimum pin length (not for 2-pin or power symbols)", &mut rules.pin_length_min, d.pin_length_min);
     mm_rule(ui, "Line width", &mut rules.symbol_line_width, d.symbol_line_width);
     ui.checkbox(&mut rules.symbol_field_positions, "Reference above the body, Value below");
+    ui.checkbox(&mut rules.house_symbols, "Redraw resistors, capacitors, inductors, diodes, LEDs, and transistors in the house style")
+        .on_hover_text("Moves pins: wires on schematics that already use a redrawn symbol may need fixing");
+    ui.add_enabled(rules.house_symbols, egui::Checkbox::new(&mut rules.house_ics, "Also redraw ICs as a generic box"))
+        .on_hover_text("Off by default: vendor IC symbols group pins by function, which a plain box loses");
 }
 
 pub fn reset_symbols(rules: &mut Rules) {
     let d = Rules::default();
-    (rules.symbol_text_size, rules.pin_length_min, rules.symbol_line_width, rules.symbol_field_positions) = (d.symbol_text_size, d.pin_length_min, d.symbol_line_width, d.symbol_field_positions);
+    (rules.symbol_text_size, rules.pin_length_min, rules.symbol_line_width, rules.symbol_field_positions, rules.house_symbols, rules.house_ics) = (d.symbol_text_size, d.pin_length_min, d.symbol_line_width, d.symbol_field_positions, d.house_symbols, d.house_ics);
 }
 
 pub fn footprints(ui: &mut egui::Ui, rules: &mut Rules) {

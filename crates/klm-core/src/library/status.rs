@@ -71,6 +71,18 @@ impl LibraryRoot {
         out
     }
 
+    /// A cheap fingerprint of the symbol, footprint and 3D files (count, newest mtime), so a save made in KiCad is noticed.
+    pub fn signature(&self) -> (usize, Option<std::time::SystemTime>) {
+        let files = |dir: std::path::PathBuf| std::fs::read_dir(dir).into_iter().flatten().flatten().collect::<Vec<_>>();
+        let mut all = files(self.dir.join("symbols"));
+        for sub in ["footprints", "3dmodels"] {
+            for d in files(self.dir.join(sub)).into_iter().filter(|d| d.path().is_dir()) {
+                all.extend(files(d.path()));
+            }
+        }
+        (all.len(), all.iter().filter_map(|e| e.metadata().ok()?.modified().ok()).max())
+    }
+
     /// A path from a KiCad file with `${KIPRJMOD}` filled in.
     fn resolve(&self, value: &str) -> String {
         value.replace("${KIPRJMOD}", &self.table_dir.to_string_lossy())

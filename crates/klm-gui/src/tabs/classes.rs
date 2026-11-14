@@ -3,6 +3,7 @@
 
 use super::page_kit::{caption, card, primary};
 use super::standards::{profile_bar, seg};
+use super::template_editor::{Outcome, TemplateEditor};
 use super::ui_kit::{self, Col, Level, Sort};
 use crate::{AppCtx, Tab, theme};
 use eframe::egui::{self, Align2, FontId, Pos2, RichText, Stroke, Vec2};
@@ -24,6 +25,8 @@ pub struct ClassesTab {
     rx: Option<mpsc::Receiver<(Counts, usize)>>,
     /// What `counts` was worked out for: the library folder and the profile and rules in force.
     key: String,
+    /// The graphical template editor, and the class it is editing.
+    editor: Option<(Class, TemplateEditor)>,
 }
 
 pub fn name(c: Class) -> String {
@@ -132,6 +135,19 @@ impl ClassesTab {
         egui::CentralPanel::default().frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(12, 0))).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.detail(ui, cx, selected));
         });
+        if let Some((class, ed)) = &mut self.editor {
+            match ed.show(ui.ctx()) {
+                Outcome::Save(t) => {
+                    if let Ok(sym) = t.to_symbol(*class) {
+                        cx.settings.standard.templates.insert(format!("{class:?}"), sexpr::to_string(&sym));
+                        cx.save_settings();
+                    }
+                    self.editor = None;
+                }
+                Outcome::Close => self.editor = None,
+                Outcome::None => {}
+            }
+        }
     }
 
     fn detail(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx, class: Class) {
@@ -174,16 +190,20 @@ impl ClassesTab {
         }
         ui.add_space(8.0);
         let key = format!("{class:?}");
+        let mut open = None;
         ui.columns(2, |cols| {
             let ui = &mut cols[0];
             card(ui, None, |ui| {
                 ui.horizontal(|ui| {
                     caption(ui, "Symbol template");
                 });
-                let house = cx.settings.standard.templates.get(&key).and_then(|t| sexpr::parse(t).ok()).and_then(|s| Template::from_symbol(s.children("symbol").next().unwrap_or(&s), class).ok());
+                let house = symbols::house_template(&cx.settings.standard, class).ok().flatten();
                 let t = house.clone().or_else(|| symbols::template_of(class).cloned()).unwrap_or_else(ic_box);
                 preview(ui, &t, Vec2::new(ui.available_width(), 130.0), cx.settings.standard.rules.symbol_field_positions, &format!("{}?", class.prefix()));
-                ui.weak(if house.is_some() { "Your house template, taken from a part you drew." } else { "Built-in template: pins on the 2.54 mm grid, KLC style." });
+                if symbols::template_of(class).is_some() && ui.button("Edit symbol…").on_hover_text("Draw the symbol: move its pins and shapes on the grid, place Reference and Value, set their text size").clicked() {
+                    open = Some(t.clone());
+                }
+                ui.weak(if house.is_some() { "Your house template, from a part you drew or set below." } else { "Built-in template: pins on the 2.54 mm grid, KLC style." });
                 if cx.settings.standard.templates.contains_key(&key) || cx.settings.standard.footprint_styles.contains_key(&key) {
                     if ui.small_button("Use built-in").on_hover_text("Forget this house symbol and footprint style").clicked() {
                         cx.settings.standard.templates.remove(&key);
@@ -191,7 +211,7 @@ impl ClassesTab {
                         cx.save_settings();
                     }
                 } else {
-                    ui.weak("To set your own: right-click a part in the Library and choose \"Use as house template\".");
+                    ui.weak("To set your own: click Edit symbol…, or right-click a part in the Library and choose \"Use as house template\".");
                 }
             });
             let ui = &mut cols[1];
@@ -239,6 +259,9 @@ impl ClassesTab {
                 ui.weak(format!("· MPN case {:?}", r.mpn_case));
             });
         });
+        if let Some(t) = open {
+            self.editor = Some((class, TemplateEditor::new(class, t, cx.settings.standard.rules.symbol_text_size.unwrap_or(1.27))));
+        }
         ui.weak("A part's class comes from its category and keywords. Change the matching in Settings → Import.");
     }
 }
@@ -252,6 +275,7 @@ fn ic_box() -> Template {
         roles: &[],
         hide_numbers: false,
         fields: None,
+        field_sizes: None,
     }
 }
 
@@ -326,7 +350,11 @@ fn preview(ui: &mut egui::Ui, t: &Template, size: Vec2, fields_above_below: bool
     }
     let font = FontId::proportional(11.0);
     let (top, bottom) = (at(((x0 + x1) / 2.0, y1)), at(((x0 + x1) / 2.0, y0)));
-    if fields_above_below {
+    if let Some([r, v]) = t.fields {
+        let align = |f: (f64, f64, f64)| if f.0 > 0.0 { Align2::LEFT_CENTER } else { Align2::CENTER_CENTER };
+        p.text(at((r.0, r.1)), align(r), reference, font.clone(), pal.accent);
+        p.text(at((v.0, v.1)), align(v), "Value", font, pal.accent);
+    } else if fields_above_below {
         p.text(top - Vec2::new(0.0, 6.0), Align2::CENTER_BOTTOM, reference, font.clone(), pal.accent);
         p.text(bottom + Vec2::new(0.0, 6.0), Align2::CENTER_TOP, "Value", font, pal.accent);
     }

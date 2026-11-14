@@ -110,8 +110,13 @@ pub fn set_store_path(path: Option<PathBuf>) {
 /// Takes a snapshot of `root` labelled `label` ("import LM358", "move to Power"), unless this thread holds a
 /// [`guard`] for `root`. Call it before a change writes anything, and let its error stop the change.
 pub fn ensure(root: &LibraryRoot, label: &str) -> Result<()> {
+    ensure_id(root, label).map(|_| ())
+}
+
+/// [`ensure`], returning the id of the snapshot it took (none when this thread already holds a guard for `root`).
+fn ensure_id(root: &LibraryRoot, label: &str) -> Result<Option<String>> {
     if HELD.with(|h| h.borrow().contains(&root.dir)) {
-        return Ok(());
+        return Ok(None);
     }
     let id = take(root, label)?;
     let secs = match policy().auto_version {
@@ -126,7 +131,8 @@ pub fn ensure(root: &LibraryRoot, label: &str) -> Result<()> {
             set_kind(root, &id, Kind::Major, Some(format!("Auto {}", date(now().as_secs() as i64))))?;
         }
     }
-    prune(root)
+    prune(root)?;
+    Ok(Some(id))
 }
 
 /// `YYYY-MM-DD` (UTC) for unix seconds.
@@ -183,9 +189,14 @@ pub fn delete(root: &LibraryRoot, id: &str) -> Result<()> {
 /// for part in parts { root.add_part(&part, "ICs", false)?; }
 /// ```
 pub fn guard(root: &LibraryRoot, label: &str) -> Result<Guard> {
-    ensure(root, label)?;
+    guard_id(root, label).map(|(g, _)| g)
+}
+
+/// [`guard`], also returning the snapshot's id so the run can be undone with [`rollback`] (none when an outer guard already holds one).
+pub fn guard_id(root: &LibraryRoot, label: &str) -> Result<(Guard, Option<String>)> {
+    let id = ensure_id(root, label)?;
     HELD.with(|h| h.borrow_mut().push(root.dir.clone()));
-    Ok(Guard(root.dir.clone()))
+    Ok((Guard(root.dir.clone()), id))
 }
 
 #[must_use = "the snapshot guard only lasts as long as this value is kept"]

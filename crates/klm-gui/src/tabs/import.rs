@@ -82,6 +82,8 @@ pub struct ImportTab {
     mpn: String,
     /// The last imports, read once and again after each import.
     recent: Option<Vec<String>>,
+    /// MPN of the single import running, for the status line.
+    importing: Option<String>,
 }
 
 /// Reads one ZIP on the calling thread and reports what it found.
@@ -230,6 +232,7 @@ impl ImportTab {
             preview: None,
             mpn: String::new(),
             recent: None,
+            importing: None,
         };
         tab.start_watcher(cx);
         tab
@@ -284,6 +287,7 @@ impl ImportTab {
             }
             Msg::Imported { id, notes } => {
                 cx.busy = false;
+                self.importing = None;
                 self.recent = None;
                 cx.log.extend(notes);
                 cx.send(AppMsg::Library(library::Msg::Refresh));
@@ -294,6 +298,7 @@ impl ImportTab {
             }
             Msg::ImportFailed(e) => {
                 cx.busy = false;
+                self.importing = None;
                 cx.log.push(format!("Import failed: {e}"));
             }
             Msg::RestartWatcher => {
@@ -376,6 +381,7 @@ impl ImportTab {
                         self.pending.push(Pending::new(cx, id, part.clone(), g.work));
                     }
                     self.dialog = None;
+                    self.importing = Some(part.mpn.clone());
                     // New libraries are queued for KiCad's tables when it closes, so this never needs KiCad closed.
                     run_import(cx, id, part, category, targets);
                 }
@@ -562,6 +568,9 @@ impl ImportTab {
             }
             if cx.busy {
                 ui.spinner();
+                if let Some(mpn) = &self.importing {
+                    ui.label(egui::RichText::new(format!("Importing {mpn}…")).color(pal.muted));
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add(egui::Button::new("Watch folders…").frame(false)).clicked() {
@@ -969,13 +978,15 @@ impl ImportDialog {
                 && part.symbol_file.is_some()
                 && self.gathered.as_ref().is_none_or(|g| g.files.mismatch().is_none());
 
-            if !self.clashes.is_empty() {
+            let existing: Vec<String> = targets.iter().filter(|r| r.has_part(&self.category, &self.part.mpn)).map(|r| r.nickname(&self.category)).collect();
+            if !existing.is_empty() {
                 ui.add_space(6.0);
-                ui.colored_label(ui.visuals().warn_fg_color, format!("{} is already in {}. Overwrite it?", self.part.mpn, self.clashes.join(" and ")));
+                let ask = if self.clashes.is_empty() { "Importing replaces it." } else { "Replace it with this import?" };
+                ui.colored_label(ui.visuals().warn_fg_color, format!("Already in your library: {} is in {}. {ask}", self.part.mpn, existing.join(" and ")));
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let label = if self.clashes.is_empty() { "Import" } else { "Overwrite" };
+                let label = if !self.clashes.is_empty() { "Replace" } else if existing.is_empty() { "Import" } else { "Reimport…" };
                 if ui.add_enabled(ready, egui::Button::new(label)).clicked() {
                     let clashes: Vec<String> = targets
                         .iter()

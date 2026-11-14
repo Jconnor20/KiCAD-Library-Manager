@@ -35,6 +35,47 @@ impl LibraryRoot {
         self.link(&cat)
     }
 
+    /// Fetches the part's symbol, footprint, 3D model and datasheet from `sources` again (by its LCSC number if it has one,
+    /// else its MPN) and replaces the library copy. Returns the sources that supplied files. Undo it from History.
+    pub fn reimport(&self, category: &str, name: &str, sources: &[Box<dyn crate::sources::Source>], work: &Path) -> Result<Vec<String>> {
+        use crate::sources::combine::{Combined, gather};
+        let lib = sexpr::parse(&std::fs::read_to_string(self.symbol_lib(category))?)?;
+        let sym = lib.children("symbol").find(|s| s.arg(0) == Some(name)).with_context(|| format!("{name} is not in {category}"))?;
+        let field = |k: &str| property(sym, k).unwrap_or("").trim().to_string();
+        let mpn = Some(field("MPN")).filter(|m| !m.is_empty()).unwrap_or_else(|| name.to_string());
+        let lcsc = field("LCSC");
+        let chosen = Part {
+            mpn,
+            manufacturer: field("Manufacturer"),
+            description: field("Description"),
+            supplier_ids: if lcsc.is_empty() { vec![] } else { vec![("LCSC".into(), lcsc.clone())] },
+            source: if lcsc.is_empty() { String::new() } else { "LCSC".into() },
+            ..Part::default()
+        };
+        let from = sources.iter().position(|s| !lcsc.is_empty() && s.name() == "LCSC").unwrap_or(usize::MAX);
+        let state = std::sync::Mutex::new((Combined::default(), chosen.clone(), vec![], vec![]));
+        gather(sources, &chosen, from, work, |source, found| {
+            let mut g = state.lock().unwrap_or_else(|e| e.into_inner());
+            match found {
+                Ok(Some(p)) => {
+                    g.3.push(p.warnings.join("; "));
+                    g.2.push(source.to_string());
+                    let (combined, meta, ..) = &mut *g;
+                    combined.add(meta, p);
+                }
+                Ok(None) => {}
+                Err(e) => g.3.push(format!("{source}: {e:#}")),
+            }
+        });
+        let (combined, meta, used, why) = state.into_inner().unwrap_or_else(|e| e.into_inner());
+        let part = combined.to_part(&meta);
+        if part.symbol_file.is_none() {
+            bail!("no source has CAD files for {}{}", chosen.mpn, if sources.is_empty() { " (no source is enabled)".into() } else { format!(": {}", why.into_iter().filter(|w| !w.is_empty()).collect::<Vec<_>>().join("; ")) });
+        }
+        self.add_part_named(&part, category, name, true)?;
+        Ok(used)
+    }
+
     fn add_part_in(&self, part: &Part, cat: &str, mpn: &str, nick: &str, work: &Path) -> Result<()> {
         let var = self.var();
 
@@ -133,8 +174,35 @@ impl LibraryRoot {
         for (k, v) in &part.supplier_ids {
             set_property(&mut symbol, k, v);
         }
+        // Before the restyle, which sorts pins onto sides by type and lets SPICE pin mapping see filled pin types.
+        crate::symbols::pintype::fill(&mut symbol, cat);
+
         if let Some(sim) = part.sim_files.first() {
             self.attach_sim(&mut symbol, sim, &sanitize(&part.mpn))?;
+        } else {
+            let settings = crate::settings::Settings::load();
+            if let Some(existing_lib) = property(&symbol, "Sim.Library")
+                .and_then(|raw| crate::spice::matcher::resolve_sim_library_path(raw, self))
+                .filter(|p| p.is_file())
+            {
+                self.attach_sim(&mut symbol, &existing_lib, &sanitize(&part.mpn))?;
+            } else if settings.sim.auto_sim
+                && let Some(res) = crate::spice::resolve_or_generate(
+                    part,
+                    Some(&symbol),
+                    Some(&vendor_lib),
+                    cat,
+                    Some(self),
+                    &settings.sim.spice_dirs,
+                    settings.sim.auto_generate_from_datasheet,
+                    work,
+                )?
+            {
+                self.attach_sim(&mut symbol, &res.file, &sanitize(&part.mpn))?;
+                if let Some(sp) = &res.pins {
+                    set_property(&mut symbol, "Sim.Pins", sp);
+                }
+            }
         }
 
         crate::symbols::restyle_imported(cat, &mut symbol);

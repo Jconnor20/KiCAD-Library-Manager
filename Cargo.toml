@@ -6,3 +6,8 @@ resolver = "2"
 version = "0.10.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
+
+# Keep target/ small: line tables are enough for backtraces, and the incremental cache grew to 12 GB.
+[profile.dev]
+debug = "line-tables-only"
+incremental = false

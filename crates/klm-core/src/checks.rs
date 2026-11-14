@@ -50,6 +50,26 @@ pub fn check_library(root: &LibraryRoot) -> HashMap<(String, String), Vec<Issue>
     all
 }
 
+/// [`check_library`] for only the given (category, symbol name) parts; each symbol library is still read once.
+pub fn check_parts(root: &LibraryRoot, parts: &[(String, String)]) -> HashMap<(String, String), Vec<Issue>> {
+    let (mut all, profile) = (HashMap::new(), fields::active());
+    let limits = fab_limits(&profile);
+    let wanted: std::collections::HashSet<&(String, String)> = parts.iter().collect();
+    let mut cats: Vec<&String> = parts.iter().map(|(c, _)| c).collect();
+    cats.sort();
+    cats.dedup();
+    for cat in cats {
+        let Some(lib) = read_symbol_lib(root, cat) else { continue };
+        for sym in lib.children("symbol") {
+            let key = (cat.clone(), sym.arg(0).unwrap_or_default().to_string());
+            if wanted.contains(&key) {
+                all.insert(key, check_symbol(root, cat, &lib, sym, &profile, limits.as_ref()));
+            }
+        }
+    }
+    all
+}
+
 pub fn check_part(root: &LibraryRoot, category: &str, symbol_name: &str) -> Vec<Issue> {
     let Some(lib) = read_symbol_lib(root, category) else {
         return vec![Issue { severity: Severity::Error, message: format!("The {category} symbol library can't be read") }];

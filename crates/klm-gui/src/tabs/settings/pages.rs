@@ -54,7 +54,7 @@ pub fn restore(d: &mut Settings, s: Section) {
         Section::WatchFolders => d.watch_dirs = def.watch_dirs,
         Section::KiCad => d.kicad_cli = None,
         Section::Search => (d.cache_ttl_minutes, d.display_currency) = (def.cache_ttl_minutes, def.display_currency),
-        Section::Import => (d.rules, d.house_symbols_on_import) = (def.rules, def.house_symbols_on_import),
+        Section::Import => (d.rules, d.house_symbols_on_import, d.sim) = (def.rules, def.house_symbols_on_import, def.sim),
         Section::Symbols => standards::reset_symbols(&mut d.standard.rules),
         Section::Footprints => standards::reset_footprints(&mut d.standard.rules),
         Section::PartInfo => d.standard.classes.clear(),
@@ -232,6 +232,34 @@ impl SettingsTab {
                     group(ui, "House-style symbols", |ui| {
                         ui.checkbox(&mut d.house_symbols_on_import, "Redraw imported symbols in the house style (resistor, capacitor, IC box…)")
                             .on_hover_text("Parts that can't be mapped with certainty keep the vendor's symbol. \"Restyle symbol\" in the Library tab does the same for existing parts.");
+                    });
+                    group(ui, "SPICE simulation models", |ui| {
+                        ui.checkbox(&mut d.sim.auto_sim, "Find close SPICE models automatically on import")
+                            .on_hover_text("When an imported part has no SPICE file, search existing library parts, KiCad built-in models, and your SPICE folders for an exact or close variant.");
+                        ui.add_enabled(
+                            d.sim.auto_sim,
+                            egui::Checkbox::new(&mut d.sim.auto_generate_from_datasheet, "Generate from datasheet PDF / specs & similar components"),
+                        )
+                        .on_hover_text("When no exact/close match exists, parse electrical ratings from the component's datasheet & parameters and adapt a similar model if available.");
+                        ui.weak("Extra local SPICE folders (.lib, .cir, .sub, .sp, .mod):");
+                        let mut remove = None;
+                        for (i, dir) in d.sim.spice_dirs.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                if ui.small_button("Remove").clicked() {
+                                    remove = Some(i);
+                                }
+                                ui.label(dir.display().to_string());
+                            });
+                        }
+                        if let Some(i) = remove {
+                            d.sim.spice_dirs.remove(i);
+                        }
+                        if ui.button("Add SPICE folder…").clicked()
+                            && let Some(dir) = rfd::FileDialog::new().set_title("Folder containing SPICE models").pick_folder()
+                            && !d.sim.spice_dirs.contains(&dir)
+                        {
+                            d.sim.spice_dirs.push(dir);
+                        }
                     })
                 },
             ),

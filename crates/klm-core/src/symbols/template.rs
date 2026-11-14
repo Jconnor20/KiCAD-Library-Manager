@@ -1,9 +1,9 @@
 //! The house templates: body graphics as KiCad s-expressions (geometry follows KiCad's own Device and
 //! Transistor_BJT libraries, KLC S3/S4) plus where each pin slot sits. Slot order is the role order of
-//! `Template::roles`.
+//! `Template::roles`. Every built-in connection point is on the 2.54 mm (100 mil) grid, so wires meet the pins.
 
 use super::class::Class;
-use super::{assign, is_hidden, pin_number, source_pins};
+use super::{assign, atom, is_hidden, pin_number, source_pins};
 use crate::sexpr::{self, Sexpr};
 use anyhow::{Result, anyhow, bail};
 use std::borrow::Cow;
@@ -23,24 +23,29 @@ pub struct Template {
     /// Names and numbers are hidden (two-terminal parts), or only names (transistors).
     pub hide_numbers: bool,
     /// Where Reference and Value sit (x, y, rotation); `None` puts them above and below the body.
+    /// Fields to the right of the body are left-justified.
     pub fields: Option<[(f64, f64, f64); 2]>,
+    /// Text height of Reference and Value, mm; `None` leaves it to the standardise rules.
+    pub field_sizes: Option<[f64; 2]>,
 }
 
 const R: Template = Template {
     body: Cow::Borrowed("(rectangle (start -1.016 -2.54) (end 1.016 2.54) (stroke (width 0.254) (type default)) (fill (type none)))"),
-    slots: Cow::Borrowed(&[Slot(0.0, 3.81, 270.0, 1.27), Slot(0.0, -3.81, 90.0, 1.27)]),
+    slots: Cow::Borrowed(&[Slot(0.0, 5.08, 270.0, 2.54), Slot(0.0, -5.08, 90.0, 2.54)]),
     roles: &[],
     hide_numbers: true,
-    fields: None,
+    fields: Some([(2.54, 1.27, 0.0), (2.54, -1.27, 0.0)]),
+    field_sizes: None,
 };
 
 const C: Template = Template {
     body: Cow::Borrowed("(polyline (pts (xy -2.032 0.762) (xy 2.032 0.762)) (stroke (width 0.508) (type default)) (fill (type none)))
            (polyline (pts (xy -2.032 -0.762) (xy 2.032 -0.762)) (stroke (width 0.508) (type default)) (fill (type none)))"),
-    slots: Cow::Borrowed(&[Slot(0.0, 3.81, 270.0, 2.794), Slot(0.0, -3.81, 90.0, 2.794)]),
+    slots: Cow::Borrowed(&[Slot(0.0, 5.08, 270.0, 4.064), Slot(0.0, -5.08, 90.0, 4.064)]),
     roles: &[],
     hide_numbers: true,
-    fields: None,
+    fields: Some([(3.048, 1.27, 0.0), (3.048, -1.27, 0.0)]),
+    field_sizes: None,
 };
 
 const L: Template = Template {
@@ -48,10 +53,11 @@ const L: Template = Template {
            (arc (start 0 1.27) (mid 0.6323 0.635) (end 0 0) (stroke (width 0.254) (type default)) (fill (type none)))
            (arc (start 0 0) (mid 0.6323 -0.635) (end 0 -1.27) (stroke (width 0.254) (type default)) (fill (type none)))
            (arc (start 0 -1.27) (mid 0.6323 -1.905) (end 0 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))"),
-    slots: Cow::Borrowed(&[Slot(0.0, 3.81, 270.0, 1.27), Slot(0.0, -3.81, 90.0, 1.27)]),
+    slots: Cow::Borrowed(&[Slot(0.0, 5.08, 270.0, 2.54), Slot(0.0, -5.08, 90.0, 2.54)]),
     roles: &[],
     hide_numbers: true,
-    fields: None,
+    fields: Some([(2.54, 1.27, 0.0), (2.54, -1.27, 0.0)]),
+    field_sizes: None,
 };
 
 const DIODE_BODY: &str = "(polyline (pts (xy -1.27 1.27) (xy -1.27 -1.27)) (stroke (width 0.254) (type default)) (fill (type none)))
@@ -59,10 +65,10 @@ const DIODE_BODY: &str = "(polyline (pts (xy -1.27 1.27) (xy -1.27 -1.27)) (stro
     (polyline (pts (xy 1.27 0) (xy -1.27 0)) (stroke (width 0.254) (type default)) (fill (type none)))";
 
 /// Slot 0 is the cathode (the bar), slot 1 the anode.
-const DIODE_SLOTS: &[Slot] = &[Slot(-3.81, 0.0, 0.0, 2.54), Slot(3.81, 0.0, 180.0, 2.54)];
+const DIODE_SLOTS: &[Slot] = &[Slot(-2.54, 0.0, 0.0, 1.27), Slot(2.54, 0.0, 180.0, 1.27)];
 const DIODE_ROLES: &[&[&str]] = &[&["K", "C", "CATHODE", "-"], &["A", "ANODE", "+"]];
 
-const D: Template = Template { body: Cow::Borrowed(DIODE_BODY), slots: Cow::Borrowed(DIODE_SLOTS), roles: DIODE_ROLES, hide_numbers: true, fields: None };
+const D: Template = Template { body: Cow::Borrowed(DIODE_BODY), slots: Cow::Borrowed(DIODE_SLOTS), roles: DIODE_ROLES, hide_numbers: true, fields: None, field_sizes: None };
 
 const LED: Template = Template {
     body: Cow::Borrowed("(polyline (pts (xy -3.048 -0.762) (xy -4.572 -2.286) (xy -3.81 -2.286) (xy -4.572 -2.286) (xy -4.572 -1.524)) (stroke (width 0.254) (type default)) (fill (type none)))
@@ -74,6 +80,7 @@ const LED: Template = Template {
     roles: DIODE_ROLES,
     hide_numbers: true,
     fields: None,
+    field_sizes: None,
 };
 
 /// Base, collector, emitter.
@@ -92,6 +99,7 @@ const NPN: Template = Template {
     roles: BJT_ROLES,
     hide_numbers: false,
     fields: None,
+    field_sizes: None,
 };
 
 const PNP: Template = Template {
@@ -107,6 +115,7 @@ const PNP: Template = Template {
     roles: BJT_ROLES,
     hide_numbers: false,
     fields: None,
+    field_sizes: None,
 };
 
 /// The fixed template of a class; the IC box is drawn to fit its pins instead.
@@ -146,12 +155,110 @@ impl Template {
             let at = sym.children("property").find(|p| p.arg(0) == Some(k))?.child("at")?;
             Some((num(at, 0)?, num(at, 1)?, num(at, 2).unwrap_or(0.0)))
         };
+        let size = |k: &str| num(sym.children("property").find(|p| p.arg(0) == Some(k))?.child("effects")?.child("font")?.child("size")?, 0);
         Ok(Template {
             body: Cow::Owned(body.join("\n")),
             slots: Cow::Owned(slots),
             roles: built_in.roles,
             hide_numbers: sym.child("pin_numbers").is_some_and(is_hidden),
             fields: field("Reference").zip(field("Value")).map(|(r, v)| [r, v]),
+            field_sizes: size("Reference").zip(size("Value")).map(|(r, v)| [r, v]),
         })
+    }
+
+    /// This template as a house-template symbol, the form `from_symbol` reads back and a profile stores.
+    /// Pins are named after their roles (K, A, B, C, E) so the roles can be told again.
+    pub fn to_symbol(&self, class: Class) -> Result<Sexpr> {
+        let name = format!("House_{class:?}");
+        let hide = || Sexpr::list("hide", vec![Sexpr::Atom("yes".into())]);
+        let mut items = vec![Sexpr::str(&name)];
+        if self.hide_numbers {
+            items.push(Sexpr::list("pin_numbers", vec![hide()]));
+        }
+        items.push(Sexpr::list("pin_names", vec![Sexpr::list("offset", vec![atom(0.0)]), hide()]));
+        for (key, f) in ["Reference", "Value"].into_iter().zip(self.fields.iter().flatten()) {
+            let text = if key == "Reference" { class.prefix() } else { name.as_str() };
+            let mut prop = vec![Sexpr::str(key), Sexpr::str(text), Sexpr::list("at", vec![atom(f.0), atom(f.1), atom(f.2)])];
+            if let Some(size) = self.field_sizes.map(|s| s[(key == "Value") as usize]) {
+                prop.push(Sexpr::list("effects", vec![Sexpr::list("font", vec![Sexpr::list("size", vec![atom(size), atom(size)])])]));
+            }
+            items.push(Sexpr::list("property", prop));
+        }
+        let body = sexpr::parse(&format!("(g {})", self.body)).map_err(|e| anyhow!("template graphics are not valid: {e:#}"))?;
+        items.push(Sexpr::list("symbol", [vec![Sexpr::str(&format!("{name}_0_1"))], body.items()[1..].to_vec()].concat()));
+        let pins = self.slots.iter().enumerate().map(|(i, s)| {
+            let pin_name = self.roles.get(i).and_then(|r| r.first()).copied().unwrap_or("~");
+            Sexpr::list(
+                "pin",
+                vec![
+                    Sexpr::Atom("passive".into()),
+                    Sexpr::Atom("line".into()),
+                    Sexpr::list("at", vec![atom(s.0), atom(s.1), atom(s.2)]),
+                    Sexpr::list("length", vec![atom(s.3)]),
+                    Sexpr::list("name", vec![Sexpr::str(pin_name)]),
+                    Sexpr::list("number", vec![Sexpr::str(&(i + 1).to_string())]),
+                ],
+            )
+        });
+        items.push(Sexpr::list("symbol", [vec![Sexpr::str(&format!("{name}_1_1"))], pins.collect()].concat()));
+        Ok(Sexpr::List([vec![Sexpr::Atom("symbol".into())], items].concat()))
+    }
+
+    /// The body as editable shapes.
+    pub fn shapes(&self) -> Vec<super::shapes::Shape> {
+        super::shapes::parse(&self.body)
+    }
+
+    pub fn set_shapes(&mut self, shapes: &[super::shapes::Shape]) {
+        self.body = Cow::Owned(super::shapes::to_body(shapes));
+    }
+
+    /// Left, bottom, right, top of the body graphics (pins not included).
+    pub fn body_bounds(&self) -> Option<(f64, f64, f64, f64)> {
+        fn walk(x: &Sexpr, pts: &mut Vec<(f64, f64)>) {
+            let num = |i| x.arg(i).and_then(|v| v.parse::<f64>().ok());
+            match x.head() {
+                Some("start" | "end" | "mid" | "xy") => pts.extend(num(0).zip(num(1))),
+                Some("circle") => {
+                    let (c, r) = (x.child("center").and_then(|c| Some((c.arg(0)?.parse::<f64>().ok()?, c.arg(1)?.parse::<f64>().ok()?))), x.child("radius").and_then(|r| r.arg(0)?.parse::<f64>().ok()));
+                    if let (Some(c), Some(r)) = (c, r) {
+                        pts.extend([(c.0 - r, c.1 - r), (c.0 + r, c.1 + r)]);
+                    }
+                }
+                _ => x.items().iter().for_each(|c| walk(c, pts)),
+            }
+        }
+        let mut pts = vec![];
+        walk(&sexpr::parse(&format!("(g {})", self.body)).ok()?, &mut pts);
+        let (x0, x1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
+        let (y0, y1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.1), a.1.max(p.1)));
+        (!pts.is_empty()).then_some((x0, y0, x1, y1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_template_survives_being_written_as_a_house_symbol() {
+        for class in [Class::Resistor, Class::Capacitor, Class::Diode, Class::Npn] {
+            let mut t = of(class).unwrap().clone();
+            t.fields = Some([(1.27, 2.54, 0.0), (1.27, -2.54, 90.0)]);
+            t.slots.to_mut()[0].1 += 2.54;
+            let back = Template::from_symbol(&t.to_symbol(class).unwrap(), class).unwrap();
+            assert_eq!((back.slots.to_vec(), back.fields, back.hide_numbers), (t.slots.to_vec(), t.fields, t.hide_numbers), "{class:?}");
+            assert_eq!(back.body_bounds(), t.body_bounds());
+        }
+    }
+
+    #[test]
+    fn edited_shapes_become_the_body() {
+        let mut t = of(Class::Resistor).unwrap().clone();
+        let mut shapes = t.shapes();
+        shapes[0].translate((0.0, 1.0));
+        t.set_shapes(&shapes);
+        assert_eq!(t.body_bounds(), Some((-1.016, -1.54, 1.016, 3.54)));
+        assert_eq!(t.shapes(), shapes);
     }
 }

@@ -79,7 +79,7 @@ impl LibraryRoot {
         Ok(())
     }
 
-    fn symbol_lib(&self, category: &str) -> PathBuf {
+    pub(crate) fn symbol_lib(&self, category: &str) -> PathBuf {
         self.dir.join("symbols").join(format!("{}.kicad_sym", sanitize(category)))
     }
 
