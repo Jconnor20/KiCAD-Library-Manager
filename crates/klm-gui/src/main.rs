@@ -359,6 +359,10 @@ impl App {
                 }
                 any = true;
             }
+            for note in klm_core::shadow::sync_shadowing_projects(&root, false).notes() {
+                cx.log.push(note);
+                any = true;
+            }
         }
         if any && kicad_env::kicad_running() {
             cx.log.push("KiCad is open: the changes are queued and re-checked when it closes.".into());

@@ -17,6 +17,7 @@ use std::process::ExitCode;
 const USAGE: &str = "usage:
   klm-cli check [--json] [--deep] [--project <dir>]
   klm-cli relink [--project <dir>]
+  klm-cli repair-3d [--project <dir>] [--dry-run]
   klm-cli history [--json] [--project <dir>]
   klm-cli rollback <id> [--project <dir>]
   klm-cli standardise [--project <dir>] [--dry-run]
@@ -39,6 +40,7 @@ const USAGE: &str = "usage:
 enum Command {
     Check { json: bool, deep: bool, project: Option<PathBuf> },
     Relink { project: Option<PathBuf> },
+    RepairModels { project: Option<PathBuf>, dry_run: bool },
     History { json: bool, project: Option<PathBuf> },
     Rollback { id: String, project: Option<PathBuf> },
     Standardise { project: Option<PathBuf>, dry_run: bool },
@@ -303,6 +305,10 @@ fn parse(args: &[String]) -> Result<Command> {
                 Ok(Command::Rollback { id: id.to_string_lossy().into(), project })
             }
         }
+        "repair-3d" => {
+            only_for(zips.is_empty() && category.is_none() && to.is_none() && !overwrite && !json && !deep, "that argument")?;
+            Ok(Command::RepairModels { project, dry_run })
+        }
         "standardise" => {
             only_for(zips.is_empty() && category.is_none() && to.is_none() && !overwrite && !json && !deep, "that argument")?;
             Ok(Command::Standardise { project, dry_run })
@@ -540,11 +546,32 @@ fn relink(project: Option<&Path>) -> Result<()> {
             println!("Re-linked {} in KiCad", root.nickname(&cat));
             any = true;
         }
+        for note in klm_core::shadow::sync_shadowing_projects(&root, false).notes() {
+            println!("{note}");
+            any = true;
+        }
     }
     if !any {
         println!("All KLM libraries are already in KiCad's library list.");
     }
     note_if_kicad_open();
+    Ok(())
+}
+
+fn repair_models(project: Option<&Path>, dry_run: bool) -> Result<()> {
+    let roots = roots(&settings()?, project)?;
+    let global = roots.iter().find(|r| r.scope == Scope::Global);
+    let project = roots.iter().find(|r| r.scope == Scope::Project);
+    let plan = batch::plan(vec![Op::RepairModels], global, project);
+    print!("{plan}");
+    if dry_run { return Ok(()); }
+    ensure_kicad_closed()?;
+    let mut errors = vec![];
+    for result in batch::apply(&plan, |_, _| {}) {
+        for note in result.notes { println!("{note}"); }
+        if let Some(error) = result.error { errors.push(error); }
+    }
+    if !errors.is_empty() { bail!("{}", errors.join("; ")); }
     Ok(())
 }
 
@@ -989,6 +1016,7 @@ fn main() -> ExitCode {
     let result = take_config_arg(args).and_then(|args| parse(&args)).and_then(|cmd| match cmd {
         Command::Check { json, deep, project } => check(json, deep, project.as_deref()),
         Command::Relink { project } => relink(project.as_deref()).map(|_| ExitCode::SUCCESS),
+        Command::RepairModels { project, dry_run } => repair_models(project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
         Command::History { json, project } => history(json, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Rollback { id, project } => rollback(&id, project.as_deref()).map(|_| ExitCode::SUCCESS),
         Command::Standardise { project, dry_run } => standardise(project.as_deref(), dry_run).map(|_| ExitCode::SUCCESS),
@@ -1036,6 +1064,7 @@ mod tests {
             Command::Check { json: true, deep: true, project: Some("D:/p".into()) }
         );
         assert_eq!(parse(&args("relink --project D:/p")).unwrap(), Command::Relink { project: Some("D:/p".into()) });
+        assert_eq!(parse(&args("repair-3d --project D:/p --dry-run")).unwrap(), Command::RepairModels { project: Some("D:/p".into()), dry_run: true });
         assert_eq!(parse(&args("health --csv --project D:/p")).unwrap(), Command::Health { json: false, csv: true, project: Some("D:/p".into()) });
         assert!(parse(&args("health --csv --json")).is_err() && parse(&args("check --csv")).is_err());
         assert_eq!(

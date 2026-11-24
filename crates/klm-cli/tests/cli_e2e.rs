@@ -49,6 +49,39 @@ fn klm(settings: &Path, config: &Path, args: &[&str]) -> Output {
 }
 
 #[test]
+fn repair_3d_previews_restores_and_keeps_a_backup() {
+    let dir = fresh("repair_3d");
+    let (config, lib, settings) = (dir.join("config"), dir.join("lib"), dir.join("settings.json"));
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::create_dir_all(lib.join("footprints/ICs.pretty")).unwrap();
+    std::fs::create_dir_all(lib.join("3dmodels/ICs.3dshapes")).unwrap();
+    let model = lib.join("3dmodels/ICs.3dshapes/part.step");
+    std::fs::write(&model, "STEP fixture").unwrap();
+    std::fs::write(&settings, serde_json::json!({"global_root":lib}).to_string()).unwrap();
+    let uri = model.to_string_lossy().replace('\\', "/");
+    std::fs::write(lib.join("footprints/ICs.pretty/PART.kicad_mod"), format!(r#"(footprint "PART" (model "{uri}" (offset (xyz 0 0 1))))"#)).unwrap();
+    let board = dir.join("test.kicad_pcb");
+    let before = r#"(kicad_pcb (footprint "KLM_ICs:PART" (property "Reference" "U1") (at 10 20)))"#;
+    std::fs::write(&board, before).unwrap();
+    let args = ["repair-3d", "--project", dir.to_str().unwrap()];
+    let mut preview_args = args.to_vec();
+    preview_args.push("--dry-run");
+    let preview = klm(&settings, &config, &preview_args);
+    assert!(preview.status.success(), "{}", String::from_utf8_lossy(&preview.stderr));
+    assert!(String::from_utf8_lossy(&preview.stdout).contains("U1: restore 1"));
+    assert_eq!(std::fs::read_to_string(&board).unwrap(), before);
+    let applied = klm(&settings, &config, &args);
+    assert!(applied.status.success(), "{}", String::from_utf8_lossy(&applied.stderr));
+    let after = std::fs::read_to_string(&board).unwrap();
+    assert!(after.contains(&uri) && after.contains("(at 10 20)"));
+    let backup = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "bak")).unwrap();
+    assert_eq!(std::fs::read_to_string(backup).unwrap(), before);
+    let again = klm(&settings, &config, &preview_args);
+    assert!(again.status.success());
+    assert!(String::from_utf8_lossy(&again.stdout).contains("Nothing to do"));
+}
+
+#[test]
 fn import_then_check_and_relink() {
     if !kicad_env::kicad_cli().is_ok_and(|c| Command::new(c).arg("version").output().is_ok_and(|o| o.status.success())) {
         eprintln!("kicad-cli not found; skipping");

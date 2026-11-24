@@ -28,6 +28,8 @@ pub enum Op {
     CopyToProject { parts: Vec<(String, String)>, overwrite: bool },
     /// Re-add libraries missing from KiCad's tables and fix old paths.
     RelinkAll,
+    /// Repair broken model paths and restore missing assignments on the project's placed footprints.
+    RepairModels,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,6 +61,8 @@ enum Work {
     Copy { from: LibraryRoot, to: LibraryRoot, category: String, name: String, overwrite: bool },
     FixPaths(LibraryRoot),
     Link(LibraryRoot, String),
+    SyncShadows(LibraryRoot),
+    RepairModels(crate::model_links::Repair),
 }
 
 /// What happens to one part (or one library, for a relink).
@@ -93,6 +97,7 @@ impl Item {
                         Ok(new_lib) => {
                             notes.push(format!("Imported {name} into {nick}"));
                             notes.extend(crate::symbols::take_note());
+                            notes.extend(crate::shadow::take_notes());
                             if new_lib {
                                 notes.push(format!("Added library {nick} to KiCad"));
                             }
@@ -119,6 +124,14 @@ impl Item {
             Work::Link(root, category) => {
                 root.link(category)?;
                 notes.push(format!("Re-linked {} in KiCad", root.nickname(category)));
+            }
+            Work::SyncShadows(root) => notes.extend(crate::shadow::sync_shadowing_projects(root, false).notes()),
+            Work::RepairModels(fix) => {
+                if !fix.changes.is_empty() {
+                    let backup = fix.apply()?;
+                    notes.push(format!("Repaired {} 3D link(s) in {}; backup: {}", fix.changes.len(), fix.path.display(), backup.display()));
+                }
+                notes.extend(fix.warnings.iter().map(|w| format!("Unresolved: {w}")));
             }
         }
         Ok(())
@@ -205,6 +218,16 @@ pub fn plan_with(ops: Vec<Op>, global: Option<&LibraryRoot>, project: Option<&Li
             }
             Op::CopyToProject { parts, overwrite } => plan.items.extend(copy_items(global, project, parts, overwrite)),
             Op::RelinkAll => plan.items.extend(relink_items(global.into_iter().chain(project))),
+            Op::RepairModels => match crate::model_links::plan(&plan.roots, project.map(|p| p.table_dir.as_path())) {
+                Ok(fixes) => for fix in fixes {
+                    let mut item = Item::new(fix.path.display().to_string());
+                    item.changes = fix.changes.iter().cloned().map(Change::Field).collect();
+                    item.warnings = fix.warnings.clone();
+                    item.work = Work::RepairModels(fix);
+                    plan.items.push(item);
+                },
+                Err(e) => plan.items.push(Item::new("Repair 3D links").fail(format!("{e:#}"))),
+            },
         }
     }
     plan
@@ -336,6 +359,13 @@ fn relink_items<'a>(roots: impl Iterator<Item = &'a LibraryRoot>) -> Vec<Item> {
             let mut item = Item::new(nick.clone());
             item.changes.push(Change::NewLibrary(nick));
             item.work = Work::Link(root.clone(), cat);
+            items.push(item);
+        }
+        let shadowed = crate::shadow::sync_shadowing_projects(root, true).copied.len();
+        if shadowed > 0 {
+            let mut item = Item::new(format!("Footprints missing from projects that shadow {}", root.dir.display()));
+            item.changes.push(Change::Field(format!("copy {shadowed} missing footprint(s) into projects' own KLM_* libraries")));
+            item.work = Work::SyncShadows(root.clone());
             items.push(item);
         }
     }

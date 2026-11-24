@@ -32,6 +32,8 @@ KLM is found next to `launch.py`, else via the `KLM_EXE` environment variable, e
 
 To move the global library, use **Change location…**. KLM moves it (same drive) or, if you already moved it, points at the new folder, and rewrites every path in the library and in KiCad's library list. Boards placed before the move keep the old 3D paths until *Tools → Update Footprints from Library*.
 
+If the STEP files are present but models are missing in KiCad, open the project in KLM and use **Library → More → Repair 3D links…**. Preview the changes, close KiCad, then apply and reopen the board. This repairs stale paths with an exact, unique model filename match within the KLM library, and restores absent model assignments from the exact KLM/PRJ footprint library entry. Project copies registered under a global KLM nickname are repaired too, so updating footprints does not remove the models again. Existing model transforms are kept; restored assignments use the library's transforms. Only model data changes, leaving board placement and routing intact. Each changed file gets a unique `.klm-3d-<time>.bak` backup. Ambiguous or unavailable models are reported for manual repair. Stock and external footprint libraries are outside this repair's scope.
+
 ## Export
 **Export selected…** (or `klm-cli export`) writes one ZIP any KiCad-reading tool (including Altium and Fusion) can open: `symbols/klm_export.kicad_sym`, `footprints/klm_export.pretty/`, `3dmodels/`, `datasheets/`, `simulation/`, and `sym-lib-table` / `fp-lib-table` to paste into KiCad. Unzip it as a KiCad project folder: model paths use `${KIPRJMOD}/3dmodels/...`. Footprints with the same name but different content are kept apart (`NAME`, `NAME_2`), and the symbols point at the right one; identical footprints are written once.
 
@@ -40,6 +42,7 @@ To move the global library, use **Change location…**. KLM moves it (same drive
 ```
 klm-cli check [--json] [--deep] [--project <dir>]    # per-part completeness; --deep adds part-check issues; exit 1 if incomplete
 klm-cli relink [--project <dir>]                      # fix old ${KLM_LIB} paths, re-add libraries KiCad dropped
+klm-cli repair-3d [--project <dir>] [--dry-run]        # preview or repair KLM model paths and missing board assignments
 klm-cli history [--json] [--project <dir>]            # list snapshots
 klm-cli rollback <id> [--project <dir>]               # restore a snapshot (id from history)
 klm-cli standardise [--project <dir>] [--dry-run]     # apply the Settings standards rules

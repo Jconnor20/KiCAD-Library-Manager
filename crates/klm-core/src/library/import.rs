@@ -32,7 +32,11 @@ impl LibraryRoot {
         let _ = std::fs::remove_dir_all(&work);
         result?;
 
-        self.link(&cat)
+        let linked = self.link(&cat);
+        if linked.is_ok() && self.scope == super::Scope::Global {
+            crate::shadow::sync_after_import(self);
+        }
+        linked
     }
 
     /// Fetches the part's symbol, footprint, 3D model and datasheet from `sources` again (by its LCSC number if it has one,

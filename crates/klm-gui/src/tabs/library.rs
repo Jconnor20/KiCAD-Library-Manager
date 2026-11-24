@@ -1486,6 +1486,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 *action = Action::Batch(vec![Op::RelinkAll]);
                 ui.close();
             }
+            if ui.button("Repair 3D links…").on_hover_text("Preview broken model path repairs and restore missing models on the project's KLM footprints. Close KiCad before applying; backups are kept.").clicked() {
+                *action = Action::Batch(vec![Op::RepairModels]);
+                ui.close();
+            }
             if ui.button("Refresh").on_hover_text("Read the library again").clicked() {
                 self.stale = true;
                 ui.close();

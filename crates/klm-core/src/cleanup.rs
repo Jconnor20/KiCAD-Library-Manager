@@ -113,10 +113,10 @@ impl Action {
 // ---- reading tables as text ----
 
 /// One child `(key value ...)` of an s-expression, with byte offsets into the text it was read from.
-struct Kid {
-    key: String,
-    start: usize,
-    end: usize,
+pub(crate) struct Kid {
+    pub(crate) key: String,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
     /// The first argument as written between its quotes (escapes are NOT interpreted: KiCad writes
     /// paths with `/`, and a hand-written `C:\x` must not silently become `C:x`), and the quoted literal's range.
     value: Option<(String, std::ops::Range<usize>)>,
@@ -173,7 +173,7 @@ fn token_end(b: &[u8], mut i: usize) -> usize {
 }
 
 /// The `(key value ...)` children of the expression `s`, which starts with `(`.
-fn kids(s: &str) -> Result<Vec<Kid>> {
+pub(crate) fn kids(s: &str) -> Result<Vec<Kid>> {
     let b = s.as_bytes();
     if b.first() != Some(&b'(') {
         bail!("expected '('");

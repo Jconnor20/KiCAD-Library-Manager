@@ -52,7 +52,7 @@ impl Out {
 }
 
 /// Library names and (unresolved) URIs in a `sym-lib-table` / `fp-lib-table`; empty if it can't be read.
-fn table_entries(table: &Path) -> Vec<(String, String)> {
+pub(crate) fn table_entries(table: &Path) -> Vec<(String, String)> {
     let Some(t) = std::fs::read_to_string(table).ok().and_then(|t| sexpr::parse(&t).ok()) else { return vec![] };
     t.children("lib")
         .filter_map(|l| Some((l.child("name")?.arg(0)?.to_string(), l.child("uri").and_then(|u| u.arg(0)).unwrap_or_default().to_string())))
@@ -83,7 +83,7 @@ fn norm(path: &str, project_dir: &Path) -> String {
 /// The uri with every `${VAR}` filled in the way KiCad does: `${KIPRJMOD}`, then the environment, then
 /// `kicad_common.json` in `config`, then the installed KiCad's stock folders. None when one can't be
 /// resolved, in which case the library is trusted rather than reported.
-fn expand(uri: &str, project_dir: &Path, config: Option<&Path>) -> Option<String> {
+pub(crate) fn expand(uri: &str, project_dir: &Path, config: Option<&Path>) -> Option<String> {
     let mut s = uri.replace("${KIPRJMOD}", &project_dir.to_string_lossy());
     let user = config.map(crate::cleanup::user_vars).unwrap_or_default();
     while let Some(open) = s.find("${") {
