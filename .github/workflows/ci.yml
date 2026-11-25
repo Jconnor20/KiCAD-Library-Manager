@@ -20,7 +20,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The GUI tests render offscreen with wgpu; egui_kittest prefers a CPU adapter (WARP) so no GPU is needed.
       # Tests that need kicad-cli skip themselves, and live-API tests are #[ignore]d, so neither runs here.
-      - run: cargo test --workspace
+      - run: cargo test --workspace --no-fail-fast
         env:
           # Tests that don't make their own sandbox must still never touch a real profile.
           # (runner.temp is only available at step level.)
