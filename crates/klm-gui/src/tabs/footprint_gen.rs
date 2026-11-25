@@ -226,12 +226,12 @@ impl FootprintTab {
                 self.result = Some(self.build(cx));
             }
             let ready = matches!(self.result, Some(Ok(_))) && root.is_some() && !self.category.trim().is_empty();
-            if ui.add_enabled(ready, egui::Button::new("Save to library")).clicked() {
-                if let (Some(Ok(g)), Some(root)) = (&self.result, &root) {
-                    match footprint_gen::save(root, self.category.trim(), g, self.overwrite) {
-                        Ok(p) => cx.log(Level::Info, format!("Wrote {}", p.display())),
-                        Err(e) => cx.log(Level::Error, format!("Could not write the footprint: {e:#}")),
-                    }
+            if ui.add_enabled(ready, egui::Button::new("Save to library")).clicked()
+                && let (Some(Ok(g)), Some(root)) = (&self.result, &root)
+            {
+                match footprint_gen::save(root, self.category.trim(), g, self.overwrite) {
+                    Ok(p) => cx.log(Level::Info, format!("Wrote {}", p.display())),
+                    Err(e) => cx.log(Level::Error, format!("Could not write the footprint: {e:#}")),
                 }
             }
         });

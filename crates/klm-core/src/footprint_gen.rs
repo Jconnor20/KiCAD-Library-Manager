@@ -126,8 +126,8 @@ impl Dims {
             Family::Sot => {
                 pos(matches!(self.pins, 3 | 5 | 6) && self.pitch > 0.0, "3, 5 or 6 pins and a pitch")?;
             }
-            Family::Soic => pos(self.pins >= 4 && self.pins % 2 == 0 && self.pitch > 0.0, "an even pin count and a pitch")?,
-            _ => pos(self.pins >= 4 && self.pins % 4 == 0 && self.pitch > 0.0, "a pin count divisible by 4 and a pitch")?,
+            Family::Soic => pos(self.pins >= 4 && self.pins.is_multiple_of(2) && self.pitch > 0.0, "an even pin count and a pitch")?,
+            _ => pos(self.pins >= 4 && self.pins.is_multiple_of(4) && self.pitch > 0.0, "a pin count divisible by 4 and a pitch")?,
         }
         // The lead span minus the foot length is not the body of a gull-wing part, so the outline needs the real one.
         pos(self.body.is_some() || matches!(f, Family::Chip | Family::Qfn), "the body size")?;

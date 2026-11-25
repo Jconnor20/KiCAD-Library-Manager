@@ -192,7 +192,7 @@ pub fn check_files(symbol: &Path, footprint: &Path, model: Option<&Path>) -> Vec
     let read = || -> anyhow::Result<(Sexpr, Sexpr)> {
         let scratch = crate::preview::scratch_dir(&std::env::temp_dir())?;
         let up = scratch.join("sym.kicad_sym");
-        let lib = crate::kicad_env::upgrade_symbols(symbol, &up).and_then(|_| Ok(sexpr::parse(&std::fs::read_to_string(&up)?)?));
+        let lib = crate::kicad_env::upgrade_symbols(symbol, &up).and_then(|_| sexpr::parse(&std::fs::read_to_string(&up)?));
         let _ = std::fs::remove_dir_all(&scratch);
         Ok((lib?, sexpr::parse(&std::fs::read_to_string(footprint)?)?))
     };

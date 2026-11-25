@@ -219,14 +219,14 @@ impl BomTab {
             if self.running {
                 ui.spinner();
             }
-            if ui.add_enabled(!self.rows.is_empty(), egui::Button::new("Export CSV…")).clicked() {
-                if let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom.csv").save_file() {
-                    let csv = bom::to_csv(&self.rows, self.settings.boards, &self.priced_in);
-                    cx.log.push(match std::fs::write(&path, csv) {
-                        Ok(()) => format!("Wrote {}", path.display()),
-                        Err(e) => format!("Could not write {}: {e}", path.display()),
-                    });
-                }
+            if ui.add_enabled(!self.rows.is_empty(), egui::Button::new("Export CSV…")).clicked()
+                && let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom.csv").save_file()
+            {
+                let csv = bom::to_csv(&self.rows, self.settings.boards, &self.priced_in);
+                cx.log.push(match std::fs::write(&path, csv) {
+                    Ok(()) => format!("Wrote {}", path.display()),
+                    Err(e) => format!("Could not write {}: {e}", path.display()),
+                });
             }
             if page_kit::primary(ui, !self.running, "Read BOM and prices")
                 .on_hover_text("Runs kicad-cli, then asks the enabled distributors (cached results are reused)")
@@ -238,10 +238,8 @@ impl BomTab {
         if reprice || (self.priced_in != Self::target(cx) && self.loaded.is_some()) {
             self.reprice(cx);
         }
-        if save {
-            if let Err(e) = self.settings.save(&project) {
-                cx.log.push(format!("BOM: {e:#}"));
-            }
+        if save && let Err(e) = self.settings.save(&project) {
+            cx.log.push(format!("BOM: {e:#}"));
         }
         ui.add_space(4.0);
         if self.rows.is_empty() {

@@ -85,19 +85,19 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
     };
 
     // Fill gaps from the symbol's own fields (vendors use different field names).
-    if let Some(sym) = symbol_file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| sexpr::parse(&t).ok()) {
-        if let Some(s) = sym.child("symbol") {
-            let field = |keys: &[&str]| keys.iter().find_map(|k| property(s, k)).filter(|v| !v.trim().is_empty()).map(String::from);
-            if part.mpn.is_empty() {
-                part.mpn = field(&["MPN", "MP", "Manufacturer_Part_Number", "PARTNO"]).unwrap_or_else(|| s.arg(0).unwrap_or_default().into());
-            }
-            if part.manufacturer.is_empty() {
-                part.manufacturer = field(&["Manufacturer", "MANUFACTURER", "MF", "Manufacturer_Name"]).unwrap_or_default();
-            }
-            part.description =
-                field(&["Description", "ki_description", "DESCRIPTION"]).map(|d| d.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
-            part.datasheet_url = field(&["Datasheet"]).filter(|d| d.starts_with("http")).unwrap_or_default();
+    if let Some(sym) = symbol_file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| sexpr::parse(&t).ok())
+        && let Some(s) = sym.child("symbol")
+    {
+        let field = |keys: &[&str]| keys.iter().find_map(|k| property(s, k)).filter(|v| !v.trim().is_empty()).map(String::from);
+        if part.mpn.is_empty() {
+            part.mpn = field(&["MPN", "MP", "Manufacturer_Part_Number", "PARTNO"]).unwrap_or_else(|| s.arg(0).unwrap_or_default().into());
         }
+        if part.manufacturer.is_empty() {
+            part.manufacturer = field(&["Manufacturer", "MANUFACTURER", "MF", "Manufacturer_Name"]).unwrap_or_default();
+        }
+        part.description =
+            field(&["Description", "ki_description", "DESCRIPTION"]).map(|d| d.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
+        part.datasheet_url = field(&["Datasheet"]).filter(|d| d.starts_with("http")).unwrap_or_default();
     }
     if part.mpn.is_empty() {
         let any = symbol_file.as_ref().or(part.footprint_files.first()).or(part.model_files.first()).or(part.sim_files.first());

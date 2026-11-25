@@ -99,10 +99,13 @@ impl LibraryRoot {
         for (c, n) in &skip[..skip.len() - 1] {
             let Ok((l, i)) = self.load_symbol(c, n) else { continue };
             let field = property(&l.items()[i], "Footprint").unwrap_or("").trim().to_string();
-            if let Some(fp) = field.strip_prefix(&format!("{}:", self.nickname(c))) {
-                if !fp.is_empty() && !fp.contains(['/', '\\']) && !fp.contains("..") && self.symbols_using(skip, &field)?.is_empty() {
-                    gone_files.push(self.footprint_file(c, fp));
-                }
+            if let Some(fp) = field.strip_prefix(&format!("{}:", self.nickname(c)))
+                && !fp.is_empty()
+                && !fp.contains(['/', '\\'])
+                && !fp.contains("..")
+                && self.symbols_using(skip, &field)?.is_empty()
+            {
+                gone_files.push(self.footprint_file(c, fp));
             }
         }
         let mut plan = RemovePlan {

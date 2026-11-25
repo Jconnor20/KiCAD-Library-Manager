@@ -153,11 +153,11 @@ impl LibraryRoot {
         // Same name but different geometry from another part → keep both.
         let (mut name, pretty) = (vendor.clone(), self.dir.join("footprints").join(format!("{cat}.pretty")));
         let mut text = render(&mut fp, &name);
-        if let Ok(old) = std::fs::read_to_string(pretty.join(format!("{name}.kicad_mod"))) {
-            if !same_geometry(&old, &text) {
-                name = format!("{vendor}_{}", sanitize(symbol_name));
-                text = render(&mut fp, &name);
-            }
+        if let Ok(old) = std::fs::read_to_string(pretty.join(format!("{name}.kicad_mod")))
+            && !same_geometry(&old, &text)
+        {
+            name = format!("{vendor}_{}", sanitize(symbol_name));
+            text = render(&mut fp, &name);
         }
         std::fs::create_dir_all(&pretty)?;
         write_atomic(&pretty.join(format!("{name}.kicad_mod")), &text)?;

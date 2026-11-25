@@ -98,10 +98,9 @@ impl SettingsTab {
                     ui.weak("Where KLM keeps the parts that every project shares.");
                     if live.global_root.is_some()
                         && ui.button("Change location…").on_hover_text("Move the library, or point KLM at where you moved it").clicked()
+                        && let Some(dir) = rfd::FileDialog::new().set_title("New location for the global library").pick_folder()
                     {
-                        if let Some(dir) = rfd::FileDialog::new().set_title("New location for the global library").pick_folder() {
-                            cmd = Some(Cmd::MoveLibrary(dir));
-                        }
+                        cmd = Some(Cmd::MoveLibrary(dir));
                     }
                 });
                 group(ui, "Appearance", |ui| {
@@ -136,12 +135,11 @@ impl SettingsTab {
                 if d.watch_dirs.is_empty() {
                     ui.label(d.downloads().first().map_or("none found".into(), |p| format!("{} (default)", p.display())));
                 }
-                if ui.button("Add folder…").clicked() {
-                    if let Some(dir) = rfd::FileDialog::new().set_title("Folder to watch for vendor ZIPs").pick_folder() {
-                        if !d.watch_dirs.contains(&dir) {
-                            d.watch_dirs.push(dir);
-                        }
-                    }
+                if ui.button("Add folder…").clicked()
+                    && let Some(dir) = rfd::FileDialog::new().set_title("Folder to watch for vendor ZIPs").pick_folder()
+                    && !d.watch_dirs.contains(&dir)
+                {
+                    d.watch_dirs.push(dir);
                 }
             }),
             Section::KiCad => group(ui, KICAD_CLI, |ui| {
@@ -151,10 +149,10 @@ impl SettingsTab {
                     None => kicad_env::kicad_cli().map_or("none found".into(), |p| format!("{} (found automatically)", p.display())),
                 });
                 ui.horizontal(|ui| {
-                    if ui.button("Browse…").clicked() {
-                        if let Some(f) = rfd::FileDialog::new().set_title("kicad-cli executable").pick_file() {
-                            d.kicad_cli = Some(f);
-                        }
+                    if ui.button("Browse…").clicked()
+                        && let Some(f) = rfd::FileDialog::new().set_title("kicad-cli executable").pick_file()
+                    {
+                        d.kicad_cli = Some(f);
                     }
                     if d.kicad_cli.is_some() && ui.button("Use default").clicked() {
                         d.kicad_cli = None;

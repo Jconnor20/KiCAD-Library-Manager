@@ -100,7 +100,7 @@ pub fn prune_cache(cache: &Path, max_age: Duration) {
 /// Names of the symbols in a symbol file, in file order; any format `kicad-cli` can upgrade.
 pub fn symbol_names(file: &Path) -> Result<Vec<String>> {
     let scratch = scratch_dir(&std::env::temp_dir())?;
-    let lib = as_kicad_sym(file, &scratch).and_then(|p| Ok(sexpr::parse(&std::fs::read_to_string(p)?)?));
+    let lib = as_kicad_sym(file, &scratch).and_then(|p| sexpr::parse(&std::fs::read_to_string(p)?));
     let _ = std::fs::remove_dir_all(&scratch);
     Ok(lib?.children("symbol").filter_map(|s| s.arg(0).map(String::from)).collect())
 }

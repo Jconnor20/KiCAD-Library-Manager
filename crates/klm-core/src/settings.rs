@@ -144,10 +144,10 @@ impl Settings {
     /// Parses a settings file, migrating the old `downloads_dir` into `watch_dirs`.
     fn parse(text: &str) -> Option<Self> {
         let mut s: Self = serde_json::from_str(text).ok()?;
-        if let Some(d) = s.downloads_dir.take() {
-            if !s.watch_dirs.contains(&d) {
-                s.watch_dirs.push(d);
-            }
+        if let Some(d) = s.downloads_dir.take()
+            && !s.watch_dirs.contains(&d)
+        {
+            s.watch_dirs.push(d);
         }
         Some(s)
     }

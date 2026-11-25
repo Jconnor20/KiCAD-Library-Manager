@@ -349,11 +349,11 @@ pub fn fix(sym: &mut Sexpr, category: &str, profile: &Profile, part: Option<&Par
         }
         let mut hits =
             desc.split(|c: char| c.is_whitespace() || c == ',' || c == ';').map(|t| t.trim_start_matches(['±', '+'])).filter(|t| carries_unit(t, unit));
-        if let (Some(tok), None) = (hits.next(), hits.next()) {
-            if let Some(v) = normalise(unit, tok) {
-                set_property(sym, &fd.name, &v);
-                changes.push(format!("{}: added {v} (from Description)", fd.name));
-            }
+        if let (Some(tok), None) = (hits.next(), hits.next())
+            && let Some(v) = normalise(unit, tok)
+        {
+            set_property(sym, &fd.name, &v);
+            changes.push(format!("{}: added {v} (from Description)", fd.name));
         }
     }
     for fd in &info.fields {
@@ -413,14 +413,15 @@ fn set_hidden(sym: &mut Sexpr, name: &str, hide: bool, nth: usize) {
         return;
     }
     let at = p.items_mut().iter_mut().find(|c| c.head() == Some("at"));
-    if let (Some(at), Some((Some(x), Some(y)))) = (at, value_at) {
-        if at.arg(0).and_then(|v| v.parse::<f64>().ok()) == Some(0.0) && at.arg(1).and_then(|v| v.parse::<f64>().ok()) == Some(0.0) {
-            let y = y - 2.54 * nth as f64;
-            *at = Sexpr::list(
-                "at",
-                vec![Sexpr::Atom(crate::convert::easyeda::geom::fmt(x)), Sexpr::Atom(crate::convert::easyeda::geom::fmt(y)), Sexpr::Atom("0".into())],
-            );
-        }
+    if let (Some(at), Some((Some(x), Some(y)))) = (at, value_at)
+        && at.arg(0).and_then(|v| v.parse::<f64>().ok()) == Some(0.0)
+        && at.arg(1).and_then(|v| v.parse::<f64>().ok()) == Some(0.0)
+    {
+        let y = y - 2.54 * nth as f64;
+        *at = Sexpr::list(
+            "at",
+            vec![Sexpr::Atom(crate::convert::easyeda::geom::fmt(x)), Sexpr::Atom(crate::convert::easyeda::geom::fmt(y)), Sexpr::Atom("0".into())],
+        );
     }
 }
 

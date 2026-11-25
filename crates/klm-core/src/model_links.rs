@@ -147,15 +147,15 @@ pub fn plan(roots: &[LibraryRoot], project: Option<&Path>) -> Result<Vec<Repair>
             let pretty = entry?.path();
             let Some(cat) = pretty.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".pretty")) else { continue };
             let mut nicks = vec![root.nickname(cat)];
-            if root.scope == Scope::Project {
-                if let Some(table) = &table {
-                    for lib in table.children("lib") {
-                        let path = lib.child("uri").and_then(|u| u.arg(0)).and_then(|u| resolve(u, root));
-                        if path.and_then(|p| p.canonicalize().ok()) == pretty.canonicalize().ok() {
-                            if let Some(nick) = lib.child("name").and_then(|n| n.arg(0)) {
-                                nicks.push(nick.to_string());
-                            }
-                        }
+            if root.scope == Scope::Project
+                && let Some(table) = &table
+            {
+                for lib in table.children("lib") {
+                    let path = lib.child("uri").and_then(|u| u.arg(0)).and_then(|u| resolve(u, root));
+                    if path.and_then(|p| p.canonicalize().ok()) == pretty.canonicalize().ok()
+                        && let Some(nick) = lib.child("name").and_then(|n| n.arg(0))
+                    {
+                        nicks.push(nick.to_string());
                     }
                 }
             }
@@ -351,11 +351,8 @@ mod tests {
         let stale = r#"(footprint "PART" (model "Z:/old/part.step" (offset (xyz 7 8 9)) (rotate (xyz 10 20 30))))"#;
         std::fs::write(&fp, stale).unwrap();
         let board = dir.join("test.kicad_pcb");
-        std::fs::write(
-            &board,
-            format!(r#"(kicad_pcb (footprint "KLM_ICs:PART" (property "Reference" "U1") (model "Z:/old/part.step" (offset (xyz 4 5 6)))))"#),
-        )
-        .unwrap();
+        std::fs::write(&board, r#"(kicad_pcb (footprint "KLM_ICs:PART" (property "Reference" "U1") (model "Z:/old/part.step" (offset (xyz 4 5 6)))))"#)
+            .unwrap();
         let fixes = plan(&[root], Some(&dir)).unwrap();
         assert_eq!(fixes.len(), 2);
         assert!(fixes[0].after.contains("(xyz 7 8 9)"));

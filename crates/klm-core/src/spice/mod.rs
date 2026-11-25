@@ -149,10 +149,11 @@ pub fn parse_models(text: &str) -> Vec<SpiceModel> {
             continue;
         }
 
-        if kw == ".model" && subckt_depth == 0 {
-            if let Some(m) = parse_model_card(line, &raw_lines[*start_idx..=*end_idx].join("\n")) {
-                out.push(m);
-            }
+        if kw == ".model"
+            && subckt_depth == 0
+            && let Some(m) = parse_model_card(line, &raw_lines[*start_idx..=*end_idx].join("\n"))
+        {
+            out.push(m);
         }
     }
 
@@ -278,7 +279,8 @@ pub fn pick_model<'a>(models: &'a [SpiceModel], mpn: &str, hint: Option<&str>) -
     models.iter().max_by_key(|m| {
         let mk = matching::key(&m.name);
         let mf = matcher::normalize_family_mpn(&m.name);
-        let exact = if !target.is_empty() && mk == target {
+
+        if !target.is_empty() && mk == target {
             100
         } else if fam.len() >= 4 && mf == fam {
             80
@@ -286,8 +288,7 @@ pub fn pick_model<'a>(models: &'a [SpiceModel], mpn: &str, hint: Option<&str>) -
             20
         } else {
             10
-        };
-        exact
+        }
     })
 }
 

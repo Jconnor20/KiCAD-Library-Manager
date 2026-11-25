@@ -71,8 +71,7 @@ fn foreign_scan_preserves_spice_files_and_sets_device_and_pins() {
     let dir = fresh("foreign-sim");
     let kicad_dir = dir.join("vendor_lib");
     std::fs::create_dir_all(kicad_dir.join("sim")).unwrap();
-    let sym = format!(
-        r#"(kicad_symbol_lib (version 20241209) (generator kicad_symbol_editor)
+    let sym = r#"(kicad_symbol_lib (version 20241209) (generator kicad_symbol_editor)
   (symbol "1N4148" (in_bom yes) (on_board yes)
     (property "Reference" "D" (at 0 2.54 0) (effects (font (size 1.27 1.27))))
     (property "Value" "1N4148" (at 0 -2.54 0) (effects (font (size 1.27 1.27))))
@@ -86,7 +85,7 @@ fn foreign_scan_preserves_spice_files_and_sets_device_and_pins() {
     )
   )
 )"#
-    );
+    .to_string();
     std::fs::write(kicad_dir.join("Diodes.kicad_sym"), sym).unwrap();
     std::fs::write(kicad_dir.join("sim/diodes.mod"), ".model BAV99 D(IS=4n)\n.model 1N4148 D(IS=2.52n RS=0.568 N=1.752 BV=100)\n").unwrap();
 

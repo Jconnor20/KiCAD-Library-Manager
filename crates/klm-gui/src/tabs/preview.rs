@@ -69,11 +69,11 @@ impl PreviewPanel {
             let (tx, mut src, ctx, mpn) = (tx.clone(), src.clone(), ctx.clone(), mpn.clone());
             let kind = *kind;
             std::thread::spawn(move || {
-                if let (Kind::Symbol, Some(file), Some(mpn), None) = (kind, &src.symbol, &mpn, &src.symbol_name) {
-                    if let Ok(names) = preview::symbol_names(file) {
-                        src.symbol_name = names.iter().find(|n| n.eq_ignore_ascii_case(mpn)).or(names.first()).cloned();
-                        let _ = tx.send(Msg::Symbols(names, src.symbol_name.clone()));
-                    }
+                if let (Kind::Symbol, Some(file), Some(mpn), None) = (kind, &src.symbol, &mpn, &src.symbol_name)
+                    && let Ok(names) = preview::symbol_names(file)
+                {
+                    src.symbol_name = names.iter().find(|n| n.eq_ignore_ascii_case(mpn)).or(names.first()).cloned();
+                    let _ = tx.send(Msg::Symbols(names, src.symbol_name.clone()));
                 }
                 let _ = tx.send(Msg::Image(i, preview::render(kind, &src).map_err(|e| format!("{e:#}"))));
                 ctx.request_repaint();

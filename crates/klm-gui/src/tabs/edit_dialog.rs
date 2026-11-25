@@ -151,10 +151,10 @@ impl EditDialog {
                 }
             });
         });
-        if let Some(c) = suggestion {
-            if ui.button(format!("Use {c}")).on_hover_text("Category from your naming rules").clicked() {
-                self.category = c;
-            }
+        if let Some(c) = suggestion
+            && ui.button(format!("Use {c}")).on_hover_text("Category from your naming rules").clicked()
+        {
+            self.category = c;
         }
         let field = |ui: &mut egui::Ui, f: &mut (&'static str, String, String)| {
             ui.label(RichText::new(f.0).weak().size(12.0));

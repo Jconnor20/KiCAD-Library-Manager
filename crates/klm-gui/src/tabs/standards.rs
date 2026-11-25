@@ -22,19 +22,19 @@ pub fn profile(ui: &mut egui::Ui, d: &mut Settings) -> Option<String> {
                 }
             }
         });
-        if ui.button("Import…").on_hover_text("Add a profile file someone shared").clicked() {
-            if let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).pick_file() {
-                match profile::import(&f) {
-                    Ok(p) => (d.profile, d.standard) = (p.name.clone(), p),
-                    Err(e) => err = Some(format!("{e:#}")),
-                }
+        if ui.button("Import…").on_hover_text("Add a profile file someone shared").clicked()
+            && let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).pick_file()
+        {
+            match profile::import(&f) {
+                Ok(p) => (d.profile, d.standard) = (p.name.clone(), p),
+                Err(e) => err = Some(format!("{e:#}")),
             }
         }
-        if ui.button("Export…").on_hover_text("Save this profile as a file to share").clicked() {
-            if let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).set_file_name(format!("{current}.json")).save_file() {
-                let p = Profile { name: current.clone(), ..d.standard.clone() };
-                err = profile::export(&p, &f).err().map(|e| format!("{e:#}"));
-            }
+        if ui.button("Export…").on_hover_text("Save this profile as a file to share").clicked()
+            && let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).set_file_name(format!("{current}.json")).save_file()
+        {
+            let p = Profile { name: current.clone(), ..d.standard.clone() };
+            err = profile::export(&p, &f).err().map(|e| format!("{e:#}"));
         }
     });
     ui.horizontal(|ui| {
@@ -147,18 +147,18 @@ pub fn profile_bar(ui: &mut egui::Ui, cx: &mut crate::AppCtx) {
     let mut adopt: Option<Profile> = None;
     let mut err = None;
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if ui.button("Export…").on_hover_text("Save this profile as a file to share").clicked() {
-            if let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).set_file_name(format!("{current}.json")).save_file() {
-                let p = Profile { name: current.clone(), ..cx.settings.standard.clone() };
-                err = profile::export(&p, &f).err();
-            }
+        if ui.button("Export…").on_hover_text("Save this profile as a file to share").clicked()
+            && let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).set_file_name(format!("{current}.json")).save_file()
+        {
+            let p = Profile { name: current.clone(), ..cx.settings.standard.clone() };
+            err = profile::export(&p, &f).err();
         }
-        if ui.button("Import…").on_hover_text("Add a profile file someone shared").clicked() {
-            if let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).pick_file() {
-                match profile::import(&f) {
-                    Ok(p) => adopt = Some(p),
-                    Err(e) => err = Some(e),
-                }
+        if ui.button("Import…").on_hover_text("Add a profile file someone shared").clicked()
+            && let Some(f) = rfd::FileDialog::new().add_filter("Standard profile", &["json"]).pick_file()
+        {
+            match profile::import(&f) {
+                Ok(p) => adopt = Some(p),
+                Err(e) => err = Some(e),
             }
         }
         egui::ComboBox::from_id_salt("page_profile").selected_text(format!("Profile: {current}")).show_ui(ui, |ui| {

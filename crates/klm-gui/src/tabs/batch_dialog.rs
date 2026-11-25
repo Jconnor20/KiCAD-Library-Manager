@@ -185,10 +185,8 @@ pub fn show(batch: &mut Option<BatchDialog>, ctx: &egui::Context) -> Option<Plan
     };
     if matches!(state, BatchDialog::Review(_)) && (close || dismissed) {
         *batch = None;
-    } else if apply {
-        if let Some(BatchDialog::Review(plan)) = batch.take() {
-            return Some(plan);
-        }
+    } else if apply && let Some(BatchDialog::Review(plan)) = batch.take() {
+        return Some(plan);
     }
     None
 }

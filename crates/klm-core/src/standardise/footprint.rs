@@ -278,11 +278,11 @@ fn shift(x: &mut Sexpr, d: (f64, f64)) {
         }
         // The 3D model's y axis points up, against the board's.
         Some("model") => {
-            if let Some(xyz) = child_mut(x, "offset").and_then(|o| child_mut(o, "xyz")) {
-                if let (Some(a), Some(b)) = (num(xyz, 0), num(xyz, 1)) {
-                    set_num(xyz, 0, a + d.0);
-                    set_num(xyz, 1, b - d.1);
-                }
+            if let Some(xyz) = child_mut(x, "offset").and_then(|o| child_mut(o, "xyz"))
+                && let (Some(a), Some(b)) = (num(xyz, 0), num(xyz, 1))
+            {
+                set_num(xyz, 0, a + d.0);
+                set_num(xyz, 1, b - d.1);
             }
         }
         _ => {

@@ -162,7 +162,7 @@ impl AlternativesPanel {
         });
         if let Some((n, cad)) = add {
             let (src, part) = shown[n].clone();
-            self.add(cx, &base, Alternative::from(&part), Some((src, part)).filter(|_| cad));
+            self.add(cx, &base, Alternative::from(&part), cad.then_some((src, part)));
         }
         ui.horizontal(|ui| {
             for (field, hint) in self.manual.iter_mut().zip(["MPN", "Manufacturer", "LCSC", "DigiKey", "Mouser"]) {
@@ -231,11 +231,10 @@ impl AlternativesPanel {
                     Err(_) => self.rx = None,
                 }
             }
-            if let Some(rx) = &self.searching {
-                if let Ok(found) = rx.try_recv() {
+            if let Some(rx) = &self.searching
+                && let Ok(found) = rx.try_recv() {
                     (self.online, self.searching) = (found, None);
                 }
-            }
             self.beyond_library(ui, cx);
             ui.separator();
             if self.groups.is_empty() {

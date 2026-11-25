@@ -383,16 +383,18 @@ fn file_chips(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, downloading: bool
     let key = (p.category.clone(), p.name.clone());
     chip(ui, "SYM", "Symbol", Cell::Ok);
     let r = chip(ui, "FP", "Footprint", cell(p.footprint));
-    if fixable(p.footprint) && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-        if let Some(path) = pick_attachment() {
-            *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
-        }
+    if fixable(p.footprint)
+        && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+        && let Some(path) = pick_attachment()
+    {
+        *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
     }
     let r = chip(ui, "3D", "3D model", cell(p.model));
-    if fixable(p.model) && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-        if let Some(path) = pick_attachment() {
-            *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
-        }
+    if fixable(p.model)
+        && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+        && let Some(path) = pick_attachment()
+    {
+        *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
     }
     let r = chip(ui, "DS", "Datasheet", cell(p.datasheet));
     if fixable(p.datasheet) && !downloading && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
@@ -726,10 +728,10 @@ impl LibraryTab {
         if self.alternatives.as_mut().is_some_and(|a| !a.window(cx)) {
             self.alternatives = None;
         }
-        if let Some((title, panel)) = &mut self.preview {
-            if !panel.window(&cx.ctx, title) {
-                self.preview = None;
-            }
+        if let Some((title, panel)) = &mut self.preview
+            && !panel.window(&cx.ctx, title)
+        {
+            self.preview = None;
         }
         if let Some(editor) = &mut self.symbol_editor {
             match editor.show(&cx.ctx, &cx.settings.rules, &cx.settings.standard) {
@@ -898,10 +900,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                     ui.horizontal(|ui| {
                         ui.label("Save as");
                         ui.add(egui::TextEdit::singleline(path).desired_width(360.0));
-                        if ui.button("Browse…").clicked() {
-                            if let Some(p) = rfd::FileDialog::new().add_filter("ZIP", &["zip"]).set_file_name("klm_export.zip").save_file() {
-                                *path = p.display().to_string();
-                            }
+                        if ui.button("Browse…").clicked()
+                            && let Some(p) = rfd::FileDialog::new().add_filter("ZIP", &["zip"]).set_file_name("klm_export.zip").save_file()
+                        {
+                            *path = p.display().to_string();
                         }
                     });
                 });
@@ -1427,10 +1429,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 },
             );
         });
-        if sort != before {
-            if let Some(&c) = shown.get(sort.col) {
-                self.sort = Sort { col: c, asc: sort.asc };
-            }
+        if sort != before
+            && let Some(&c) = shown.get(sort.col)
+        {
+            self.sort = Sort { col: c, asc: sort.asc };
         }
         if toggle_all {
             self.selected = if all_ticked { HashSet::new() } else { (0..self.view.len()).filter_map(|i| self.key_at(i)).collect() };
@@ -1626,10 +1628,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 {
                     *action = Action::Batch(vec![Op::CopyToProject { parts: targets.clone(), overwrite: ui.input(|i| i.modifiers.shift) }]);
                 }
-                if ui.add(small("Attach…")).on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked() {
-                    if let Some(file) = pick_attachment() {
-                        *action = Action::Batch(vec![Op::Attach { scope: self.scope, file, parts: targets.clone() }]);
-                    }
+                if ui.add(small("Attach…")).on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked()
+                    && let Some(file) = pick_attachment()
+                {
+                    *action = Action::Batch(vec![Op::Attach { scope: self.scope, file, parts: targets.clone() }]);
                 }
                 let fill = ui.add_enabled(!self.downloading, small("Fill missing files…"));
                 if fill
@@ -1672,10 +1674,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 ui.horizontal(|ui| {
                     let target = p.datasheet_target.as_deref();
                     let open = ui.add_enabled(target.is_some(), egui::Button::new("Open datasheet"));
-                    if open.on_hover_text("Open the datasheet in your PDF viewer or browser").on_disabled_hover_text("This part has no datasheet").clicked() {
-                        if let Some(t) = target {
-                            let _ = open::that(t);
-                        }
+                    if open.on_hover_text("Open the datasheet in your PDF viewer or browser").on_disabled_hover_text("This part has no datasheet").clicked()
+                        && let Some(t) = target
+                    {
+                        let _ = open::that(t);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (can, why) = match (self.scope, has_project) {
@@ -1768,11 +1770,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                         if ui.add(ui_kit::ghost("Edit…")).on_hover_text("Edit MPN, maker, description, category, supplier numbers, datasheet and tags").clicked() {
                             *action = Action::Edit(vec![key.clone()]);
                         }
-                        if ui.add(ui_kit::ghost("Attach…")).on_hover_text("Add a datasheet (PDF), SPICE model, 3D model (STEP/WRL) or a footprint/3D ZIP without a symbol").clicked() {
-                            if let Some(path) = pick_attachment() {
+                        if ui.add(ui_kit::ghost("Attach…")).on_hover_text("Add a datasheet (PDF), SPICE model, 3D model (STEP/WRL) or a footprint/3D ZIP without a symbol").clicked()
+                            && let Some(path) = pick_attachment() {
                                 *action = Action::Attach { scope: self.scope, category: key.0.clone(), name: key.1.clone(), path };
                             }
-                        }
                     });
                 });
                 let rows: Vec<_> = self.inspect.iter().flat_map(|i| i.fields.iter()).filter(|(k, v)| !v.is_empty() && !matches!(*k, "MPN" | "Manufacturer")).collect();

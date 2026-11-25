@@ -188,10 +188,10 @@ pub fn find_datasheet(
             }
         }
     };
-    if let Some(url) = existing {
-        if try_url(url, "existing link", &mut why) {
-            return Ok(url.to_string());
-        }
+    if let Some(url) = existing
+        && try_url(url, "existing link", &mut why)
+    {
+        return Ok(url.to_string());
     }
     if mpn.is_empty() {
         bail!("no MPN to search for{}", if why.is_empty() { String::new() } else { format!("; {}", why.join("; ")) });

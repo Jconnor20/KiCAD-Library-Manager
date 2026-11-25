@@ -121,13 +121,8 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
         let sym = kicad_env::upgrade_symbols(p, &dir.join(format!("{stem}.kicad_sym")));
         let fp = kicad_env::upgrade_footprints(p, &dir.join(format!("{stem}.pretty")));
         footprints_only |= sym.is_err() && fp.is_ok();
-        if sym.is_err() && fp.is_err() {
-            out.unsupported.push(format!(
-                "{}: kicad-cli could not convert it. kicad-cli said: {}; {}",
-                p.display(),
-                first_line(&sym.unwrap_err()),
-                first_line(&fp.unwrap_err())
-            ));
+        if let (Err(se), Err(fe)) = (&sym, &fp) {
+            out.unsupported.push(format!("{}: kicad-cli could not convert it. kicad-cli said: {}; {}", p.display(), first_line(se), first_line(fe)));
         } else if sym.is_err() && !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pcblib")) {
             out.unsupported.push(format!("{}: footprints converted but it has no symbols kicad-cli can read", p.display()));
         }

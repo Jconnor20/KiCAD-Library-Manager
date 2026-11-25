@@ -1,0 +1,4 @@
+# Thresholds raised to fit the codebase's existing style; correctness lints stay on.
+type-complexity-threshold = 1000
+too-many-arguments-threshold = 9
+enum-variant-size-threshold = 1024

@@ -433,10 +433,10 @@ pub fn distributors(settings: &crate::settings::Settings, region: &str) -> (Vec<
 /// The best-matching result for a line: its supplier number when it has one for this source, else the MPN
 /// from the BOM's maker (or any maker if the BOM names none).
 pub fn pick<'a>(results: &'a [Part], line: &Line, source: &str) -> Option<&'a Part> {
-    if let Some((_, id)) = line.supplier_ids.iter().find(|(s, _)| s == source) {
-        if let Some(p) = results.iter().find(|p| p.supplier_ids.iter().any(|(s, v)| s == source && v.eq_ignore_ascii_case(id))) {
-            return Some(p);
-        }
+    if let Some((_, id)) = line.supplier_ids.iter().find(|(s, _)| s == source)
+        && let Some(p) = results.iter().find(|p| p.supplier_ids.iter().any(|(s, v)| s == source && v.eq_ignore_ascii_case(id)))
+    {
+        return Some(p);
     }
     let same: Vec<&Part> = results.iter().filter(|p| same_mpn(&p.mpn, &line.mpn)).collect();
     same.iter().find(|p| line.manufacturer.is_empty() || p.manufacturer.eq_ignore_ascii_case(&line.manufacturer)).or(same.first()).copied()
@@ -483,12 +483,12 @@ pub fn fetch_quotes(lines: &[Line], dist: &[Distributor], store: Option<&Store>,
                         }
                     }
                 });
-                if let Some((results, stale)) = res {
-                    if let Some(p) = pick(results, line, name) {
-                        // Every packaging the source lists is a quote of its own (cut tape, reel...).
-                        for v in std::iter::once(p).chain(&p.variations) {
-                            out.push(Quote { stale: *stale, ..quote_of(name, v) });
-                        }
+                if let Some((results, stale)) = res
+                    && let Some(p) = pick(results, line, name)
+                {
+                    // Every packaging the source lists is a quote of its own (cut tape, reel...).
+                    for v in std::iter::once(p).chain(&p.variations) {
+                        out.push(Quote { stale: *stale, ..quote_of(name, v) });
                     }
                 }
             }
@@ -1101,7 +1101,7 @@ C1,100n,C_0603,,,,,,\n";
 
     #[test]
     fn assembly_from_saved_lcsc_and_digikey_replies() {
-        let lcsc = parts_of(include_str!("../tests/fixtures/live/jlcpcb_search_LM358.json"), |b, q| sources::lcsc::parse_search(b, q), "LM358");
+        let lcsc = parts_of(include_str!("../tests/fixtures/live/jlcpcb_search_LM358.json"), sources::lcsc::parse_search, "LM358");
         let quote_for = |id: &str| quote_of("LCSC", lcsc.iter().find(|p| p.supplier_ids[0].1 == id).unwrap());
         // C5213: extended with 4 in stock. The same search has a basic part too.
         let a = assembly(&[quote_for("C5213")]);

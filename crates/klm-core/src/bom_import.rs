@@ -684,10 +684,10 @@ pub fn generate(
         }
         // Each download is imported as it arrives. After a stop the ones still in flight arrive too and are kept (or dropped, for an undo).
         for (i, got) in rx {
-            if !ctl.undo() {
-                if let Resolved::Source(found) = &resolved[i] {
-                    import_one(&mut lines, i, found, got);
-                }
+            if !ctl.undo()
+                && let Resolved::Source(found) = &resolved[i]
+            {
+                import_one(&mut lines, i, found, got);
             }
             done += 1;
             report(stage, done, total);
@@ -998,10 +998,10 @@ mod tests {
         }
         fn fetch(&self, part: &Part, work: &Path) -> Result<Option<Part>> {
             let n = self.0.fetch_add(1, Ordering::SeqCst) + 1;
-            if let Some((ctl, state, at)) = &self.1 {
-                if n == *at {
-                    ctl.0.store(*state, Ordering::SeqCst);
-                }
+            if let Some((ctl, state, at)) = &self.1
+                && n == *at
+            {
+                ctl.0.store(*state, Ordering::SeqCst);
             }
             std::thread::sleep(std::time::Duration::from_millis(15));
             std::fs::create_dir_all(work)?;

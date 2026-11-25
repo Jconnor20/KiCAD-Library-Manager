@@ -268,11 +268,10 @@ impl BomImportTab {
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
         let pal = theme::palette(ui.visuals());
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!self.running, egui::Button::new("Open BOM…")).on_hover_text("A CSV or Excel/OpenDocument sheet with one row per line (KiCad, JLCPCB, DigiKey and similar exports). The sheet, header row and columns are detected; change them below if they are wrong.").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("BOM (CSV or spreadsheet)", &["csv", "xlsx", "xlsm", "xlsb", "xls", "ods"]).pick_file() {
+            if ui.add_enabled(!self.running, egui::Button::new("Open BOM…")).on_hover_text("A CSV or Excel/OpenDocument sheet with one row per line (KiCad, JLCPCB, DigiKey and similar exports). The sheet, header row and columns are detected; change them below if they are wrong.").clicked()
+                && let Some(p) = rfd::FileDialog::new().add_filter("BOM (CSV or spreadsheet)", &["csv", "xlsx", "xlsm", "xlsb", "xls", "ods"]).pick_file() {
                     self.open(p, cx);
                 }
-            }
             if let Some(p) = &self.path {
                 ui.label(p.display().to_string());
             }
@@ -394,15 +393,14 @@ impl BomImportTab {
             if let Some(w) = why {
                 ui.weak(format!("Generate: {w}"));
             }
-            if ui.add_enabled(self.generated.is_some(), egui::Button::new("Save BOM with library parts…")).clicked() {
-                if let (Some(g), Some(path)) = (&self.generated, rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom-library.csv").save_file()) {
+            if ui.add_enabled(self.generated.is_some(), egui::Button::new("Save BOM with library parts…")).clicked()
+                && let (Some(g), Some(path)) = (&self.generated, rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom-library.csv").save_file()) {
                     let csv = bi::write_back(&self.rows, &self.at, &self.resolved_all(), &g.lines);
                     cx.log.push(match std::fs::write(&path, csv) {
                         Ok(()) => format!("Wrote {}", path.display()),
                         Err(e) => format!("Could not write {}: {e}", path.display()),
                     });
                 }
-            }
         });
         if let Some(g) = &self.generated {
             ui.label(format!(

@@ -386,13 +386,13 @@ impl TemplateEditor {
             } else if resp.clicked() {
                 self.sel = resp.interact_pointer_pos().map_or(Sel::None, |pos| self.hit(rect, pos));
             }
-            if resp.dragged_by(egui::PointerButton::Primary) {
-                if let (Some((sel, last)), Some(pos)) = (self.drag, resp.interact_pointer_pos()) {
-                    let now = self.snapped(rect, pos);
-                    self.raw = self.to_sym(rect, pos);
-                    self.apply_drag(sel, last, now);
-                    self.drag = Some((sel, now));
-                }
+            if resp.dragged_by(egui::PointerButton::Primary)
+                && let (Some((sel, last)), Some(pos)) = (self.drag, resp.interact_pointer_pos())
+            {
+                let now = self.snapped(rect, pos);
+                self.raw = self.to_sym(rect, pos);
+                self.apply_drag(sel, last, now);
+                self.drag = Some((sel, now));
             }
             if resp.drag_stopped() {
                 self.drag = None;
@@ -432,12 +432,12 @@ impl TemplateEditor {
         // Drawing.
         p.rect(rect, 4.0, pal.bg, Stroke::new(1.0, pal.line), egui::StrokeKind::Inside);
         let p = p.with_clip_rect(rect);
-        self.paint_grid(&p, rect, &pal);
+        self.paint_grid(&p, rect, pal);
         let accent = pal.accent;
         let color = |sel: bool| if sel { accent } else { pal.fg };
         for (i, sh) in self.doc.shapes.iter().enumerate() {
             let on = matches!(self.sel, Sel::Shape(j) | Sel::Point(j, _) | Sel::Radius(j) if j == i);
-            self.paint_shape(&p, rect, sh, color(on), &pal);
+            self.paint_shape(&p, rect, sh, color(on), pal);
         }
         let hide = self.doc.hide_numbers;
         for (i, s) in self.doc.slots.iter().enumerate() {
@@ -450,8 +450,8 @@ impl TemplateEditor {
                 p.text(c.lerp(e, 0.5) + Vec2::new(0.0, -6.0), Align2::CENTER_BOTTOM, (i + 1).to_string(), FontId::monospace(10.0), pal.muted);
             }
         }
-        self.paint_texts(&p, rect, &pal);
-        self.paint_handles(&p, rect, &pal);
+        self.paint_texts(&p, rect, pal);
+        self.paint_handles(&p, rect, pal);
         // The shape being drawn.
         if let Some(at) = hover.filter(|_| self.tool != Tool::Select) {
             let mut pts = self.draft.clone();
@@ -466,7 +466,7 @@ impl TemplateEditor {
                 _ => None,
             };
             if let Some(geo) = sh {
-                self.paint_shape(&p, rect, &Shape::new(geo), stroke.color, &pal);
+                self.paint_shape(&p, rect, &Shape::new(geo), stroke.color, pal);
             }
             p.circle_filled(self.to_screen(rect, at), 3.0, accent);
         }
@@ -637,12 +637,12 @@ impl TemplateEditor {
             if ui.button("Fit").clicked() {
                 self.fitted = false;
             }
-            if ui.button("Reset to default").on_hover_text("Go back to the built-in drawing. Nothing is kept until you Save to standard.").clicked() {
-                if let Some(b) = symbols::template_of(self.class) {
-                    self.push_undo();
-                    self.doc = Doc::of(b);
-                    self.sel = Sel::None;
-                }
+            if ui.button("Reset to default").on_hover_text("Go back to the built-in drawing. Nothing is kept until you Save to standard.").clicked()
+                && let Some(b) = symbols::template_of(self.class)
+            {
+                self.push_undo();
+                self.doc = Doc::of(b);
+                self.sel = Sel::None;
             }
         });
         let mut hide = !self.doc.hide_numbers;
