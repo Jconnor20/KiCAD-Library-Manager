@@ -222,7 +222,7 @@ fn queued_library_survives_an_outside_table_edit() {
     assert!(kicad_env::pending_in(&queue).is_empty());
 }
 
-/// Found while writing W6.4: a queued restore holds the whole old table, so applying it used to throw away
+/// Found while writing the scale tests: a queued restore holds the whole old table, so applying it used to throw away
 /// an outside edit. Fixed in `kicad_env::apply_table_op`, which now splices outside entries back in.
 #[test]
 fn queued_restore_keeps_an_outside_edit() {

@@ -1,4 +1,4 @@
-//! W7.1: the Settings page (it was a popup until the wireframe redesign). The plan is S1-S17.
+//! The Settings page (it was a popup until the wireframe redesign). Test IDs run S1-S17.
 
 use super::harness::*;
 use crate::tabs::settings::Msg as SettingsMsg;

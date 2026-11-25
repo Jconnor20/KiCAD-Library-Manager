@@ -1,4 +1,4 @@
-//! W7.4 Search tab. Test IDs (S1…) are the rows of the W7.4 test plan.
+//! Search tab. Test IDs (S1…) are the ones used in this file.
 //! Results are handed to the tab as if a source had answered (`Msg::Done`), so nothing reaches the network.
 
 use super::harness::*;

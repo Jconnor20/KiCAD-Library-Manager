@@ -1178,6 +1178,14 @@ fn stdlib_build(categories: &[String], manifest: Option<PathBuf>) -> Result<()> 
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--version" || a == "-V") {
+        println!("klm-cli {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
+    if args.first().is_some_and(|a| a == "help") || args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{USAGE}");
+        return ExitCode::SUCCESS;
+    }
     let result = take_config_arg(args).and_then(|args| parse(&args)).and_then(|cmd| match cmd {
         Command::Check { json, deep, project } => check(json, deep, project.as_deref()),
         Command::Relink { project } => relink(project.as_deref()).map(|_| ExitCode::SUCCESS),

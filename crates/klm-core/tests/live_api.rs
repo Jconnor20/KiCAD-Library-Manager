@@ -1,4 +1,4 @@
-//! Live contract check for the distributor APIs (W6.1). Everything here is `#[ignore]`d: run with
+//! Live contract check for the distributor APIs. Everything here is `#[ignore]`d: run with
 //! `cargo test -p klm-core --test live_api -- --ignored live`. Keys come from Credential Manager;
 //! `live_record_*` saves each raw reply (secrets replaced by REDACTED) under `tests/fixtures/live/`,
 //! which the unit tests in `src/sources/*` replay. Nothing touches the app's settings or database.

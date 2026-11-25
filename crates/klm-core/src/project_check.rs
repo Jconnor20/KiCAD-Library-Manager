@@ -29,7 +29,7 @@ impl FabResult {
 
 /// A KiCad custom design rules file (`.kicad_dru`, KiCad 7+ syntax) holding the limits that are set.
 // shortcut: no rule for min_mask_web (KiCad's mask-bridge check only reads the board setup) or courtyard_excess
-// (a footprint matter, W10.1); min_silk_width only covers silk text, as KiCad has no line-width constraint.
+// (a footprint matter); min_silk_width only covers silk text, as KiCad has no line-width constraint.
 pub fn dru(limits: &FabLimits) -> String {
     const VIA: &str = "(condition \"A.Type == 'Via'\") ";
     const SILK: &str = "(layer \"?.Silkscreen\") ";

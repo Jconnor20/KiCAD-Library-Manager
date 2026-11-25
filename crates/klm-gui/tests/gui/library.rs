@@ -1,5 +1,5 @@
-//! W7.3 Library tab: selection, loading off the UI thread, status-cell fixes and the toolbar's dry-run dialogs.
-//! Test IDs (L1…) are the rows of the W7.3 test plan.
+//! Library tab: selection, loading off the UI thread, status-cell fixes and the toolbar's dry-run dialogs.
+//! Test IDs (L1…) are the ones used in this file.
 
 use super::harness::*;
 use crate::Tab;

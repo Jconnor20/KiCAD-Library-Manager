@@ -120,6 +120,7 @@ impl SettingsTab {
                 group(ui, "Updates", |ui| {
                     ui.checkbox(&mut d.check_updates, "Check for updates at start-up");
                     ui.weak("Asks GitHub for the latest release; nothing else is sent.");
+                    ui.weak(concat!("Version ", env!("CARGO_PKG_VERSION")));
                 });
             }
             Section::WatchFolders => group(ui, "Folders watched for vendor ZIPs", |ui| {

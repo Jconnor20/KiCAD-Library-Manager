@@ -73,7 +73,7 @@ What KLM does not do, or does only partly, today. Fixed items are removed from t
 - **Spreadsheet BOMs** are read with values only: formulas give their cached result, and a merged cell fills only its top-left cell. **Save BOM with library parts** writes CSV and drops the rows above the header.
 - **A standard-library hit is referenced**, as `KLM_STD_<Category>:<part_id>`, not copied into the library you generate. Run `klm-cli stdlib build` to create those libraries.
 - **BOM import lookups.** The BOM's manufacturer narrows candidates only when it matches one exactly, so differently spelled makers can show as ambiguous. The same part is fetched once per line, not once per MPN. The generate step has no automated test.
-- **The standard library is small and not in the release zips.** `stdlib/` currently holds resistors only, and the packages do not include it, so `stdlib` commands and the BOM lookup find it only when run from a source checkout or with `--manifest`.
+- **The standard library is small.** `stdlib/` currently holds resistors only. Both release zips ship it next to the executable, and `--manifest <dir>` points at a different folder.
 
 ## Footprint generator
 

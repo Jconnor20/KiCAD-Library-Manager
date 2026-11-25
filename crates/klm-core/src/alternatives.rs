@@ -548,7 +548,7 @@ mod tests {
         let stored = s.rejected().unwrap();
         assert!(stored.iter().all(|(a, b)| a.contains("@resc1608x55n") || a.contains("@r_0603") && b.contains('@') && !a.contains("chip:")), "{stored:?}");
         // What a changed alias table does: the stored footprint names resolve to whatever the table says now,
-        // so an entry written under an old package id (W8.3 data) and the raw one hide the same group.
+        // so an entry written under an old package id and the raw one hide the same group.
         s.add_rejected(&[("c1@chip:0603".into(), "d1@chip:0603".into())]).unwrap();
         let more = [lp("c", "C1", "10k", "R_0603"), lp("d", "D1", "10k", "RESC1608X55N")];
         assert!(suggest_unrejected(&s, &more).unwrap().is_empty());

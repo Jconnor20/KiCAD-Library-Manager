@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The profile used when none is chosen: the KiCad Library Conventions.
-// shortcut: only KLC is built in; W10 adds fab/IPC profiles once a profile can hold those settings.
+// shortcut: only KLC is built in; fab/IPC profiles come once a profile can hold those settings.
 pub const BUILT_IN: &str = "KLC";
 
 /// Format version written into every profile, for later migrations.

@@ -236,7 +236,7 @@ mod tests {
         assert_eq!(p.variations[0].price_breaks[0].0, 1);
     }
 
-    // Recorded from the live API (W6.1).
+    // Recorded from the live API.
     #[test]
     fn live_keyword_reply_maps_every_field() {
         let parts = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/digikey_search_LM358.json")).unwrap());

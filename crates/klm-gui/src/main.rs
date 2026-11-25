@@ -235,7 +235,7 @@ fn main() -> eframe::Result {
 /// Window size and position are remembered between runs, in the config folder (so a sandbox keeps them too).
 fn native_options() -> eframe::NativeOptions {
     eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 800.0]).with_title("KiCad Library Manager"),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 800.0]).with_title(concat!("KiCad Library Manager ", env!("CARGO_PKG_VERSION"))),
         persistence_path: klm_core::settings::app_dir().map(|d| d.join("window.ron")),
         ..Default::default()
     }
@@ -458,7 +458,7 @@ impl App {
     /// The first-run steps still open, each with a button to the Settings page for it. Hidden once all are done.
     fn checklist(&mut self, ui: &mut egui::Ui) {
         let cx = &self.cx;
-        // W7.1 adds Libraries / KiCad / Sources / Watch folders pages; point each step at its own then.
+        // The Settings sections (Libraries, KiCad, Sources, Watch folders) could each get their own step here.
         let steps = [
             ("Global library", cx.settings.global_root.is_some(), Section::Libraries),
             ("KiCad found", cx.kicad_config.is_ok(), Section::KiCad),

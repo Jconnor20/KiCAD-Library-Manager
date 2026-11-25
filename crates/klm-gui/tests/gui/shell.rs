@@ -1,4 +1,4 @@
-//! W7.2 app shell: start tab, first-run checklist, error badge, windows per tab, window defaults.
+//! App shell: start tab, first-run checklist, error badge, windows per tab, window defaults.
 
 use super::harness::*;
 use crate::tabs::ui_kit::Level;

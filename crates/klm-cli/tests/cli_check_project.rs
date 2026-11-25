@@ -1,5 +1,5 @@
 //! `klm-cli check-project` end to end. The DRC/ERC mapping is tested from saved reports in `klm_core::project_check`;
-//! here only what fails before kicad-cli runs, since the fab limits come from W10.0's `fab_data`.
+//! here only what fails before kicad-cli runs, since the fab limits come from `fab_data`.
 
 use std::path::Path;
 use std::process::{Command, Output};

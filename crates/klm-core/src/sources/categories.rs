@@ -55,7 +55,7 @@ pub fn parse_digikey(v: &Value) -> Vec<Category> {
 mod tests {
     use super::*;
 
-    // Recorded from the live API (W6.1).
+    // Recorded from the live API.
     const DIGIKEY: &str = include_str!("../../tests/fixtures/live/digikey_categories.json");
 
     #[test]

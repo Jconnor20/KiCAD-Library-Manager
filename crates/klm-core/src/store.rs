@@ -202,7 +202,7 @@ impl Store {
         Ok(rows.next().transpose()?)
     }
 
-    // --- Search history, saved searches, favourites, recent imports (W3.4). They reuse `history` and
+    // --- Search history, saved searches, favourites, recent imports. They reuse `history` and
     // `tags`, so no schema change; `parts` can be rebuilt without touching them.
 
     /// Newest first, each query once.
@@ -256,7 +256,7 @@ impl Store {
         Ok(q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?)
     }
 
-    // --- Alternative groups (W3.2, used by `crate::alternatives`) ---
+    // --- Alternative groups (used by `crate::alternatives`) ---
 
     /// Every (part_mpn, alternative) row.
     pub fn all_alternatives(&self) -> Result<Vec<(String, Alternative)>> {
@@ -282,7 +282,7 @@ impl Store {
         self.log("delete", mpn)
     }
 
-    /// Remembers suggestions the user rejected (W8.3), as pairs of member ids (`crate::alternatives::member_id`).
+    /// Remembers suggestions the user rejected, as pairs of member ids (`crate::alternatives::member_id`).
     /// Kept as tags (`part_mpn` = first id, tag = `rejected-alt:` + second id), so there is no schema change.
     pub fn add_rejected(&self, pairs: &[(String, String)]) -> Result<()> {
         let tx = self.db.unchecked_transaction()?;

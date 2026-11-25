@@ -34,7 +34,7 @@ jobs:
           cargo build --release -p klm-cli
           if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
           $v = '${{ steps.ver.outputs.version }}'
-          Compress-Archive -DestinationPath "dist/klm-$v-windows-x64.zip" -Path target/release/klm.exe, target/release/klm-cli.exe, LICENSE, README.md
+          Compress-Archive -DestinationPath "dist/klm-$v-windows-x64.zip" -Path target/release/klm.exe, target/release/klm-cli.exe, LICENSE, README.md, stdlib
 
       - uses: softprops/action-gh-release@v2
         with:

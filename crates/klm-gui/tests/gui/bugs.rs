@@ -1,4 +1,4 @@
-//! The UI bugs found by hand after Wave 5 (Feature_Roadmap.md, "Review after Wave 5"), one test each.
+//! The UI bugs found by hand in a review of the UI, one test each.
 //! A bug that is still open is `#[should_panic(expected = "KNOWN BUG")]`: the test passes while the bug exists
 //! and fails with "did not panic" the day it is fixed, which is the cue to drop the attribute.
 

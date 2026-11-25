@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn easyeda_pro_library_files_are_tried_not_ignored() {
-        // Found by the W6.2 corpus: an .elibz2 used to be skipped without a word.
+        // Found by the foreign-library corpus: an .elibz2 used to be skipped without a word.
         for f in ["a.elibz2", "a.ELIBZ", "a.epro", "a.IntLib"] {
             assert!(is_foreign(Path::new(f)), "{f}");
         }
