@@ -1,163 +1,114 @@
-# Manual test checklist
+# Release checklist
 
-These have passed automated tests but haven't been checked by hand in the app or in KiCad. Tick each one off as you go. If something fails, note what you did and what the log panel at the bottom of KLM said.
+A manual pass to do before each release, on top of the automated tests. Items are ordered by risk: the ones most likely to break for a new user come first. Tick each one, or note what you did, what you expected and what the log (status bar → **Show log**) said.
 
 **Before you start**
-- **Run the latest build:** `cargo run --release -p klm-gui`, or the `.exe` in `target\release\`.
-- **Your library is safe:** KLM takes a snapshot before every change. If a test goes wrong, roll it back from the **History** tab.
-- **Close KiCad** whenever KLM asks. KiCad overwrites its library list while it's open.
+
+- Use a release build: `cargo build --release`, or the zip you are about to publish.
+- Test on a copy first. Run `klm.exe --config <dir>` (or set `KLM_CONFIG_DIR=<dir>`) to keep settings, `parts.db`, caches, KiCad's library tables (`<dir>\kicad\<version>\`) and API keys (`<dir>\credentials.json`, plain text) out of your real setup. Put a `settings.json` with `global_root` in the folder first if you want to skip the first-run page. Set `KLM_USE_REAL_KEYS=1` to read keys missing from the folder from the real Credential Manager.
+- KLM takes a snapshot before every change. If a test goes wrong, roll it back from **History**.
+- Have KiCad 10 installed, and KiCad 9 for the install items marked (9).
+
+## Install and KiCad
+
+- [ ] **PCM install from the repository URL.** In KiCad 10: *Plugin and Content Manager → Manage…*, add `https://raw.githubusercontent.com/Jconnor20/KiCAD-Library-Manager/master/pcm/repository.json`, select it, install **KiCad Library Manager**, **Apply Pending Changes**. Expect the install to finish with no "metadata" error and the version to match the release. (9) Repeat on KiCad 9.
+- [ ] **PCM install from file.** Download `klm-pcm-<version>.zip` from the release. *Install from File…*, choose it. Expect the same result. Restart KiCad with *Preferences → Plugins → Enable KiCad API* on.
+- [ ] **Toolbar button, PCB editor.** Open a board and click **Library Manager**. Expect KLM to open with that board's project chosen (top bar shows its folder name). First run may take a minute while KiCad sets up the plugin's Python environment.
+- [ ] **Toolbar button, schematic editor.** Same in the schematic editor.
+- [ ] **Plugin errors are visible.** Rename `klm.exe` inside the installed plugin folder and click the button. Expect a message box and the reason in `%TEMP%\klm-plugin.log`. Rename it back.
+- [ ] **Standalone zip.** Unzip `klm-<version>-windows-x64.zip` into a fresh folder, run `klm.exe`, and run `klm-cli.exe` with no arguments. Expect the app to open (after SmartScreen's **More info → Run anyway**) and the CLI to print its command list.
+- [ ] **PCM update path.** With the previous release installed through the repository, publish the new tag and check KiCad offers the update after refreshing the repository. (Skip for the first release.)
+
+## First run and setup
+
+- [ ] **First-run page.** Run with an empty `KLM_CONFIG_DIR`. Expect the "Set up your global library" page with three steps. Pick an empty folder and click **Create global library**. Expect the library folder created, `KLM_*` entries (once you import) in KiCad's tables, and the app to open on Library.
+- [ ] **Set-up checklist.** Expect "Set up: ✔ Global library, ✔ KiCad found" and open items for a source and a watch folder, each with an **Open** button to the right Settings page. Enable LCSC and add a watch folder. Expect the checklist to disappear.
+- [ ] **Change location.** Top bar → Library → **Change location…** to a new folder on the same drive. Expect every part still shows complete, and KiCad finds them after a restart. Then once to another drive: expect a copy, a check, then the original removed.
+
+## Import (highest-traffic path)
+
+- [ ] **Search and import an LCSC part end to end.** Search for `LM358` or a connector, click Import, check the preview, import to Global. Open KiCad, place it from the `KLM_<Category>` library. Expect the footprint assigned, the 3D model in KiCad's 3D viewer, and the datasheet opening from the symbol.
+- [ ] **Import with KiCad open.** Import a part into a new category while KiCad is open. Expect no blocking prompt, "pending" in the log or top bar, and after you close and reopen KiCad the new `KLM_<Category>` library is in the symbol chooser.
+- [ ] **Vendor ZIPs.** Import a SnapEDA/SnapMagic, an Ultra Librarian and a SamacSys ZIP: drop them in a watch folder, or use **Import ZIP…**. Expect each to appear in the queue, show a preview and import. An attached `.stl` should show a warning.
+- [ ] **Altium and Eagle.** With **Import files…**, import a real `.SchLib` plus `.PcbLib`, and an Eagle `.lbr`. Expect parts to appear in the queue, or a clear message (EasyEDA Pro `.elibz2` should say KiCad cannot convert it).
+- [ ] **Import all.** Queue two or three ZIPs, click **Import all…**. Expect a dry-run list, **Apply**, and one snapshot for the batch in History.
+
+## Library
+
+- [ ] **Edit in KiCad.** On a part, **Open in KiCad → Symbol in KiCad's editor** and **Footprint in KiCad's editor**. Expect each to open as a standalone editor, and saving a change there to re-check the part in KLM within a few seconds.
+- [ ] **In-app symbol editor.** **Edit symbol…**: move a pin, change the body size, save. Expect the Library row re-checked. In History, roll the change back and expect the symbol as before.
+- [ ] **Reimport and Delete.** **Reimport** a part from its source and expect your edits replaced after the confirmation. **Delete…** a part and read the preview: expect the symbol, and any footprint, model, datasheet and sim model no other part uses. After Delete, History can roll it back.
+- [ ] **Standardise.** Run **Standardise…** on a copy of your library: read the dry run, apply, open the library in KiCad. Expect fields set to hidden to show as hidden (`(hide yes)` in the `.kicad_sym`), Reference and Value where the house template puts them, and no broken pin numbers. Roll it back from History.
+- [ ] **3D fit fix.** Pick a part whose model is off-centre or turned. Expect a 3D fit warning, and after Standardise the model correctly placed in KiCad's 3D viewer (centred on the footprint, right way up).
+- [ ] **Attach and Copy to project.** **Attach…** a datasheet, a SPICE model and a 3D model, then **Copy to project**. Expect each file in the right folder and a `PRJ_<Category>` library in the project.
+- [ ] **Find missing datasheets.** Delete one part's PDF and run **More → Find missing datasheets**. Expect the PDF back and the `Datasheet` field updated.
+
+## Standards and project checks
+
+- [ ] **Footprint generator.** *Standards → Create*: generate an SOIC-8, a chip 0603 and a QFN. Open each in KiCad's footprint editor. Expect pads at the sizes the page shows, a courtyard and a pin-1 mark, and a clean DRC when placed on a board.
+- [ ] **Project check, one fab.** Open a real project, *Standards → Project check*, run it. Expect KiCad's DRC and ERC findings with references, fab-limit violations naming a `klm_` rule, and the project folder unchanged (no `.kicad_dru` written).
+- [ ] **Project check, All fabs.** Tick **All fabs** and run. Expect one pass/fail line per fab.
+- [ ] **KiCad tables clean-up.** *Standards → KiCad tables*: scan, queue one remove and one fix path, read the preview, apply with KiCad closed. Expect a `.klm-cleanup-*.bak` beside the table and the library files untouched.
+
+## BOM
+
+- [ ] **Prices and assembler.** With DigiKey and Mouser keys set, open *BOM* on a project and click **Read BOM and prices**. Expect stock, price at your board count, lead time and totals. Spot-check two lines on the distributor's site. Switch **Assembler** between JLCPCB and DigiKey/Mouser and click **Use best alternates**. Expect the alternates to change with the assembler.
+- [ ] **BOM export.** **Export CSV…** and open it in a spreadsheet. Expect the same rows and totals, and no cell turned into a formula.
+- [ ] **BOM import.** *Import → From a BOM*: open a CSV, then an `.xlsx`. Expect the right sheet, header row and columns, **Look up** to give a status per line, and **Generate** to add the found parts to the library.
+
+## Sources and keys
+
+- [ ] **DigiKey, Mouser and Nexar.** In *Settings → Sources*, enter keys, **Save keys**, **Test**. Expect "✔ results" for each, then a real search for each in Search. Close and reopen KLM: keys show as stored, and are not in `settings.json`.
+
+## History and relink
+
+- [ ] **Rollback.** After an import, roll back to before it in History. Expect the part gone and the library as before, including KiCad's library list.
+- [ ] **Relink with KiCad open and closed.** Delete a `KLM_…` entry in KiCad's *Manage Symbol Libraries* and save. With KiCad closed, **More → Relink libraries**: expect the entry back. Repeat with KiCad open: expect it queued, and applied after KiCad closes.
+
+## Security and updates
+
+- [ ] **Refuses unsafe links.** Set a symbol's `Datasheet` to `C:\Windows\System32\calc.exe` (and another to a `\\server\share\x.pdf` path) and click **Open datasheet** on each part in Library. Expect nothing to launch and a message in the log.
+- [ ] **Update check.** *Settings → General → Updates*: expect "Check for updates at start-up" on by default and a note that only GitHub is asked. With it off, expect no request at start-up. To see the badge, install a build whose version is lower than the latest release; expect "Update <version>" in the status bar, opening the release page when clicked.
+
+## Command line
+
+- [ ] **Core commands.** In `klm-cli.exe`: `check --deep`, `history` then `rollback <id>`, `import a.zip --dry-run` (changes nothing), `health --project <dir>` and `check-project <dir>`. Expect readable output and exit code 1 only when something is wrong.
+- [ ] **Export.** `klm-cli export out.zip <part>`, unzip, add the `sym-lib-table` and `fp-lib-table` entries to a fresh KiCad project. Expect the symbols to place with footprints and 3D models showing.
 
 ---
 
-## KiCad integration
+## Automated tests
 
-- [ ] **Install the toolbar plugin.** In KiCad: *Plugin and Content Manager → Install from File…*, then pick `dist\klm-pcm-0.4.0.zip`. Expect it to install with no "metadata" error.
-- [ ] **Toolbar button.** Open a board in the PCB editor (KiCad's API must be on: *Preferences → Plugins*) and click **Library Manager**. Expect KLM to open with that board's project already chosen.
-- [ ] **New category library.** Import a part into a new category while KiCad is open. Expect no close-KiCad prompt, and "N pending" in the top bar. After you reopen KiCad, the new `KLM_<Category>` library is in the symbol chooser.
-- [ ] **Placed part is complete.** Place an imported part from KiCad's symbol chooser. Expect its footprint to be assigned, the 3D viewer to show its model, and *Show datasheet* to open the local PDF.
-- [ ] **Re-link.** Delete a `KLM_…` entry in KiCad's *Manage Symbol Libraries*, close KiCad, then click **Re-link libraries** in KLM. Expect the entry back.
+```
+cargo test --workspace
+```
 
-## Sources
+This runs the unit tests and the end-to-end tests. Tests that need `kicad-cli` skip themselves when KiCad is not installed. The GUI tests render offscreen and take about a minute and a half. Set `KLM_CONFIG_DIR` first to be sure nothing touches your real setup:
 
-- [ ] **LCSC, several part types.** Search and import a connector, a multi-unit op-amp (e.g. LM358 in a dual package) and a part with odd-shaped pads. Expect the preview and the KiCad footprint to match the datasheet drawing: pin positions, pad sizes, pin-1 location.
-- [ ] **Ultra Librarian ZIP.** Download one part's KiCad ZIP. Expect it to appear under **Import** and import cleanly. `corpus_e2e.rs` proves it on four real Ultra Librarian ZIPs (KiCad, Altium, Fusion, combined); the GUI click-through is still yours.
-- [ ] **Legacy `.lib` symbol.** Import a ZIP whose symbol is an old-style `.lib` (older SamacSys/UL downloads). Expect the pin/pad check to run on it rather than say it can't be read. `corpus_e2e.rs` proves import and rendering on KiCad's real legacy `Regulator_Linear.lib`; the pin/pad check inside the GUI is still yours.
-- [ ] **DigiKey.** Enter your client ID and secret in **Settings → DigiKey**, then click **Test**. Expect results for LM358. Then search a real part from the Search tab.
-- [ ] **Mouser.** Same as DigiKey, with your API key.
-- [ ] **Nexar (Octopart).** Same as DigiKey, with your client ID and secret.
-- [ ] **Keys are stored safely.** After saving a key, close and reopen KLM. Expect it to show "stored", and the key not to appear in `%APPDATA%\KiCAD-Library-Manager\settings.json`.
+```
+$env:KLM_CONFIG_DIR = "$env:TEMP\klm-sandbox"; cargo test --workspace
+```
 
-## Search tab
+CI also runs `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo deny check`.
 
-- [ ] **Sorting.** Click each column header. Price and stock should sort as numbers, and a second click reverses the order.
-- [ ] **Filters.** Try source, in stock only, manufacturer, package, maximum price and the text box. Expect "N of M results" to update, and **Clear filters** to reset everything.
-- [ ] **Get… after sorting.** Sort or filter the results, then click **Get…**. Expect the part you clicked, not whichever part used to be in that row.
-- [ ] **Currency.** Pick a display currency on the Search tab. Expect prices from every source converted, and live rates loaded. (The rate service hasn't been called from the app yet.)
+### Live API tests
 
-## Multi-source Get
+These call the real distributors and need your keys in Windows Credential Manager (or a sandbox with `KLM_USE_REAL_KEYS=1`). They are skipped by default:
 
-- [ ] **Candidates from several sources.** With LCSC plus at least one distributor enabled, click **Get…** on a part that's on both. Expect the import dialog to list each file type with where it came from, and to fill in more as sources answer.
-- [ ] **Swapping a source.** Change one file to a different source. Expect the preview to redraw with the new file.
-- [ ] **Mismatch refusal.** Pick a symbol from one source and a footprint from another whose pin numbers differ. Expect Import to be blocked with a message listing the mismatched pins.
-- [ ] **Fetch from SnapMagic.** For a part with no CAD files, click **Fetch from SnapMagic…** and download the ZIP. Expect it to be added to the dialog that's already open.
-- [ ] **Your edits are kept.** Edit the manufacturer or description while sources are still answering. Expect your text to stay.
+```
+cargo test -p klm-core --test live_api -- --ignored live
+```
 
-## Import tab
+The `live_record_*` tests save each raw reply, with secrets replaced, under `crates/klm-core/tests/fixtures/live/`. Run them when a distributor changes its API, and before a release if Mouser or Nexar keys are available (see [LIMITS.md](LIMITS.md)).
 
-- [ ] **Previews.** Open the import dialog. Expect symbol, footprint and 3D thumbnails, a click to enlarge one, and check warnings next to them. Note roughly how long the 3D render takes.
-- [ ] **Import all.** Download two or three ZIPs, then click **Import all…**. Expect a dry-run list of what would change, and **Apply** to import them all. Afterwards the **History** tab shows *one* snapshot for the batch.
+### Scale timings
 
-## Library tab
+```
+cargo test --release -p klm-core --test scale_e2e -- --ignored scale --nocapture
+```
 
-- [ ] **Checks column.** Expect ✔ for good parts, and a coloured count with the issue list on hover for the others.
-- [ ] **Preview.** Click **Preview** on a row. Expect the same viewer as the import dialog.
-- [ ] **Edit… on one part.** Change the manufacturer and tags. Expect the change in the table, and in the symbol's fields in KiCad.
-- [ ] **Edit… to change category.** Move a part to another category. Expect its symbol, footprint and 3D model to move, and the part to still place correctly in KiCad.
-- [ ] **Edit selected.** Tick several rows, click **Edit selected…** and change one field. Expect only that field changed on all of them.
-- [ ] **Attach…** Attach a datasheet, a SPICE model and a 3D model, choosing Global, Project or both. Expect each file in that library's own folder.
-- [ ] **Copy to project.** Expect the part in the project's `lib\` folder, with a `PRJ_<Category>` library in the project.
-- [ ] **Download missing datasheets.** Set one part's datasheet to a web link to a PDF, then click the button. Expect a local PDF and the field pointing at it. A link to a web page rather than a PDF should be left alone.
-- [ ] **Batch buttons.** Try **Copy selected to project**, **Attach to selected…** and **Relink all**. Expect a dry-run list before anything changes.
+Builds a 2,000-part library and prints how long listing, checking and the alternatives scan take. It does not fail on the numbers.
 
-## History tab
+### Real-file corpus
 
-- [ ] **Snapshots appear.** After an import, expect a new snapshot showing its time, action and size.
-- [ ] **Rollback.** Roll back the import. Expect the part gone and the library exactly as before, including KiCad's library list. Expect a prompt to close KiCad if the list has to change.
-- [ ] **Rolling back an older snapshot.** Expect the newer changes after it to be undone too.
-
-## BOM tab
-
-- [ ] **Load a real project.** Open the BOM tab on one of your projects. Expect every line from the schematic, matched to library parts by MPN or supplier number, with "missing" shown for parts without CAD files.
-- [ ] **Live prices.** With DigiKey and Mouser keys set, expect stock, price at your quantity and lead time per line, and totals (unit, extended, coverage, longest lead time). Spot-check two lines against the distributor's website, including a quantity that crosses a price break.
-- [ ] **Shipping region.** Set a Settings default, then a different project override. Expect DigiKey prices in that region's currency; Mouser and LCSC are labelled as ignoring it.
-- [ ] **Offline.** Disconnect the network and reload. Expect cached prices marked stale and one error in the log, not one per line.
-- [ ] **CSV export.** Export and open in Excel. Expect the same rows and totals, with no cell turned into a formula.
-
-## Import library (other tools)
-
-- [ ] **Your old `KiCAD_Library`.** Click **Import library…** on the Import tab and pick it. Expect a dry-run list with sensible categories, then after Apply the parts in the Library tab with ✔ and one snapshot in History.
-- [ ] **Altium.** Try a real `.SchLib`/`.PcbLib` or `.IntLib`. Expect either imported parts or a clear "kicad-cli can't convert this" message.
-- [ ] **EasyEDA.** Same with an `.elib`/`.epro` library export.
-- [ ] **Eagle / Fusion.** Same with an `.lbr`.
-
-## Settings
-
-- [ ] **kicad-cli path.** Use **Browse…** to pick `kicad-cli.exe`, click **Test**, then **Use default**. Expect the version to show each time.
-- [ ] **Downloads folder.** Change the watched folder. Expect ZIPs downloaded there to be picked up.
-
-## Moving the global library
-
-Do this one last, and on a copy if you're nervous. History can roll it back.
-
-- [ ] **Same drive.** **Change location…** to a new folder. Expect every part to still show ✔, and KiCad to still find them after a restart.
-- [ ] **Another drive** (e.g. a USB stick). Expect a copy, a check, then the original removed. If you unplug the drive part-way, the original should be untouched.
-
-## Command line (`target\release\klm-cli.exe`)
-
-- [ ] **`klm-cli check --deep`** lists every part. The exit code is 1 when something is incomplete.
-- [ ] **`klm-cli import a.zip b.zip --dry-run`** prints the plan and changes nothing.
-- [ ] **`klm-cli history`**, then **`klm-cli rollback <id>`**, restores that snapshot.
-- [ ] **`klm-cli health --project <dir>`** on a real project. Expect a readable report, exit code 1 only when there are errors, and the same findings with `--json` and `--csv`.
-- [ ] **`klm-cli check-project <dir>`** on a real project, once with the profile's fab and once with `--all-fabs`. Expect KiCad's DRC/ERC findings with references, fab-limit violations naming a `klm_` rule, and the project folder unchanged (no `.kicad_dru` written).
-- [ ] **`klm-cli export out.zip <part>...`**, then unzip it and add the `sym-lib-table`/`fp-lib-table` entries to a fresh KiCad project. Expect the symbols to place with their footprints and 3D models showing.
-- [ ] **Export into Altium or Fusion.** Import the same ZIP with their KiCad importer. Expect symbols and footprints to come through.
-
----
-
-## Wave 4.5
-
-- [ ] **Plugin errors.** Rename `klm.exe` in the installed plugin folder and click the button. Expect a message box, and the reason in `%TEMP%\klm-plugin.log`.
-- [ ] **Schematic button.** Open a schematic and click **Library Manager**. Expect KLM to open on that project.
-- [ ] **Pending libraries.** With KiCad open, import into a new category, then close KiCad. Expect the library to still be in *Manage Symbol Libraries*.
-- [ ] **Watch folders.** Add two watch folders, drop a vendor ZIP into each, and expect both to be picked up. A config with the old `downloads_dir` should show that folder in the list.
-- [ ] **Key fields.** Type a key, toggle 👁, then save. Expect the saved key not to be shown.
-- [ ] **Search.**
-  - Unsorted headers show ⇅.
-  - Hovering a price lists the price breaks.
-  - A DigiKey search with a non-US region shows that currency code.
-  - Right-clicking the MPN toggles a favourite.
-- [ ] **Vendor ZIPs.** Import Ultra Librarian KiCad, Altium, Fusion and combined ZIPs. Expect each one to convert, with an attached `.stl` showing the STL warning.
-- [ ] **Import library from files.** Pick a `.SchLib` and a `.PcbLib` directly. Picking a `.LibPkg` should explain that it's a project.
-- [ ] **Library tab.** Sort by each column, combine the filters, and use the detail panel and the right-click menu.
-- [ ] **Find missing datasheets.** Delete a part's PDF and run it. Expect the PDF to come back and `Datasheet` to be updated, with a results dialog.
-- [ ] **History.**
-  - Only the last N minors are kept.
-  - A marked version survives more than N changes.
-  - The size cap prunes minors.
-  - A fresh library shows "No version saved yet".
-  - "Make minor" and "Delete" work on a version.
-- [ ] **Responsiveness.** Alternatives on a large library, and Standards Dry run and Apply, keep the window responsive.
-- [ ] **Log.** **Clear** empties the log, and **Copy** pastes every line.
-
-## Wave 5
-
-- [ ] **Browse by category** (needs DigiKey/Nexar keys). Pick a category from each source and expect filtered results. Thumbnails, including JPEGs, should render. Hover the CAD icons on an LCSC part.
-- [ ] **Restyle symbol.**
-  - Restyle a resistor, LED, NPN and IC box. Place each one in KiCad 10 and check the pin numbers match the footprint pads, including K/A and B/C/E.
-  - The Reference and Value text on IC boxes shouldn't overlap.
-  - History undoes the restyle.
-  - A MOSFET is refused with a reason.
-- [ ] **Restyle on import.** Turn on the house-symbols setting and import a resistor. Expect it to arrive restyled. A refused part keeps its vendor symbol and a note.
-- [ ] **Alternatives online.**
-  - In Library → Alternatives…, find equivalents for a 10k 0603 and add one. Expect `MPN_Alt1` and the supplier fields in the symbol.
-  - Try "Add and import CAD…" and the hand-entered form, and check the panel's layout.
-- [ ] **Clean up.**
-  - With KiCad closed, run `klm-cli cleanup` against your real config and read the findings for false "broken" ones.
-  - Do a `--remove` or `--fix`, first without `--apply`, then with it. Check the table and its `.klm-cleanup-*.bak` backup.
-  - On the Clean up tab, check the scan, queue, preview, Apply and the "KiCad is open" warning.
-  - Run "Move into KLM" on a symbol library and expect its footprints to come too.
-- [ ] **KiCad open.** With KiCad open, run Relink, Change location… and a rollback. Close KiCad and check the tables are right after the next re-check.
-- [ ] **Attach ZIPs.** Attach a footprint-only ZIP and then a model-only ZIP to a part from the Library tab.
-- [ ] **History kinds.** Run `klm-cli history` and `klm-cli history --json`. Expect each snapshot shown as minor, named or interval.
-- [ ] **MOQ.** In LCSC and Nexar search results, check the MOQ and pack size columns are filled.
-
-## Running against a sandbox
-
-Never test against your real library. `klm.exe --config <dir>` / `klm-cli --config <dir>` (or `KLM_CONFIG_DIR=<dir>`) keep settings, the part database, caches, the pending queue, KiCad's global library tables (`<dir>/kicad/<version>/`, made empty if missing) and API keys (`<dir>/credentials.json`, plain text) in `<dir>`. Put a `settings.json` with `global_root` in it first. Set `KLM_USE_REAL_KEYS=1` to read keys missing from the sandbox from the real Credential Manager. Details and proof: `docs/verification/W6.0-sandbox.md`.
-
-## Already verified
-
-- [x] The TE switch (2-1977223-4) datasheet attach: `klm-cli check` shows its datasheet present.
-- [x] Your real library passes `klm-cli check --deep`: 3 parts, 0 problems.
-- [x] A dry-run import of your SamacSys resistor ZIP changes no files.
-- [x] An exported bundle loads with `kicad-cli sym upgrade` and `fp upgrade` (KiCad installed on this machine, run by the W4.4 test after merge).
+`crates/klm-core/tests/corpus_e2e.rs` imports real vendor files from `testdata/` (git-ignored; see [docs/testdata-manifest.md](docs/testdata-manifest.md) for what to download) and renders them with `kicad-cli`. A case whose file is missing is skipped. Renders land in `target/corpus-renders/`.

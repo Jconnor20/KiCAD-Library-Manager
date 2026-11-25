@@ -38,25 +38,116 @@ const USAGE: &str = "usage:
 
 #[derive(Debug, PartialEq)]
 enum Command {
-    Check { json: bool, deep: bool, project: Option<PathBuf> },
-    Relink { project: Option<PathBuf> },
-    RepairModels { project: Option<PathBuf>, dry_run: bool },
-    History { json: bool, project: Option<PathBuf> },
-    Rollback { id: String, project: Option<PathBuf> },
-    Standardise { project: Option<PathBuf>, dry_run: bool },
-    Restyle { category: String, part: String, project: Option<PathBuf>, dry_run: bool },
-    Health { json: bool, csv: bool, project: Option<PathBuf> },
-    CheckProject { dir: PathBuf, fabs: Vec<String>, all_fabs: bool, format: String },
-    FootprintGen { family: String, category: String, dims: Box<klm_core::footprint_gen::Dims>, density: Option<char>, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
-    Cleanup { projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, moves: Vec<String>, apply: bool },
-    Import { zips: Vec<PathBuf>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, dry_run: bool },
-    Export { zip: PathBuf, parts: Vec<String>, category: Option<String>, project: Option<PathBuf> },
-    Sim { part: Option<String>, generate: bool, category: Option<String>, project: Option<PathBuf> },
-    Remove { part: String, category: Option<String>, project: Option<PathBuf>, yes: bool },
-    Lookup { mpns: Vec<String>, json: bool },
-    StdlibVerify { categories: Vec<String>, manifest: Option<PathBuf>, offline: bool, json: bool },
-    StdlibBuild { categories: Vec<String>, manifest: Option<PathBuf> },
-    BomImport { bom: PathBuf, sheet: Option<String>, header_row: Option<usize>, maps: Vec<(String, String)>, category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, manifest: Option<PathBuf>, out: Option<PathBuf>, dry_run: bool },
+    Check {
+        json: bool,
+        deep: bool,
+        project: Option<PathBuf>,
+    },
+    Relink {
+        project: Option<PathBuf>,
+    },
+    RepairModels {
+        project: Option<PathBuf>,
+        dry_run: bool,
+    },
+    History {
+        json: bool,
+        project: Option<PathBuf>,
+    },
+    Rollback {
+        id: String,
+        project: Option<PathBuf>,
+    },
+    Standardise {
+        project: Option<PathBuf>,
+        dry_run: bool,
+    },
+    Restyle {
+        category: String,
+        part: String,
+        project: Option<PathBuf>,
+        dry_run: bool,
+    },
+    Health {
+        json: bool,
+        csv: bool,
+        project: Option<PathBuf>,
+    },
+    CheckProject {
+        dir: PathBuf,
+        fabs: Vec<String>,
+        all_fabs: bool,
+        format: String,
+    },
+    FootprintGen {
+        family: String,
+        category: String,
+        dims: Box<klm_core::footprint_gen::Dims>,
+        density: Option<char>,
+        project: Option<PathBuf>,
+        overwrite: bool,
+        dry_run: bool,
+    },
+    Cleanup {
+        projects: Vec<PathBuf>,
+        remove: Vec<String>,
+        fix: Vec<String>,
+        moves: Vec<String>,
+        apply: bool,
+    },
+    Import {
+        zips: Vec<PathBuf>,
+        category: Option<String>,
+        to: Target,
+        project: Option<PathBuf>,
+        overwrite: bool,
+        dry_run: bool,
+    },
+    Export {
+        zip: PathBuf,
+        parts: Vec<String>,
+        category: Option<String>,
+        project: Option<PathBuf>,
+    },
+    Sim {
+        part: Option<String>,
+        generate: bool,
+        category: Option<String>,
+        project: Option<PathBuf>,
+    },
+    Remove {
+        part: String,
+        category: Option<String>,
+        project: Option<PathBuf>,
+        yes: bool,
+    },
+    Lookup {
+        mpns: Vec<String>,
+        json: bool,
+    },
+    StdlibVerify {
+        categories: Vec<String>,
+        manifest: Option<PathBuf>,
+        offline: bool,
+        json: bool,
+    },
+    StdlibBuild {
+        categories: Vec<String>,
+        manifest: Option<PathBuf>,
+    },
+    BomImport {
+        bom: PathBuf,
+        sheet: Option<String>,
+        header_row: Option<usize>,
+        maps: Vec<(String, String)>,
+        category: Option<String>,
+        to: Target,
+        project: Option<PathBuf>,
+        overwrite: bool,
+        manifest: Option<PathBuf>,
+        out: Option<PathBuf>,
+        dry_run: bool,
+    },
 }
 
 fn parse_lookup(args: &[String]) -> Result<Command> {
@@ -88,7 +179,8 @@ fn parse_sim(args: &[String]) -> Result<Command> {
 }
 
 fn parse_bom_import(args: &[String]) -> Result<Command> {
-    let (mut bom, mut sheet, mut header_row, mut maps, mut category, mut to, mut project, mut overwrite, mut manifest, mut out, mut dry_run) = (None, None, None, vec![], None, Target::Global, None, false, None, None, false);
+    let (mut bom, mut sheet, mut header_row, mut maps, mut category, mut to, mut project, mut overwrite, mut manifest, mut out, mut dry_run) =
+        (None, None, None, vec![], None, Target::Global, None, false, None, None, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || it.next().cloned().with_context(|| format!("{a} needs a value"));
@@ -114,7 +206,19 @@ fn parse_bom_import(args: &[String]) -> Result<Command> {
             _ => bom = Some(PathBuf::from(a)),
         }
     }
-    Ok(Command::BomImport { bom: bom.context("bom-import needs a BOM file (CSV or spreadsheet)")?, sheet, header_row, maps, category, to, project, overwrite, manifest, out, dry_run })
+    Ok(Command::BomImport {
+        bom: bom.context("bom-import needs a BOM file (CSV or spreadsheet)")?,
+        sheet,
+        header_row,
+        maps,
+        category,
+        to,
+        project,
+        overwrite,
+        manifest,
+        out,
+        dry_run,
+    })
 }
 
 fn parse_stdlib(args: &[String]) -> Result<Command> {
@@ -187,10 +291,26 @@ fn parse_footprint_gen(args: &[String]) -> Result<Command> {
             _ => family = Some(a.clone()),
         }
     }
-    Ok(Command::FootprintGen { family: family.context("footprint-gen needs a family")?, category: category.context("footprint-gen needs --category")?, dims: Box::new(d), density, project, overwrite, dry_run })
+    Ok(Command::FootprintGen {
+        family: family.context("footprint-gen needs a family")?,
+        category: category.context("footprint-gen needs --category")?,
+        dims: Box::new(d),
+        density,
+        project,
+        overwrite,
+        dry_run,
+    })
 }
 
-fn footprint_gen(family: &str, category: &str, dims: &klm_core::footprint_gen::Dims, density: Option<char>, project: Option<&Path>, overwrite: bool, dry_run: bool) -> Result<()> {
+fn footprint_gen(
+    family: &str,
+    category: &str,
+    dims: &klm_core::footprint_gen::Dims,
+    density: Option<char>,
+    project: Option<&Path>,
+    overwrite: bool,
+    dry_run: bool,
+) -> Result<()> {
     use klm_core::footprint_gen::{self, Family};
     let family = Family::from_label(family).with_context(|| format!("unknown family {family}; use chip, sod, sot, soic, qfn, qfp or bga"))?;
     let s = settings()?;
@@ -446,8 +566,15 @@ fn check(json: bool, deep: bool, project: Option<&Path>) -> Result<ExitCode> {
         for (s, p, bad, issues) in &rows {
             println!(
                 "{:<8} {}/{}: footprint {}, 3D {}, datasheet {}, sim {}, in KiCad {}{}",
-                scope(*s), p.category, p.mpn, word(p.footprint), word(p.model), word(p.datasheet), word(p.sim),
-                if p.in_kicad { "yes" } else { "no" }, if *bad { "  <- incomplete" } else { "" },
+                scope(*s),
+                p.category,
+                p.mpn,
+                word(p.footprint),
+                word(p.model),
+                word(p.datasheet),
+                word(p.sim),
+                if p.in_kicad { "yes" } else { "no" },
+                if *bad { "  <- incomplete" } else { "" },
             );
             for i in issues {
                 println!("           {}: {}", severity(i), i.message);
@@ -515,7 +642,8 @@ fn check_project(dir: &Path, fabs: Vec<String>, all_fabs: bool, format: &str) ->
     let results = project_check::check_all(dir, &cli, &fabs, &choice)?;
     match format {
         "json" => {
-            let rows: Vec<_> = results.iter().map(|r| json!({ "fab": r.fab, "name": r.name, "pass": r.passes(), "errors": r.errors, "warnings": r.warnings })).collect();
+            let rows: Vec<_> =
+                results.iter().map(|r| json!({ "fab": r.fab, "name": r.name, "pass": r.passes(), "errors": r.errors, "warnings": r.warnings })).collect();
             println!("{}", serde_json::to_string_pretty(&rows)?);
         }
         "csv" => {
@@ -533,28 +661,12 @@ fn check_project(dir: &Path, fabs: Vec<String>, all_fabs: bool, format: &str) ->
 }
 
 fn relink(project: Option<&Path>) -> Result<()> {
-    let roots = roots(&settings()?, project)?;
-    let mut any = false;
-    for root in roots {
-        let fixed = root.fix_old_paths()?;
-        if fixed > 0 {
-            println!("Replaced ${{KLM_LIB}} with {} in {fixed} files", root.dir.display());
-            any = true;
-        }
-        for cat in root.unlinked() {
-            root.link(&cat)?;
-            println!("Re-linked {} in KiCad", root.nickname(&cat));
-            any = true;
-        }
-        for note in klm_core::shadow::sync_shadowing_projects(&root, false).notes() {
-            println!("{note}");
-            any = true;
-        }
-    }
-    if !any {
-        println!("All KLM libraries are already in KiCad's library list.");
-    }
+    let report = LibraryRoot::relink_all(&roots(&settings()?, project)?);
+    report.notes.iter().for_each(|n| println!("{n}"));
     note_if_kicad_open();
+    if !report.errors.is_empty() {
+        bail!("{}", report.errors.join("; "));
+    }
     Ok(())
 }
 
@@ -564,14 +676,22 @@ fn repair_models(project: Option<&Path>, dry_run: bool) -> Result<()> {
     let project = roots.iter().find(|r| r.scope == Scope::Project);
     let plan = batch::plan(vec![Op::RepairModels], global, project);
     print!("{plan}");
-    if dry_run { return Ok(()); }
+    if dry_run {
+        return Ok(());
+    }
     ensure_kicad_closed()?;
     let mut errors = vec![];
     for result in batch::apply(&plan, |_, _| {}) {
-        for note in result.notes { println!("{note}"); }
-        if let Some(error) = result.error { errors.push(error); }
+        for note in result.notes {
+            println!("{note}");
+        }
+        if let Some(error) = result.error {
+            errors.push(error);
+        }
     }
-    if !errors.is_empty() { bail!("{}", errors.join("; ")); }
+    if !errors.is_empty() {
+        bail!("{}", errors.join("; "));
+    }
     Ok(())
 }
 
@@ -580,7 +700,10 @@ fn history(json: bool, project: Option<&Path>) -> Result<()> {
     for root in roots(&settings()?, project)? {
         let list = snapshot::list(&root);
         if json {
-            let snaps: Vec<_> = list.iter().map(|s| json!({ "id": s.id, "kind": s.kind_name(), "version": s.version, "bytes": s.bytes, "label": s.label, "time": s.ts })).collect();
+            let snaps: Vec<_> = list
+                .iter()
+                .map(|s| json!({ "id": s.id, "kind": s.kind_name(), "version": s.version, "bytes": s.bytes, "label": s.label, "time": s.ts }))
+                .collect();
             out.push(json!({ "library": root.dir.display().to_string(), "snapshots": snaps }));
         } else {
             println!("{}", root.dir.display());
@@ -597,7 +720,10 @@ fn history(json: bool, project: Option<&Path>) -> Result<()> {
 
 /// Restores the library that holds snapshot `id` to the state before that change.
 fn rollback(id: &str, project: Option<&Path>) -> Result<()> {
-    let root = roots(&settings()?, project)?.into_iter().find(|r| snapshot::list(r).iter().any(|s| s.id == id)).with_context(|| format!("no snapshot {id}; see `klm-cli history`"))?;
+    let root = roots(&settings()?, project)?
+        .into_iter()
+        .find(|r| snapshot::list(r).iter().any(|s| s.id == id))
+        .with_context(|| format!("no snapshot {id}; see `klm-cli history`"))?;
     snapshot::rollback(&root, id)?;
     println!("Rolled {} back to snapshot {id}", root.dir.display());
     note_if_kicad_open();
@@ -723,8 +849,11 @@ fn cleanup_cmd(projects: Vec<PathBuf>, remove: Vec<String>, fix: Vec<String>, mo
     for sel in &moves {
         let (e, g) = (pick(&report, sel)?, global.as_ref().context("no global library")?);
         let mv = cleanup::plan_move(&report, e, &s.rules, g)?;
-        print!("move {sel} into KLM:
-{}", mv.plan);
+        print!(
+            "move {sel} into KLM:
+{}",
+            mv.plan
+        );
         mv.caveats.iter().for_each(|c| println!("  not everything comes along: {c}"));
         staged.push(mv);
     }
@@ -856,11 +985,13 @@ fn lookup(mpns: &[String], json: bool) -> Result<ExitCode> {
         if json {
             let hits: Vec<_> = hits
                 .iter()
-                .map(|p| json!({
-                    "source": p.source, "mpn": p.mpn, "manufacturer": p.manufacturer, "description": p.description, "package": p.package,
-                    "lifecycle": p.lifecycle, "jlc_type": p.jlc_type, "stock": p.stock, "datasheet_url": p.datasheet_url,
-                    "supplier_ids": p.supplier_ids.iter().map(|(k, v)| json!({ "supplier": k, "id": v })).collect::<Vec<_>>(),
-                }))
+                .map(|p| {
+                    json!({
+                        "source": p.source, "mpn": p.mpn, "manufacturer": p.manufacturer, "description": p.description, "package": p.package,
+                        "lifecycle": p.lifecycle, "jlc_type": p.jlc_type, "stock": p.stock, "datasheet_url": p.datasheet_url,
+                        "supplier_ids": p.supplier_ids.iter().map(|(k, v)| json!({ "supplier": k, "id": v })).collect::<Vec<_>>(),
+                    })
+                })
                 .collect();
             out.push(json!({ "query": mpn, "hits": hits, "errors": errors }));
         } else {
@@ -868,7 +999,16 @@ fn lookup(mpns: &[String], json: bool) -> Result<ExitCode> {
             for p in &hits {
                 let ids: Vec<String> = p.supplier_ids.iter().map(|(k, v)| format!("{k} {v}")).collect();
                 let stock = p.stock.map_or("?".into(), |n| n.to_string());
-                println!("  {}: {} | {} | {} | lifecycle {} | jlc {} | stock {stock} | {}", p.source, p.mpn, p.manufacturer, p.package, p.lifecycle, p.jlc_type, ids.join(", "));
+                println!(
+                    "  {}: {} | {} | {} | lifecycle {} | jlc {} | stock {stock} | {}",
+                    p.source,
+                    p.mpn,
+                    p.manufacturer,
+                    p.package,
+                    p.lifecycle,
+                    p.jlc_type,
+                    ids.join(", ")
+                );
             }
             for e in &errors {
                 println!("  error: {e}");
@@ -937,7 +1077,19 @@ fn stdlib_verify(categories: &[String], manifest: Option<PathBuf>, offline: bool
 /// Resolves each BOM line (standard library, then sources), prints the report and, unless `dry_run`, builds the library.
 /// Fails when any line is unresolved or couldn't be imported.
 #[allow(clippy::too_many_arguments)]
-fn bom_import(bom: &Path, sheet: Option<&str>, header_row: Option<usize>, maps: &[(String, String)], category: Option<String>, to: Target, project: Option<PathBuf>, overwrite: bool, manifest: Option<PathBuf>, out: Option<&Path>, dry_run: bool) -> Result<ExitCode> {
+fn bom_import(
+    bom: &Path,
+    sheet: Option<&str>,
+    header_row: Option<usize>,
+    maps: &[(String, String)],
+    category: Option<String>,
+    to: Target,
+    project: Option<PathBuf>,
+    overwrite: bool,
+    manifest: Option<PathBuf>,
+    out: Option<&Path>,
+    dry_run: bool,
+) -> Result<ExitCode> {
     use klm_core::bom_import as bi;
     let s = settings()?;
     let rows = bi::load(bom, sheet, header_row)?;
@@ -953,7 +1105,8 @@ fn bom_import(bom: &Path, sheet: Option<&str>, header_row: Option<usize>, maps: 
         eprintln!("note: no sources are enabled; only the standard library can match");
     }
     let lines: Vec<_> = items.iter().enumerate().map(|(n, i)| (n, i.line.clone())).collect();
-    let resolved: Vec<_> = bi::resolve_all(&lines, bi::By::Auto, &manifests, &sources, &|_, _, _| {}, &bi::Control::default()).into_iter().map(|(_, r)| r).collect();
+    let resolved: Vec<_> =
+        bi::resolve_all(&lines, bi::By::Auto, &manifests, &sources, &|_, _, _| {}, &bi::Control::default()).into_iter().map(|(_, r)| r).collect();
     for (i, r) in items.iter().zip(&resolved) {
         println!("{:<10} {:<24} x{:<4} {}", r.label(), if i.line.mpn.is_empty() { &i.line.value } else { &i.line.mpn }, i.qty, r.detail());
     }
@@ -973,7 +1126,19 @@ fn bom_import(bom: &Path, sheet: Option<&str>, header_row: Option<usize>, maps: 
     ensure_kicad_closed()?;
     let work = std::env::temp_dir().join(format!("klm-bom-import-{}", std::process::id()));
     let opts = bi::Options { target: to, category, overwrite, alternatives: false };
-    let done = bi::generate(&resolved, &items.iter().map(|i| i.alts.clone()).collect::<Vec<_>>(), &[], &sources, global.as_ref(), project.as_ref(), &opts, &s, &work, &|_, _, _| {}, &bi::Control::default());
+    let done = bi::generate(
+        &resolved,
+        &items.iter().map(|i| i.alts.clone()).collect::<Vec<_>>(),
+        &[],
+        &sources,
+        global.as_ref(),
+        project.as_ref(),
+        &opts,
+        &s,
+        &work,
+        &|_, _, _| {},
+        &bi::Control::default(),
+    );
     let _ = std::fs::remove_dir_all(&work);
     let g = done?;
     for (i, d) in items.iter().zip(&g.lines) {
@@ -1013,6 +1178,14 @@ fn stdlib_build(categories: &[String], manifest: Option<PathBuf>) -> Result<()> 
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--version" || a == "-V") {
+        println!("klm-cli {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
+    if args.first().is_some_and(|a| a == "help") || args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{USAGE}");
+        return ExitCode::SUCCESS;
+    }
     let result = take_config_arg(args).and_then(|args| parse(&args)).and_then(|cmd| match cmd {
         Command::Check { json, deep, project } => check(json, deep, project.as_deref()),
         Command::Relink { project } => relink(project.as_deref()).map(|_| ExitCode::SUCCESS),
@@ -1024,7 +1197,9 @@ fn main() -> ExitCode {
         Command::Remove { part, category, project, yes } => remove(&part, category.as_deref(), project.as_deref(), yes).map(|_| ExitCode::SUCCESS),
         Command::Health { json, csv, project } => health(json, csv, project),
         Command::CheckProject { dir, fabs, all_fabs, format } => check_project(&dir, fabs, all_fabs, &format),
-        Command::FootprintGen { family, category, dims, density, project, overwrite, dry_run } => footprint_gen(&family, &category, &dims, density, project.as_deref(), overwrite, dry_run).map(|_| ExitCode::SUCCESS),
+        Command::FootprintGen { family, category, dims, density, project, overwrite, dry_run } => {
+            footprint_gen(&family, &category, &dims, density, project.as_deref(), overwrite, dry_run).map(|_| ExitCode::SUCCESS)
+        }
         Command::Cleanup { projects, remove, fix, moves, apply } => cleanup_cmd(projects, remove, fix, moves, apply),
         Command::Import { zips, category, to, project, overwrite, dry_run } => import(zips, category, to, project, overwrite, dry_run),
         Command::Export { zip, parts, category, project } => export(&zip, parts, category, project.as_deref()).map(|_| ExitCode::SUCCESS),
@@ -1032,7 +1207,9 @@ fn main() -> ExitCode {
         Command::Lookup { mpns, json } => lookup(&mpns, json),
         Command::StdlibVerify { categories, manifest, offline, json } => stdlib_verify(&categories, manifest, offline, json),
         Command::StdlibBuild { categories, manifest } => stdlib_build(&categories, manifest).map(|_| ExitCode::SUCCESS),
-        Command::BomImport { bom, sheet, header_row, maps, category, to, project, overwrite, manifest, out, dry_run } => bom_import(&bom, sheet.as_deref(), header_row, &maps, category, to, project, overwrite, manifest, out.as_deref(), dry_run),
+        Command::BomImport { bom, sheet, header_row, maps, category, to, project, overwrite, manifest, out, dry_run } => {
+            bom_import(&bom, sheet.as_deref(), header_row, &maps, category, to, project, overwrite, manifest, out.as_deref(), dry_run)
+        }
     });
     result.unwrap_or_else(|e| {
         eprintln!("error: {e:#}\n{USAGE}");
@@ -1059,10 +1236,7 @@ mod tests {
     #[test]
     fn parses_commands() {
         assert_eq!(parse(&args("check")).unwrap(), Command::Check { json: false, deep: false, project: None });
-        assert_eq!(
-            parse(&args("check --json --deep --project D:/p")).unwrap(),
-            Command::Check { json: true, deep: true, project: Some("D:/p".into()) }
-        );
+        assert_eq!(parse(&args("check --json --deep --project D:/p")).unwrap(), Command::Check { json: true, deep: true, project: Some("D:/p".into()) });
         assert_eq!(parse(&args("relink --project D:/p")).unwrap(), Command::Relink { project: Some("D:/p".into()) });
         assert_eq!(parse(&args("repair-3d --project D:/p --dry-run")).unwrap(), Command::RepairModels { project: Some("D:/p".into()), dry_run: true });
         assert_eq!(parse(&args("health --csv --project D:/p")).unwrap(), Command::Health { json: false, csv: true, project: Some("D:/p".into()) });
@@ -1071,7 +1245,10 @@ mod tests {
             parse(&args("check-project D:/p --fab jlcpcb --fab pcbway --all-fabs --format csv")).unwrap(),
             Command::CheckProject { dir: "D:/p".into(), fabs: vec!["jlcpcb".into(), "pcbway".into()], all_fabs: true, format: "csv".into() }
         );
-        assert_eq!(parse(&args("check-project D:/p")).unwrap(), Command::CheckProject { dir: "D:/p".into(), fabs: vec![], all_fabs: false, format: "text".into() });
+        assert_eq!(
+            parse(&args("check-project D:/p")).unwrap(),
+            Command::CheckProject { dir: "D:/p".into(), fabs: vec![], all_fabs: false, format: "text".into() }
+        );
         for bad in ["check-project", "check-project a b", "check-project a --fab", "check-project a --format xml", "check-project a --json"] {
             assert!(parse(&args(bad)).is_err(), "{bad:?} should fail");
         }
@@ -1105,7 +1282,10 @@ mod tests {
 
     #[test]
     fn rejects_bad_arguments() {
-        assert_eq!(parse(&args("restyle Resistors RC0603 --dry-run")).unwrap(), Command::Restyle { category: "Resistors".into(), part: "RC0603".into(), project: None, dry_run: true });
+        assert_eq!(
+            parse(&args("restyle Resistors RC0603 --dry-run")).unwrap(),
+            Command::Restyle { category: "Resistors".into(), part: "RC0603".into(), project: None, dry_run: true }
+        );
         assert_eq!(parse(&args("remove LM358 --yes")).unwrap(), Command::Remove { part: "LM358".into(), category: None, project: None, yes: true });
         assert_eq!(parse(&args("lookup A B --json")).unwrap(), Command::Lookup { mpns: vec!["A".into(), "B".into()], json: true });
         assert!(parse(&args("lookup")).is_err());
@@ -1115,7 +1295,30 @@ mod tests {
         );
         assert_eq!(parse(&args("stdlib build")).unwrap(), Command::StdlibBuild { categories: vec![], manifest: None });
         assert!(parse(&args("stdlib build --offline")).is_err());
-        for bad in ["remove", "remove a b", "remove a --dry-run", "check --yes", "", "restyle Resistors", "restyle a b c", "restyle a b --json", "frobnicate", "import", "import a.zip --to nowhere", "check --bogus", "check a.zip", "relink --json", "relink --deep", "import a.zip --deep", "import a.zip --json", "check --project", "check --dry-run", "relink --dry-run", "standardise a.zip", "standardise --json"] {
+        for bad in [
+            "remove",
+            "remove a b",
+            "remove a --dry-run",
+            "check --yes",
+            "",
+            "restyle Resistors",
+            "restyle a b c",
+            "restyle a b --json",
+            "frobnicate",
+            "import",
+            "import a.zip --to nowhere",
+            "check --bogus",
+            "check a.zip",
+            "relink --json",
+            "relink --deep",
+            "import a.zip --deep",
+            "import a.zip --json",
+            "check --project",
+            "check --dry-run",
+            "relink --dry-run",
+            "standardise a.zip",
+            "standardise --json",
+        ] {
             assert!(parse(&args(bad)).is_err(), "{bad:?} should fail");
         }
     }
@@ -1123,8 +1326,17 @@ mod tests {
     #[test]
     fn incomplete_matches_the_gui_rule() {
         let mut p = PartStatus {
-            category: "ICs".into(), name: "A".into(), mpn: "A".into(), manufacturer: String::new(), description: String::new(),
-            footprint: Check::Ok, model: Check::Link, datasheet: Check::Ok, sim: Check::Missing, datasheet_target: None, in_kicad: true,
+            category: "ICs".into(),
+            name: "A".into(),
+            mpn: "A".into(),
+            manufacturer: String::new(),
+            description: String::new(),
+            footprint: Check::Ok,
+            model: Check::Link,
+            datasheet: Check::Ok,
+            sim: Check::Missing,
+            datasheet_target: None,
+            in_kicad: true,
         };
         assert!(!incomplete(&p), "a missing sim model alone is fine");
         p.model = Check::Broken;

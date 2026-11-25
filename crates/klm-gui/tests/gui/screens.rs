@@ -16,7 +16,15 @@ fn search_tab_with_a_source() {
 fn every_tab_opens_and_is_saved() {
     let _env = setup();
     for size in SIZES {
-        for (tab, name) in [(Tab::Search, "search"), (Tab::Import, "import"), (Tab::Library, "library"), (Tab::Bom, "bom"), (Tab::History, "history"), (Tab::Cleanup, "cleanup")] {
+        for (tab, name) in [
+            (Tab::Search, "search"),
+            (Tab::Import, "import"),
+            (Tab::Library, "library"),
+            (Tab::Bom, "bom"),
+            (Tab::History, "history"),
+            (Tab::Cleanup, "cleanup"),
+            (Tab::ProjectCheck, "project-check"),
+        ] {
             let mut h = app(size, tab);
             let m = snap(&mut h, &format!("tab-{name}"));
             eprintln!("{name} {size:?} missing glyphs: {m:?}");
@@ -75,7 +83,8 @@ fn settings_and_every_library_dialog_open() {
         let mut h = lib();
         click(&mut h, "RP2040");
         let ds = h.state().cx.global_root().unwrap().dir.join("datasheets/x.pdf");
-        h.state_mut().library_tab.attach_dialog = Some(crate::tabs::library::AttachDialog::new(klm_core::library::Scope::Global, "ICs".into(), "RP2040".into(), ds));
+        h.state_mut().library_tab.attach_dialog =
+            Some(crate::tabs::library::AttachDialog::new(klm_core::library::Scope::Global, "ICs".into(), "RP2040".into(), ds));
         h.run_ok();
         snap(&mut h, "library-attach-dialog");
 

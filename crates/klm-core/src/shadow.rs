@@ -30,8 +30,15 @@ impl SyncReport {
         let mut i = 0;
         while i < self.copied.len() {
             let c = &self.copied[i];
-            let group: Vec<&str> = self.copied[i..].iter().take_while(|o| o.project == c.project && o.nickname == c.nickname).map(|o| o.footprint.as_str()).collect();
-            out.push(format!("Copied {} footprint(s) into {} in project {} (its own library hides the global one): {}", group.len(), c.nickname, c.project.display(), group.join(", ")));
+            let group: Vec<&str> =
+                self.copied[i..].iter().take_while(|o| o.project == c.project && o.nickname == c.nickname).map(|o| o.footprint.as_str()).collect();
+            out.push(format!(
+                "Copied {} footprint(s) into {} in project {} (its own library hides the global one): {}",
+                group.len(),
+                c.nickname,
+                c.project.display(),
+                group.join(", ")
+            ));
             i += group.len();
         }
         out.extend(self.warnings.iter().map(|w| format!("Warning: {w}")));
@@ -47,7 +54,9 @@ pub fn recent_projects(config_dir: &Path) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = vec![];
     for f in json["system"]["file_history"].as_array().into_iter().flatten().filter_map(|f| f.as_str()) {
         let file = PathBuf::from(f);
-        if let Some(dir) = file.parent().filter(|_| file.is_file()) && !dirs.iter().any(|d| d == dir) {
+        if let Some(dir) = file.parent().filter(|_| file.is_file())
+            && !dirs.iter().any(|d| d == dir)
+        {
             dirs.push(dir.to_path_buf());
         }
     }
@@ -87,7 +96,11 @@ pub fn sync_in(global: &LibraryRoot, projects: &[PathBuf], dry_run: bool) -> Syn
                     report.warnings.push(format!("could not copy {} into {}: {e}", src.display(), to.display()));
                     continue;
                 }
-                report.copied.push(Copied { project: project.clone(), nickname: nick.clone(), footprint: src.file_stem().unwrap_or_default().to_string_lossy().into_owned() });
+                report.copied.push(Copied {
+                    project: project.clone(),
+                    nickname: nick.clone(),
+                    footprint: src.file_stem().unwrap_or_default().to_string_lossy().into_owned(),
+                });
             }
         }
     }
@@ -105,6 +118,7 @@ pub(crate) fn sync_after_import(global: &LibraryRoot) {
 }
 
 /// What the last import on this thread copied into projects (see [`sync_after_import`]), like `symbols::take_note`.
+/// Thread-local: call it on the same thread that ran the import (the worker), or it returns nothing.
 pub fn take_notes() -> Vec<String> {
     NOTES.with(|n| std::mem::take(&mut *n.borrow_mut()))
 }

@@ -37,7 +37,9 @@ fn count(x: &sexpr::Sexpr, head: &str) -> usize {
 
 #[test]
 fn recorded_parts_convert_to_the_expected_pins_and_pads() {
-    for (id, pins, pads, name) in [("C25804", 2, 2, "R0603"), ("C7950", 8, 8, "SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL"), ("C2040", 57, 57, "LQFN-56_L7.0-W7.0-P0.4-EP")] {
+    for (id, pins, pads, name) in
+        [("C25804", 2, 2, "R0603"), ("C7950", 8, 8, "SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL"), ("C2040", 57, 57, "LQFN-56_L7.0-W7.0-P0.4-EP")]
+    {
         let c = fixture(id);
         assert_eq!(c.footprint_name, name);
         let sym = sexpr::parse(&c.symbol).unwrap();

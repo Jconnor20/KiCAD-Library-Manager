@@ -96,7 +96,23 @@ pub struct TemplateEditor {
 impl TemplateEditor {
     /// `template` is the class's current house or built-in template; `default_size` the text height the rules give.
     pub fn new(class: Class, template: Template, default_size: f64) -> Self {
-        Self { class, doc: Doc::of(&template), base: template, undo: vec![], sel: Sel::None, tool: Tool::Select, draft: vec![], drag: None, raw: (0.0, 0.0), grid: 2.54, scale: 16.0, pan: Vec2::ZERO, fitted: false, default_size, changed: false }
+        Self {
+            class,
+            doc: Doc::of(&template),
+            base: template,
+            undo: vec![],
+            sel: Sel::None,
+            tool: Tool::Select,
+            draft: vec![],
+            drag: None,
+            raw: (0.0, 0.0),
+            grid: 2.54,
+            scale: 16.0,
+            pan: Vec2::ZERO,
+            fitted: false,
+            default_size,
+            changed: false,
+        }
     }
 
     fn template(&self) -> Template {
@@ -235,7 +251,9 @@ impl TemplateEditor {
             let outline: Vec<Pos2> = match &sh.geo {
                 Geo::Line(v) => v.iter().map(|p| self.to_screen(rect, *p)).collect(),
                 Geo::Rect(a, b) => [*a, (b.0, a.1), *b, (a.0, b.1), *a].iter().map(|p| self.to_screen(rect, *p)).collect(),
-                Geo::Circle(c, r) => (0..=32).map(|k| k as f64 * std::f64::consts::TAU / 32.0).map(|t| self.to_screen(rect, (c.0 + r * t.cos(), c.1 + r * t.sin()))).collect(),
+                Geo::Circle(c, r) => {
+                    (0..=32).map(|k| k as f64 * std::f64::consts::TAU / 32.0).map(|t| self.to_screen(rect, (c.0 + r * t.cos(), c.1 + r * t.sin()))).collect()
+                }
                 Geo::Arc([a, m, e]) => arc_points(*a, *m, *e).iter().map(|p| self.to_screen(rect, *p)).collect(),
                 Geo::Other(_) => vec![],
             };
@@ -368,13 +386,13 @@ impl TemplateEditor {
             } else if resp.clicked() {
                 self.sel = resp.interact_pointer_pos().map_or(Sel::None, |pos| self.hit(rect, pos));
             }
-            if resp.dragged_by(egui::PointerButton::Primary) {
-                if let (Some((sel, last)), Some(pos)) = (self.drag, resp.interact_pointer_pos()) {
-                    let now = self.snapped(rect, pos);
-                    self.raw = self.to_sym(rect, pos);
-                    self.apply_drag(sel, last, now);
-                    self.drag = Some((sel, now));
-                }
+            if resp.dragged_by(egui::PointerButton::Primary)
+                && let (Some((sel, last)), Some(pos)) = (self.drag, resp.interact_pointer_pos())
+            {
+                let now = self.snapped(rect, pos);
+                self.raw = self.to_sym(rect, pos);
+                self.apply_drag(sel, last, now);
+                self.drag = Some((sel, now));
             }
             if resp.drag_stopped() {
                 self.drag = None;
@@ -414,12 +432,12 @@ impl TemplateEditor {
         // Drawing.
         p.rect(rect, 4.0, pal.bg, Stroke::new(1.0, pal.line), egui::StrokeKind::Inside);
         let p = p.with_clip_rect(rect);
-        self.paint_grid(&p, rect, &pal);
+        self.paint_grid(&p, rect, pal);
         let accent = pal.accent;
         let color = |sel: bool| if sel { accent } else { pal.fg };
         for (i, sh) in self.doc.shapes.iter().enumerate() {
             let on = matches!(self.sel, Sel::Shape(j) | Sel::Point(j, _) | Sel::Radius(j) if j == i);
-            self.paint_shape(&p, rect, sh, color(on), &pal);
+            self.paint_shape(&p, rect, sh, color(on), pal);
         }
         let hide = self.doc.hide_numbers;
         for (i, s) in self.doc.slots.iter().enumerate() {
@@ -432,8 +450,8 @@ impl TemplateEditor {
                 p.text(c.lerp(e, 0.5) + Vec2::new(0.0, -6.0), Align2::CENTER_BOTTOM, (i + 1).to_string(), FontId::monospace(10.0), pal.muted);
             }
         }
-        self.paint_texts(&p, rect, &pal);
-        self.paint_handles(&p, rect, &pal);
+        self.paint_texts(&p, rect, pal);
+        self.paint_handles(&p, rect, pal);
         // The shape being drawn.
         if let Some(at) = hover.filter(|_| self.tool != Tool::Select) {
             let mut pts = self.draft.clone();
@@ -448,12 +466,18 @@ impl TemplateEditor {
                 _ => None,
             };
             if let Some(geo) = sh {
-                self.paint_shape(&p, rect, &Shape::new(geo), stroke.color, &pal);
+                self.paint_shape(&p, rect, &Shape::new(geo), stroke.color, pal);
             }
             p.circle_filled(self.to_screen(rect, at), 3.0, accent);
         }
         if let Some(at) = hover {
-            p.text(rect.left_bottom() + Vec2::new(8.0, -6.0), Align2::LEFT_BOTTOM, format!("x {}  y {} mm", fmt(at.0), fmt(at.1)), FontId::monospace(11.0), pal.muted);
+            p.text(
+                rect.left_bottom() + Vec2::new(8.0, -6.0),
+                Align2::LEFT_BOTTOM,
+                format!("x {}  y {} mm", fmt(at.0), fmt(at.1)),
+                FontId::monospace(11.0),
+                pal.muted,
+            );
         }
     }
 
@@ -613,12 +637,12 @@ impl TemplateEditor {
             if ui.button("Fit").clicked() {
                 self.fitted = false;
             }
-            if ui.button("Reset to default").on_hover_text("Go back to the built-in drawing. Nothing is kept until you Save to standard.").clicked() {
-                if let Some(b) = symbols::template_of(self.class) {
-                    self.push_undo();
-                    self.doc = Doc::of(b);
-                    self.sel = Sel::None;
-                }
+            if ui.button("Reset to default").on_hover_text("Go back to the built-in drawing. Nothing is kept until you Save to standard.").clicked()
+                && let Some(b) = symbols::template_of(self.class)
+            {
+                self.push_undo();
+                self.doc = Doc::of(b);
+                self.sel = Sel::None;
             }
         });
         let mut hide = !self.doc.hide_numbers;
@@ -644,7 +668,9 @@ impl TemplateEditor {
             self.doc.sizes = Some(sizes);
         }
         ui.weak("KiCad's default is 1.27 mm (50 mil).");
-        if self.doc.fields.is_some() && ui.small_button("Put text above and below").on_hover_text("Forget the text positions: Reference above the body, Value below").clicked() {
+        if self.doc.fields.is_some()
+            && ui.small_button("Put text above and below").on_hover_text("Forget the text positions: Reference above the body, Value below").clicked()
+        {
             self.push_undo();
             self.doc.fields = None;
         }
@@ -705,14 +731,17 @@ impl TemplateEditor {
                     ui.label("Length");
                     change |= ui.add(egui::DragValue::new(&mut s.3).speed(grid).range(0.254..=20.0).suffix(" mm")).changed();
                 });
-                egui::ComboBox::from_id_salt("tpl_pin_dir").selected_text(DIRECTIONS.iter().find(|d| d.0 == s.2).map_or(format!("{}°", s.2), |d| d.1.to_string())).show_ui(ui, |ui| {
-                    for (v, label) in DIRECTIONS {
-                        change |= ui.selectable_value(&mut s.2, v, label).changed();
-                    }
-                });
+                egui::ComboBox::from_id_salt("tpl_pin_dir")
+                    .selected_text(DIRECTIONS.iter().find(|d| d.0 == s.2).map_or(format!("{}°", s.2), |d| d.1.to_string()))
+                    .show_ui(ui, |ui| {
+                        for (v, label) in DIRECTIONS {
+                            change |= ui.selectable_value(&mut s.2, v, label).changed();
+                        }
+                    });
                 let on = |v: f64| ((v / 2.54).round() * 2.54 - v).abs() < 1e-3;
                 if !(on(s.0) && on(s.1)) {
-                    ui.colored_label(ui.visuals().warn_fg_color, "Off the 100 mil grid: wires meeting it may miss").on_hover_text("KLC wants every pin end on the 2.54 mm grid.");
+                    ui.colored_label(ui.visuals().warn_fg_color, "Off the 100 mil grid: wires meeting it may miss")
+                        .on_hover_text("KLC wants every pin end on the 2.54 mm grid.");
                 }
                 if change {
                     self.push_undo();

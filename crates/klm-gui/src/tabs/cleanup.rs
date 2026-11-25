@@ -5,6 +5,7 @@ use eframe::egui::{self, RichText};
 use klm_core::cleanup::{self, Action, Entry, Issue, IssueKind, Kind, Move, Report};
 use klm_core::kicad_env;
 use std::path::PathBuf;
+use std::sync::mpsc;
 
 /// Standards · KiCad tables: scans KiCad's own library tables for duplicates, broken entries and unused libraries, and
 /// lets the user queue "remove from table", "fix path" and "move into KLM" per library. Nothing is written until
@@ -18,9 +19,19 @@ pub struct CleanupTab {
     mv: Option<(String, Move)>,
     /// Preview of `queue` (lines, warnings) or why it can't be applied; recomputed when the queue changes, not every frame.
     preview: Option<Result<(Vec<String>, Vec<String>), String>>,
+    /// A scan or an apply running on a worker; its result replaces `report`.
+    rx: Option<mpsc::Receiver<Done>>,
 }
 
-const GROUPS: [(IssueKind, &str); 4] = [(IssueKind::Broken, "Broken"), (IssueKind::Unused, "Maybe unused"), (IssueKind::Duplicate, "Duplicate"), (IssueKind::Unverifiable, "Can't check")];
+/// What a worker hands back: the report to show, a line for the log, and whether the queued changes were applied.
+struct Done {
+    report: Report,
+    log: Option<String>,
+    applied: bool,
+}
+
+const GROUPS: [(IssueKind, &str); 4] =
+    [(IssueKind::Broken, "Broken"), (IssueKind::Unused, "Maybe unused"), (IssueKind::Duplicate, "Duplicate"), (IssueKind::Unverifiable, "Can't check")];
 
 fn same(a: IssueKind, b: IssueKind) -> bool {
     std::mem::discriminant(&a) == std::mem::discriminant(&b)
@@ -47,22 +58,52 @@ impl CleanupTab {
             return;
         };
         let dirs: Vec<PathBuf> = cx.project.iter().chain(&self.projects).cloned().collect();
-        self.report = Some(cleanup::scan(&config, &dirs));
-        self.refresh_preview();
+        self.start(cx, move || Done { report: cleanup::scan(&config, &dirs), log: None, applied: false });
     }
 
+    /// Runs `work` on a worker; `ui` picks up the result.
+    fn start(&mut self, cx: &AppCtx, work: impl FnOnce() -> Done + Send + 'static) {
+        let (tx, rx) = mpsc::channel();
+        let ctx = cx.ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(work());
+            ctx.request_repaint();
+        });
+        self.rx = Some(rx);
+    }
+
+    /// Applies the queue, then scans again (unless it failed, when the report stays as it was).
     fn apply(&mut self, cx: &mut AppCtx) {
-        let Some(report) = &self.report else { return };
-        match cleanup::plan(report, &self.queue).and_then(|p| cleanup::apply(&p, true)) {
+        let Some(report) = self.report.take() else { return };
+        let (queue, config) = (self.queue.clone(), cx.kicad_config.clone().ok());
+        let dirs: Vec<PathBuf> = cx.project.iter().chain(&self.projects).cloned().collect();
+        self.start(cx, move || match cleanup::plan(&report, &queue).and_then(|p| cleanup::apply(&p, true)) {
             Ok(backups) => {
-                cx.log.push(format!("Cleaned up the library tables; backups: {}", backups.iter().map(|b| b.display().to_string()).collect::<Vec<_>>().join(", ")));
-                self.scan(cx);
+                let log = format!("Cleaned up the library tables; backups: {}", backups.iter().map(|b| b.display().to_string()).collect::<Vec<_>>().join(", "));
+                Done { report: config.map_or(report, |c| cleanup::scan(&c, &dirs)), log: Some(log), applied: true }
             }
-            Err(e) => cx.log.push(format!("Nothing was changed: {e:#}")),
-        }
+            Err(e) => Done { report, log: Some(format!("Nothing was changed: {e:#}")), applied: false },
+        });
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
+        match self.rx.as_ref().map(|rx| rx.try_recv()) {
+            Some(Ok(d)) => {
+                self.rx = None;
+                self.report = Some(d.report);
+                if let Some(line) = d.log {
+                    cx.log.push(line);
+                }
+                if d.applied {
+                    self.queue.clear();
+                }
+                self.refresh_preview();
+            }
+            // The worker died; the report went with it, so scan again.
+            Some(Err(mpsc::TryRecvError::Disconnected)) => self.rx = None,
+            _ => {}
+        }
+        let working = self.rx.is_some();
         let scanned = self.report.is_some();
         ui.horizontal(|ui| {
             ui.label(RichText::new("KiCad library tables").heading().strong());
@@ -70,8 +111,11 @@ impl CleanupTab {
                 ui.weak(format!("{} libraries · {} project(s) searched", r.entries.len(), r.projects.len()));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if primary(ui, true, if scanned { "Scan again" } else { "Scan KiCad's library tables" }).clicked() {
+                if primary(ui, !working, if scanned { "Scan again" } else { "Scan KiCad's library tables" }).clicked() {
                     self.scan(cx);
+                }
+                if working {
+                    ui.spinner();
                 }
                 if ui.button("Add project folder…").on_hover_text("Projects whose files are searched to see which libraries are used").clicked()
                     && let Some(d) = rfd::FileDialog::new().pick_folder()
@@ -124,7 +168,7 @@ impl CleanupTab {
                 ui.horizontal(|ui| {
                     ui.weak("Only table entries change; library files stay. A backup of each table is made first.");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        apply = primary(ui, !running, &format!("Apply {} fixes", self.queue.len())).clicked();
+                        apply = primary(ui, !running && !working, &format!("Apply {} fixes", self.queue.len())).clicked();
                         discard = ui.button("Discard").clicked();
                     });
                 });
@@ -144,9 +188,8 @@ impl CleanupTab {
         for c in &report.other_configs {
             ui.weak(format!("Not scanned (another KiCad version): {}", c.display()));
         }
-        let rows: Vec<(usize, bool, &Issue)> = (0..report.entries.len())
-            .flat_map(|i| report.issues_of(i).enumerate().map(move |(n, x)| (i, n == 0, x)))
-            .collect();
+        let rows: Vec<(usize, bool, &Issue)> =
+            (0..report.entries.len()).flat_map(|i| report.issues_of(i).enumerate().map(move |(n, x)| (i, n == 0, x))).collect();
         let of = |k: IssueKind| rows.iter().filter(|r| same(r.2.kind, k)).count();
         let outside = report.entries.iter().filter(|e| movable(e)).count();
         let pal = theme::palette(ui.visuals());
@@ -200,7 +243,9 @@ impl CleanupTab {
                         ui.weak("Locked").on_hover_text(format!("Can't be changed here: {why}"));
                         return;
                     }
-                    let queued = self.queue.iter().position(|a| matches!(a, Action::Remove { table, name } | Action::FixPath { table, name, .. } if *table == e.table && *name == e.name));
+                    let queued = self.queue.iter().position(
+                        |a| matches!(a, Action::Remove { table, name } | Action::FixPath { table, name, .. } if *table == e.table && *name == e.name),
+                    );
                     if let Some(q) = queued {
                         let text = match &self.queue[q] {
                             Action::FixPath { new_path, .. } => format!("Will point to {}", new_path.display()),
@@ -216,7 +261,11 @@ impl CleanupTab {
                         want = Some(Action::Remove { table: e.table.clone(), name: e.name.clone() });
                     }
                     if ui.small_button("Fix path…").clicked() {
-                        let picked = if e.kind == Kind::Symbol { rfd::FileDialog::new().add_filter("Symbol library", &["kicad_sym", "lib"]).pick_file() } else { rfd::FileDialog::new().pick_folder() };
+                        let picked = if e.kind == Kind::Symbol {
+                            rfd::FileDialog::new().add_filter("Symbol library", &["kicad_sym", "lib"]).pick_file()
+                        } else {
+                            rfd::FileDialog::new().pick_folder()
+                        };
                         if let Some(new_path) = picked {
                             want = Some(Action::FixPath { table: e.table.clone(), name: e.name.clone(), new_path });
                         }
@@ -257,9 +306,15 @@ impl CleanupTab {
             for c in &mv.caveats {
                 ui.colored_label(Level::Warn.color(ui.visuals()), c);
             }
-            ui.weak("This copies the library into KLM. The old table entry and its files stay as they are; remove the entry afterwards if the copy is complete.");
+            ui.weak(
+                "This copies the library into KLM. The old table entry and its files stay as they are; remove the entry afterwards if the copy is complete.",
+            );
             ui.horizontal(|ui| {
-                if ui.add_enabled(!kicad_env::kicad_running(), egui::Button::new("Import")).on_disabled_hover_text("KiCad is open; close it so the new libraries can be linked").clicked() {
+                if ui
+                    .add_enabled(!kicad_env::kicad_running(), egui::Button::new("Import"))
+                    .on_disabled_hover_text("KiCad is open; close it so the new libraries can be linked")
+                    .clicked()
+                {
                     for r in mv.apply() {
                         cx.log.push(match r.error {
                             Some(e) => format!("{}: {e}", r.label),

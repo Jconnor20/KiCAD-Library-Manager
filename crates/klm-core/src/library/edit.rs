@@ -67,7 +67,8 @@ impl LibraryRoot {
             }
             set_property(&mut symbol, key, value.trim());
         }
-        let renames = edit.fields.iter().any(|(k, v)| (k == "MPN" && !sanitize(v).is_empty()) || (k == "Manufacturer" && !rules.name_template.trim().is_empty()));
+        let renames =
+            edit.fields.iter().any(|(k, v)| (k == "MPN" && !sanitize(v).is_empty()) || (k == "Manufacturer" && !rules.name_template.trim().is_empty()));
         let name = if renames {
             let mpn = property(&symbol, "MPN").map(str::trim).filter(|m| !m.is_empty()).unwrap_or(symbol_name).to_string();
             let maker = property(&symbol, "Manufacturer").unwrap_or("").to_string();

@@ -36,7 +36,8 @@ const FOOTPRINT: &str = r#"(module FP (layer F.Cu) (tedit 5A02FF57)
 )"#;
 
 /// The three seeded parts: (MPN, maker, category, has footprint+3D+datasheet, has footprint only).
-pub const PARTS: [(&str, &str, &str); 3] = [("LM358", "Texas Instruments", "ICs"), ("RP2040", "Raspberry Pi", "ICs"), ("RC0603FR-0710KL", "Yageo", "Resistors")];
+pub const PARTS: [(&str, &str, &str); 3] =
+    [("LM358", "Texas Instruments", "ICs"), ("RP2040", "Raspberry Pi", "ICs"), ("RC0603FR-0710KL", "Yageo", "Resistors")];
 
 /// Holds the lock that serialises the tests (they share one sandbox) and the sandbox's paths.
 #[allow(dead_code)] // paths for tests that need them; most only hold the lock
@@ -60,10 +61,15 @@ pub fn setup() -> Env {
         std::fs::create_dir_all(d).unwrap();
     }
     std::fs::write(project.join("test.kicad_pro"), "{}").unwrap();
-    std::fs::write(dir.join("settings.json"), serde_json::json!({
-        "global_root": lib, "last_project": project, "watch_dirs": [dl],
-        "source_enabled": {"LCSC": false, "DigiKey": false, "Mouser": false, "Nexar": false},
-    }).to_string()).unwrap();
+    std::fs::write(
+        dir.join("settings.json"),
+        serde_json::json!({
+            "global_root": lib, "last_project": project, "watch_dirs": [dl],
+            "source_enabled": {"LCSC": false, "DigiKey": false, "Mouser": false, "Nexar": false},
+        })
+        .to_string(),
+    )
+    .unwrap();
 
     let cfg = klm_core::kicad_env::config_dir().unwrap();
     assert!(cfg.starts_with(&dir), "KiCad tables must be in the sandbox: {}", cfg.display());
@@ -71,7 +77,13 @@ pub fn setup() -> Env {
     for (i, (mpn, maker, cat)) in PARTS.iter().enumerate() {
         let sym = src.join(format!("{mpn}.kicad_sym"));
         std::fs::write(&sym, SYMBOL.replace("NAME", mpn)).unwrap();
-        let mut part = Part { mpn: mpn.to_string(), manufacturer: maker.to_string(), description: format!("Test part {mpn}"), symbol_file: Some(sym), ..Default::default() };
+        let mut part = Part {
+            mpn: mpn.to_string(),
+            manufacturer: maker.to_string(),
+            description: format!("Test part {mpn}"),
+            symbol_file: Some(sym),
+            ..Default::default()
+        };
         if i < 2 {
             let fp = src.join(format!("{mpn}.kicad_mod"));
             std::fs::write(&fp, FOOTPRINT).unwrap();
@@ -103,7 +115,12 @@ pub fn app<'a>(size: (f32, f32), tab: Tab) -> Gui<'a> {
 
 /// `a11y`: also fail on widgets without an accessible name (egui_kittest's own check).
 pub fn app_checked<'a>(size: (f32, f32), tab: Tab, a11y: bool) -> Gui<'a> {
-    let mut h = Harness::builder().with_size(eframe::egui::vec2(size.0, size.1)).allow_missing_glyphs().with_accessibility_check(a11y).wgpu().build_eframe(|cc| App::new(&cc.egui_ctx, None));
+    let mut h = Harness::builder()
+        .with_size(eframe::egui::vec2(size.0, size.1))
+        .allow_missing_glyphs()
+        .with_accessibility_check(a11y)
+        .wgpu()
+        .build_eframe(|cc| App::new(&cc.egui_ctx, None));
     h.state_mut().cx.tab = tab;
     h.state_mut().log_open = true; // the tests read the log; the real app starts with it collapsed into the status bar
     h.run_ok();

@@ -4,11 +4,40 @@
 use crate::library::property;
 use crate::part::Part;
 use crate::sexpr;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const MAX_ENTRY: u64 = 200 * 1024 * 1024;
+const MAX_TOTAL: u64 = 1024 * 1024 * 1024;
+const MAX_ENTRIES: usize = 10_000;
+
+/// Reads a ZIP entry in full, but never more than `limit` bytes: the size a ZIP declares can lie, so it is not trusted.
+fn read_limited(entry: impl Read, limit: u64) -> Result<Vec<u8>> {
+    let mut bytes = vec![];
+    entry.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        bail!("a file in the ZIP is larger than {} MB, so the ZIP was not read (it may be a decompression bomb)", limit >> 20);
+    }
+    Ok(bytes)
+}
+
+/// [`read_limited`] with the per-file cap, adding to `total` and refusing a ZIP that unpacks past [`MAX_TOTAL`].
+fn read_entry(entry: impl Read, total: &mut u64) -> Result<Vec<u8>> {
+    let bytes = read_limited(entry, MAX_ENTRY)?;
+    *total += bytes.len() as u64;
+    if *total > MAX_TOTAL {
+        bail!("the ZIP unpacks to more than {} MB, so it was not read (it may be a decompression bomb)", MAX_TOTAL >> 20);
+    }
+    Ok(bytes)
+}
+
+fn check_count(n: usize) -> Result<()> {
+    if n > MAX_ENTRIES {
+        bail!("the ZIP holds {n} files (more than {MAX_ENTRIES}), so it was not read");
+    }
+    Ok(())
+}
 const SIM_EXTS: &[&str] = &["cir", "sub", "sp", "spi", "ckt", "mod", "ibs"];
 
 /// Reads a ZIP and extracts the part's files into `work`. `Ok(None)` means it holds no KiCad files at all;
@@ -17,9 +46,10 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
     let file = std::fs::File::open(zip_path).with_context(|| format!("opening {}", zip_path.display()))?;
     let mut zip = zip::ZipArchive::new(file).with_context(|| format!("reading {}", zip_path.display()))?;
 
-    let (mut sym_new, mut sym_legacy, mut fps, mut steps, mut wrls, mut pdfs, mut sims) =
-        (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
+    let (mut sym_new, mut sym_legacy, mut fps, mut steps, mut wrls, mut pdfs, mut sims) = (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
     let mut part_info = String::new();
+    check_count(zip.len())?;
+    let mut total = 0;
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
@@ -37,8 +67,7 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         if !wanted {
             continue;
         }
-        let mut bytes = vec![];
-        entry.read_to_end(&mut bytes)?;
+        let bytes = read_entry(&mut entry, &mut total)?;
         if path_in_zip.ends_with("part_info.txt") {
             part_info = String::from_utf8_lossy(&bytes).into_owned();
             continue;
@@ -73,12 +102,7 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         return Ok(None);
     }
 
-    let info = |key: &str| {
-        part_info
-            .lines()
-            .find_map(|l| l.strip_prefix(key)?.strip_prefix('=').map(|v| v.trim().to_string()))
-            .unwrap_or_default()
-    };
+    let info = |key: &str| part_info.lines().find_map(|l| l.strip_prefix(key)?.strip_prefix('=').map(|v| v.trim().to_string())).unwrap_or_default();
     let mut part = Part {
         mpn: info("PartNumber"),
         manufacturer: info("Manufacturer"),
@@ -91,20 +115,19 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
     };
 
     // Fill gaps from the symbol's own fields (vendors use different field names).
-    if let Some(sym) = symbol_file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| sexpr::parse(&t).ok()) {
-        if let Some(s) = sym.child("symbol") {
-            let field = |keys: &[&str]| keys.iter().find_map(|k| property(s, k)).filter(|v| !v.trim().is_empty()).map(String::from);
-            if part.mpn.is_empty() {
-                part.mpn = field(&["MPN", "MP", "Manufacturer_Part_Number", "PARTNO"]).unwrap_or_else(|| s.arg(0).unwrap_or_default().into());
-            }
-            if part.manufacturer.is_empty() {
-                part.manufacturer = field(&["Manufacturer", "MANUFACTURER", "MF", "Manufacturer_Name"]).unwrap_or_default();
-            }
-            part.description = field(&["Description", "ki_description", "DESCRIPTION"])
-                .map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "))
-                .unwrap_or_default();
-            part.datasheet_url = field(&["Datasheet"]).filter(|d| d.starts_with("http")).unwrap_or_default();
+    if let Some(sym) = symbol_file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| sexpr::parse(&t).ok())
+        && let Some(s) = sym.child("symbol")
+    {
+        let field = |keys: &[&str]| keys.iter().find_map(|k| property(s, k)).filter(|v| !v.trim().is_empty()).map(String::from);
+        if part.mpn.is_empty() {
+            part.mpn = field(&["MPN", "MP", "Manufacturer_Part_Number", "PARTNO"]).unwrap_or_else(|| s.arg(0).unwrap_or_default().into());
         }
+        if part.manufacturer.is_empty() {
+            part.manufacturer = field(&["Manufacturer", "MANUFACTURER", "MF", "Manufacturer_Name"]).unwrap_or_default();
+        }
+        part.description =
+            field(&["Description", "ki_description", "DESCRIPTION"]).map(|d| d.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
+        part.datasheet_url = field(&["Datasheet"]).filter(|d| d.starts_with("http")).unwrap_or_default();
     }
     if part.mpn.is_empty() {
         let any = symbol_file.as_ref().or(part.footprint_files.first()).or(part.model_files.first()).or(part.sim_files.first());
@@ -120,14 +143,11 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         part.category_hint = part.description.clone();
     }
     let mpn_lower = part.mpn.to_lowercase();
-    part.datasheet_file = pdfs
-        .into_iter()
-        .map(|(_, f)| f)
-        .find(|f| {
-            // File name only: vendors put the MPN in folder names too.
-            let name = f.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-            name.contains("datasheet") || (!mpn_lower.is_empty() && name.contains(&mpn_lower))
-        });
+    part.datasheet_file = pdfs.into_iter().map(|(_, f)| f).find(|f| {
+        // File name only: vendors put the MPN in folder names too.
+        let name = f.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+        name.contains("datasheet") || (!mpn_lower.is_empty() && name.contains(&mpn_lower))
+    });
     part.symbol_file = symbol_file;
     Ok(Some(part))
 }
@@ -137,16 +157,22 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
 pub fn extract_foreign(zip_path: &Path, dir: &Path) -> Result<(usize, bool)> {
     let mut zip = zip::ZipArchive::new(std::fs::File::open(zip_path).with_context(|| format!("opening {}", zip_path.display()))?)?;
     let (mut n, mut libpkg) = (0, false);
+    check_count(zip.len())?;
+    let mut total = 0;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
         let name = entry.name()?.into_owned();
         let ext = Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
         libpkg |= ext == "libpkg";
-        let Some(file_name) = Path::new(&name).file_name().filter(|_| !entry.is_dir() && entry.size() <= MAX_ENTRY && ["lbr", "schlib", "pcblib", "intlib"].contains(&ext.as_str())) else { continue };
+        let Some(file_name) = Path::new(&name)
+            .file_name()
+            .filter(|_| !entry.is_dir() && entry.size() <= MAX_ENTRY && ["lbr", "schlib", "pcblib", "intlib"].contains(&ext.as_str()))
+        else {
+            continue;
+        };
         let dest = dir.join(i.to_string());
         std::fs::create_dir_all(&dest)?;
-        let mut bytes = vec![];
-        entry.read_to_end(&mut bytes)?;
+        let bytes = read_entry(&mut entry, &mut total)?;
         std::fs::write(dest.join(file_name), bytes)?;
         n += 1;
     }
@@ -228,6 +254,24 @@ mod tests {
         assert!(p.warnings.iter().any(|w| w.contains("STL")));
         let (n, libpkg) = extract_foreign(&zp, &dir.join("f")).unwrap();
         assert_eq!((n, libpkg), (0, true));
+    }
+
+    #[test]
+    fn oversized_entries_and_huge_zips_are_refused() {
+        let e = read_limited(std::io::repeat(0).take(1000), 999).unwrap_err();
+        assert!(e.to_string().contains("larger than"), "{e}");
+        assert_eq!(read_limited(std::io::repeat(0).take(999), 999).unwrap().len(), 999);
+
+        let dir = crate::test_dir("zip_many");
+        let zp = dir.join("many.zip");
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&zp).unwrap());
+        for i in 0..=MAX_ENTRIES {
+            z.start_file(format!("{i}.txt"), zip::write::SimpleFileOptions::default()).unwrap();
+        }
+        z.finish().unwrap();
+        let e = read_zip(&zp, &dir.join("work")).unwrap_err();
+        assert!(e.to_string().contains("not read"), "{e}");
+        assert!(extract_foreign(&zp, &dir.join("f")).is_err());
     }
 
     #[test]

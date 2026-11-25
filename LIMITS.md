@@ -1,153 +1,125 @@
-# Known limits and risks
+# Known limits
 
-A running list of what each merged work package left undone, cut short or made risky. Add to it when a WP merges, and strike an item through (or delete it) once it's fixed. Things that only need trying by hand go in [TESTING.md](TESTING.md) instead.
+What KLM does not do, or does only partly, today. Fixed items are removed from this list. For what is planned, see [ROADMAP.md](ROADMAP.md). Steps for checking a release by hand are in [TESTING.md](TESTING.md).
 
----
+## Import
 
-## Wave 6
+- **Vendor formats.** Altium (`.SchLib`, `.PcbLib`, `.IntLib`), Ultra Librarian, SamacSys, SnapMagic, legacy KiCad `.lib`, Eagle `.lbr` and LCSC/EasyEDA parts import and render on real files. EasyEDA Pro `.elibz2` does not: KiCad 9 and 10 both refuse to convert it, and KLM reports that.
+- **Fusion 360.** Only Eagle `.lbr` files are read. Fusion's own library format is not.
+- **A `.PcbLib` alone** converts to footprints but cannot become a part, because it has no symbol.
+- **Only the first 3D model** of a footprint with several is carried over from a converted library.
+- **STL models** are attached with a warning. Whether KiCad's 3D viewer shows them has not been confirmed.
+- **A footprint-only or 3D-only ZIP** can be attached to an existing part. Imported on its own it fails with "part has no symbol file", unless an Import dialog for the same MPN is open.
+- **Existing schematics keep the old library names** after you import a library; they do not point at the imported KLM copies.
+- **The watch folders** only see ZIPs saved after KLM starts, or after the folder list changes.
+- **Footprint preview** on import from Search can take several seconds, because it renders through `kicad-cli`.
 
-### W6.3 GUI test harness
+## Sources and distributors
 
-Open UI bugs, each pinned by a `#[should_panic(expected = "KNOWN BUG")]` test in `crates/klm-gui/tests/gui/bugs.rs` (fix in W7, then delete the attribute). Details and snapshots: `docs/verification/W6.3-gui.md`.
+- **Mouser and Nexar replies have not been checked against live data.** DigiKey and LCSC fields are confirmed against recorded replies. For Mouser (no key was available) and Nexar (its free plan allows 10 parts and was used up), field names come from documentation and schema checks. Mouser lead time, lifecycle wording and order multiples, and Nexar stock, price, MOQ and pack size, may be wrong or empty. Re-run the live tests with your keys (see [TESTING.md](TESTING.md)).
+- **No category browsing for Mouser.** Nexar category browsing is built but unverified, for the same reason.
+- **CAD availability** (symbol, footprint, 3D) is known before import only for LCSC/EasyEDA parts. Nothing shows a SPICE model before import.
+- **No country of origin.** None of the recorded replies carries it.
+- **Lead time.** DigiKey is confirmed; LCSC has none; Nexar has it per offer but KLM does not read it.
+- **DigiKey token requests** timed out at the app's 20 s limit in 3 of 5 live runs; the others took under 2 s. Retry if a search fails with a timeout.
+- **Search results are cached** (a day by default, changeable in Settings → Workflow → Search), so stock and prices can be that old. Changing the stored fields of a part can make old cache entries unreadable; KLM then searches again.
+- **SnapMagic has no in-app search.** KLM opens the part's page so you can download the ZIP yourself. A SnapMagic key can be stored but nothing uses it.
+- **Currency.** Quotes that cannot be converted are left out of BOM totals, so coverage drops when rates fail to load.
+- **Large BOMs** may hit a distributor's API quota. KLM spaces its requests but cannot know your quota.
 
-- Settings API key boxes are 40 px wide (B1).
-- Alternatives and Preview windows stay on screen after switching tab (B2).
-- Missing glyphs (shown as empty boxes): `✔`, `▲`, `⇅`, `★`, `☆`, `👁` in the default egui fonts, so every status cell, sort arrow, star and the show-key button is a box (B4). The review's "purple ✔" was this box.
-- Alternatives opens on the first part, not the selected one (B5).
-- A part without a sim model shows orange "missing" (B6).
-- Library table and Search results columns have unnamed combo/check boxes: screen readers see "ComboBox" and "CheckBox" with no name (B7).
-- Not reproduced: Search header cut off, log over 25% of the height. At 820x560 and 1280x800 (1x scale) the header is inside the window and the log takes 21% / 15%. Not tried with results listed, nor at Windows display scaling above 100%.
-- The harness does not cover: dialogs on the Import, History, Cleanup and BOM tabs, the "Close KiCad first" prompt, anything behind a native file picker (opened directly instead, e.g. the attach dialog), or dark/light themes.
-- Tests share one sandbox and run one at a time (a lock); the full GUI suite takes about 80 s because of the offscreen wgpu rendering and `kicad-cli` previews.
+## Library and checks
 
-### W6.0 Test sandbox
+- **Orphans are matched by file name**, so two same-named files in different folders can hide each other.
+- **Alternatives match package by footprint name** with an alias table. The same package under vendor-specific names that are not in the table will not group. SOIC bodies are told apart by width only for 3.9, 5.3 and 7.5 mm; other widths group only with the same name.
+- **Edit in KiCad** opens the symbol library or footprint in KiCad's own editor and re-checks the part when you save. It watches the file only while KLM is running, and a failed launch is only logged. Starting `eeschema` or `pcbnew` standalone this way has not been confirmed on a real KiCad.
+- **Source cross-check is not wired in.** The code that flags a field that disagrees with distributor data for the part's MPN exists but nothing calls it.
+- **Compliance badge cache** is per library: any changed symbol library, footprint, model or profile recomputes all of it.
+- **History.** Retention settings apply to every library. Automatic version dates use UTC, "weekly" means 7 days and "monthly" means 30. Edits to the snapshot files made outside KLM need **Refresh**.
+- **Datasheet finder.** With no distributor enabled it can only retry the existing link. Search results are used only when their MPN matches the part's.
 
-- Only `--config` / `KLM_CONFIG_DIR` runs are isolated. The older tests (`cli_e2e`, `cli_cleanup`, `snapshot_e2e`, `credentials::tests`) still use the real Credential Manager and let `kicad-cli` rewrite the real `kicad_common.json`.
-- Sandbox API keys are plain text in `<dir>/credentials.json`; use it for test keys only.
-- Temporary scratch folders (`klm-zip-*`, `klm-batch-*`, ...) still go to the OS temp dir, not the sandbox; they are unique per run and not user data.
-- The GUI's native file dialogs open in the user's real folders and can browse anywhere; the sandbox does not restrict what the user picks.
+## Standardise and profiles
 
-### W6.4 Scale and KiCad-open checks
+- **Wires can come loose.** Moving a footprint's origin, lengthening a pin or restyling a symbol moves connection points, so schematics and boards that later update from the library can lose connections. The dry run lists every such change before anything is written.
+- **ICs have no house template.** They get the automatic box symbol.
+- **Restyle refuses** MOSFETs, Zener/TVS/Schottky diodes, polarised capacitors, batteries, thermistors, multi-unit symbols, `extends` symbols and power symbols, and two visible pins stacked on one point.
+- **Standardise skips** symbols with two pins or fewer, power symbols and hidden pins.
+- **Pin-1 marker on large pads.** On pads larger than about 6 mm the added marker can land more than 2 mm from pin 1, and the check may still report it missing.
+- **Value is rebuilt only for resistors, capacitors and inductors.** Other classes keep their Value.
+- **Parameter autofill.** DigiKey and LCSC fill class fields; Mouser fills almost none and the Nexar mapping is unverified against a real reply.
+- **Template preview** in the Part information editor uses sample values, not a part from your library.
+- **Naming rules** (name template, category rules) live in Settings, not in the standard profile, so a shared profile does not carry them.
+- **Create → Symbol** shows what a pasted pin table would give but cannot write a new symbol into a library yet.
+- **Fab outline style** and the `${REFERENCE}` fab text are not part of the footprint style.
 
-Timings: `cargo test --release -p klm-core --test scale_e2e -- --ignored scale --nocapture`, 2,000 parts in 8 categories, median of 3 runs, Windows 11. Full output in [docs/verification/W6.4-scale.md](docs/verification/W6.4-scale.md).
+## Fab and project checks
 
-| Operation | Median ms | On the UI thread? | Note |
-|---|---|---|---|
-| `LibraryRoot::list_parts` | 345 | **yes, over 200 ms** | `klm-gui/src/tabs/library.rs:553`, `get_or_insert_with` in the Library tab's draw. Redone after every reset (`self.parts = None`, about ten sites), so an edit or refresh stalls the UI for this long. |
-| `checks::check_library` | 382 | no | Runs on a worker (`library.rs:542`). Over 200 ms, but off the UI thread. |
-| `alternatives::scan` + `suggest` | 53 | no | Runs on a worker (`alternatives.rs:36`). Store lookups per group are not timed. |
+- **Fab data has gaps.** Values a PCB maker does not publish are left empty: PCBWay via drill and pad, mask web and edge; OSH Park via pad and silk text height; Eurocircuits track, clearance, drill, ring and via (its table is an image); Aisler via pad. The IPC-6012 class 3 annular ring (0.05 mm) and the IPC-7351 courtyard excess come from secondary sources because the standards are paywalled. Each fab entry carries its source page and the date it was checked; the standard 2-layer process is assumed.
+- **Footprint fab check approximations.** Trapezoid and custom pads are treated as their size rectangle. Inner copper layers, drill offsets and silk text stroke width are not checked. Silk circles and arcs are never flagged, and only `fp_line` silk is clipped off pads (rectangles and polygons stay flagged). Round courtyards are not grown. Fixes run only when the profile names a fab.
+- **Project check.** There is no rule for the mask web (KiCad reads it only from board setup) or for courtyard excess. The silk width rule covers silk text only. Sub-sheets kept in subfolders are not copied, so ERC does not see them. KiCad 9 labels KLM's rule violations "board setup constraints". "All fabs" mode lists which fabs pass, not each fab's findings.
+- **A rules file KiCad cannot parse is dropped silently** by `kicad-cli`. KLM's rule syntax is checked against KiCad 9.0 and 10.0.7 only.
 
-- **`list_parts` blocks the UI.** Move it to a worker like `check_library`, or cache the result across resets. Not fixed here (no feature work in Wave 6).
-- **The scale fixture is written straight to disk.** `add_part` runs `kicad-cli` for each part, so 2,000 of them would take minutes. The reads all go through the real APIs. One footprint per package and one model per package is kinder than a real library.
-- **No time budget is asserted.** The timing test prints numbers; it does not fail on them.
-- **Pending queue, outside edit to a queued library:** passes. The queued library is added to the table as it is at apply time, so an edit made in between survives.
-- ~~**Pending queue, outside edit after a queued table restore: data loss.**~~ Fixed in W6.4: `kicad_env::apply_table_op` splices entries that are neither in the restore text nor KLM-managed (descr "Managed by KiCad Library Manager") back into the restored table, and a queued removal keeps the table if such entries exist. Limit: an outside *change or removal* of an entry that the restore text also lists is still overwritten, and the immediate snapshot restore (`copy_replace`) still replaces the table as the user asked.
-- **The KiCad-open branches are simulated.** Under a sandbox `kicad_running()` is always false, so `defer_table_op` and `register_or_queue` never queue. The replay tests write the queue files directly, in the format those functions write.
-- **`klm-cli health` runs on projects only in the tests.** Global table checks are not covered.
+## 3D fit
 
-## Wave 5
+- **The bounding box is approximate.** It is read from point data in STEP and WRL files. Nested STEP transforms and WRL `Transform` nodes are not followed, and `.stpz` and `.wrz` files are skipped.
+- **Only multiples of 90 degrees** are exact for X and Y rotation.
+- **Rotation direction** follows KiCad's model matrix (angles negated). The result has been checked against KiCad's source, not yet on a real model in the 3D viewer.
+- **The fix** (centre the model, pick the best quarter turn) runs only when the model's size fits the footprint, so a wrong model is warned about, never moved. There is no Settings switch for it. Only the footprint's first model is checked.
 
-### W5.1 Search by part type
-- **Category APIs.** DigiKey's category list and `CategoryFilter` search with an empty keyword were called live in W6.1 and work (the list nests under `Children`, which the parser had wrong; fixed). Nexar category browsing isn't built: the old unused parser was removed. The Nexar free plan's part quota was already spent, so `supCategories` itself is unverified; its fields (`id name parentId numParts path`) were checked against the schema.
-- **Mouser has no category browsing.** Assumed from its docs; not checked live because no Mouser key was stored in W6.1.
-- **CAD icons** are known ahead of import only for LCSC/EasyEDA parts. Nothing ever shows a SPICE model.
-- **No LCSC thumbnails.** The image field in LCSC's search reply is unknown.
+## BOM and assembly
 
-### W5.2 House-style symbols
-- **Wires can come loose.** Restyling moves pins, so schematics already using the symbol may need wires fixed.
-- **Refused kinds:** MOSFETs, Zener/TVS/Schottky diodes, polarised caps, batteries, thermistors, multi-unit symbols, `extends` and power symbols.
-- **No KiCad-open check on the Library-tab button** (the CLI has one). This matches the Edit action.
-- **Not handled:** two visible pins stacked on one point. Templates aren't editable.
-- **Tests:** one test briefly turns on the import setting and could race another importing test. The tests use KiCad's installed Device/Transistor_BJT libraries, and skip without KiCad.
+- **JLCPCB status is partial.** "Not stocked by JLC at all" cannot be told apart from "LCSC not asked, or offline", so only "out of stock at JLC" is flagged. Lifecycle comes from DigiKey and Mouser, and Mouser's wording is matched loosely. There is no extended-part setup fee in the summary.
+- **Swap needs the part in the library.**
+- **Shipping region applies to DigiKey only.** Mouser and LCSC ignore it. There is no shipping cost or delivery estimate.
+- **Spreadsheet BOMs** are read with values only: formulas give their cached result, and a merged cell fills only its top-left cell. **Save BOM with library parts** writes CSV and drops the rows above the header.
+- **A standard-library hit is referenced**, as `KLM_STD_<Category>:<part_id>`, not copied into the library you generate. Run `klm-cli stdlib build` to create those libraries.
+- **BOM import lookups.** The BOM's manufacturer narrows candidates only when it matches one exactly, so differently spelled makers can show as ambiguous. The same part is fetched once per line, not once per MPN. The generate step has no automated test.
+- **The standard library is small.** `stdlib/` currently holds resistors only. Both release zips ship it next to the executable, and `--manifest <dir>` points at a different folder.
 
-### W5.3 Alternatives beyond the library
-- **Equivalents are matched as text,** so "0.1uF" won't match "100nF". This is marked `shortcut:` in the code.
-- The search fixture was written by hand, not captured live.
+## Footprint generator
 
-### W5.4 Clean up existing KiCad libraries
-- **Only the newest KiCad version's config is scanned.** Older ones are listed as "not scanned".
-- **Footprint-only libraries can't be moved into KLM.**
-- **Path rules from memory.** How it resolves env vars, text variables and relative project paths comes from Opus's memory of how KiCad does it, not from KiCad's source.
+- **The IPC-7351 standard itself was not read.** Formulas follow published tables as recalled and cross-checked against `kicad-footprint-generator`; the chip, BGA pad-ratio and F/P values are the least certain. SOIC-8 gives 1.50 mm pads on 2.70 mm centres where PCB Libraries gives 1.55 and 2.70.
+- **Not modelled:** chips smaller than 1608, pull-back QFN, J-lead/SOJ/PLCC, non-collapsing BGA balls. Chip is always RESC.
+- **QFN exposed pad** has full paste and no exposed-pad-to-signal gap check.
+- **No 3D model** is generated.
 
-### W5.5 Rest of W4.5
-- **KiCad open:** rollback, move-global and relink apply at once and queue their table edits in `pending-tables.json`. The queue is replayed after KiCad closes, but only when the GUI next re-checks. Outside additions in between are kept since W6.4 (see below); changes to existing entries are not. Never tried with real KiCad.
-- **`klm-cli import`** that adds libraries still refuses while KiCad is open.
+## Symbol editor
 
-## Wave 4.5
+- **Single-unit symbols with a rectangle body only.** There is no drawing of lines or arcs, and the first rectangle is taken as the body. Use KiCad's editor for those.
+- **The preview** is KiCad's render of the saved file, so it updates on Save, not while you drag.
+- **Swapping two pin numbers** (1 and 2) is refused; rename through a spare number.
 
-- ~~**Symbol-less ZIPs.** Attaching a footprint-only or 3D-only ZIP to an existing part isn't built yet.~~ Fixed in W5.5: Attach… takes them. Importing one on its own still fails with "part has no symbol file" unless an Import dialog for the same MPN is open.
-- **STL models.** These are attached with a warning. Whether KiCad's 3D viewer shows them isn't confirmed.
-- **Formats still untested on real files:** EasyEDA Pro `.elibz2` (KiCad can't convert it; the app says so). Real `.SchLib`/`.PcbLib`/`.IntLib`, LCSC/EasyEDA JSON, legacy `.lib` and Ultra Librarian ZIPs are proven in `corpus_e2e.rs` (W6.2).
-- **KiCad open.** New libraries are written while KiCad runs and re-checked when it closes. ~~Rollback, move-global and relink still ask you to close KiCad~~ (queued since W5.5). Old `${KLM_LIB}` path rewrites still ask you to close KiCad. It isn't known whether KiCad picks up a table edited while it runs.
-- **Watcher.** It only sees ZIPs saved after the app starts, or after the folder list changes.
-- **Search.**
-  - Availability icons show what is known before import, not what the import will find.
-  - ~~LCSC and Nexar MOQ and pack fields aren't filled.~~ Fixed in W5.5.
-  - DigiKey `StandardPackage` is confirmed live (on each product variation; absent for tubes, so pack size stays blank).
-- **Datasheet finder.** With no distributor source enabled, it can only retry existing links. Search results are used only when their MPN matches the part's.
-- **History.**
-  - Retention settings apply to every library.
-  - Auto-version dates are in UTC. Weekly means 7 days and Monthly means 30.
-  - Manifest edits made outside the app need **Refresh**.
-- **Standards Apply and import can overlap.** Apply doesn't mark the app busy, so an import started during Apply could write a file mid-apply. Standards results are only collected while Settings is open.
-- **Plugin.** It is untested in KiCad 10. If KiCad's `kicad-python` lacks a schematic call, the button opens KLM with no project.
+## KiCad integration
 
-## Wave 4
+- **KiCad open.** New libraries are written while KiCad runs and re-checked when it closes. Rollback, move-global and relink apply at once and queue their table edits, and the queue is replayed when KiCad closes. An outside edit that adds an entry survives; an outside change or removal of an entry the restore also lists is overwritten. Old `${KLM_LIB}` path rewrites still need KiCad closed. Whether KiCad picks up a library table edited while it runs has not been confirmed.
+- **Clean up scans only the newest KiCad version's config**; older ones are listed as not scanned. Footprint-only libraries cannot be moved into KLM. Path resolution (environment variables, text variables, relative project paths) is modelled on KiCad's behaviour, not taken from its source.
+- **Stock library variables** (`${KICADn_SYMBOL_DIR}` and the footprint and 3D equivalents) resolve to the newest installed KiCad whatever `n` is. An unresolvable variable is trusted, not reported.
+- **Repair 3D links** handles KLM libraries only. Stock and external footprint libraries are out of scope.
+- **The toolbar plugin** needs KiCad's API enabled and, the first time, internet access for `kicad-python`. If `kicad-python` lacks a schematic call, the button opens KLM with no project.
+- **Output format.** KLM writes the newest installed KiCad's format. KiCad 9 cannot open files written for a KiCad 10 install.
 
-### W4.1 BOM import and enrichment
-- **No country of origin.** The recorded DigiKey, LCSC/JLCPCB and Nexar-schema replies have no such field (W6.1), so the column stays missing. Mouser's documented reply (third-party docs; no key was available to record one) has `ProductCompliance` name/value pairs for HTS/ECCN-style codes and no country-of-origin field; if a live reply shows one, add it to `mouser.rs` with a fixture. `Mult` is documented as a string (like `Min`), which the parser reads; a live reply is still unrecorded.
-- **Health resolves stock library variables from the installed KiCad only.** `${KICADn_SYMBOL_DIR}`, `_FOOTPRINT_DIR` and `_3DMODEL_DIR` map to the installed version's `share/kicad/...` whatever `n` is (Windows/Linux layout, not macOS). A variable that can't be resolved (no install, unknown name) is still trusted, not reported.
-- **Lead time.** DigiKey `ManufacturerLeadWeeks` is confirmed live (a string of weeks). Mouser `LeadTime` is unverified (no Mouser key stored). LCSC has none. Nexar has `factoryLeadDays` per offer but isn't read.
-- **Nexar free plan** allows 10 parts; once spent every search fails with that message, so Nexar values (stock, prices, MOQ, pack size) are unverified. Its field names were checked by schema introspection: `multipack` didn't exist and is now `multipackQuantity`.
-- **DigiKey token** requests timed out at the app's 20 s limit in 3 of 5 live runs (other runs took under 2 s).
-- **Shipping region is DigiKey only.** Mouser and LCSC ignore it (the BOM tab says so).
-- **Fixed BOM field names:** `MPN`, `Manufacturer`, `LCSC`, `DigiKey`, `Mouser`. A project using other field names won't match.
-- **Only DigiKey's first packaging variation is read**, so cut tape vs reel pricing may be wrong.
-- **No rate limiting**, and Mouser's order multiples are ignored. A large BOM may hit API quotas.
-- Currency: quotes that can't be converted are left out of totals, so coverage can drop when rates fail to load.
-- Nexar is left out on purpose.
+## Platform
 
-### W4.2 Project health report
-- **Schematics aren't read.** A symbol placed in a schematic but missing from every library isn't found.
-- **Orphans are matched by file name only**, so two same-named files in different folders hide each other. This is marked `shortcut:` in the code.
-- A part with no footprint is reported twice (`footprint` and `part-check`).
-- `klm-cli health` has no end-to-end test; only its argument parsing is tested.
+- **Windows only**, 64-bit. API keys use Windows Credential Manager, and KiCad is found through its Windows install and config paths.
+- **Not code-signed.** SmartScreen may warn on first run.
+- **KLM does not show its version** in the app. Use the release you downloaded.
+- **Update check only notifies.** There is no self-update; install the new release the way you installed this one.
+- **UNC paths** in library files (`\\server\share`) are never opened or followed, on purpose.
 
-### W4.3 Import from other tools
-- **EasyEDA Pro libraries aren't proven.** Real Altium `.SchLib`/`.PcbLib`/`.IntLib` convert and render (W6.2). KiCad 9.0 and 10.0 both refuse an EasyEDA Pro `.elibz2` ("Unable to convert library"); the app reports that. A `.PcbLib` alone has no symbol, so its footprints convert but can't become a part.
-- **Only the first 3D model** of a footprint with several is carried over.
-- **Leftover temp folder** after a cancelled import review, until the next import finishes.
-- **No choice of destination.** Parts go to the global library, or the project library when there is no global one.
-- **Existing schematics keep the old library names**, so they don't point at the imported KLM copies.
-- The last four review fixes weren't re-reviewed by Opus.
+## Not yet verified by hand
 
-### W4.4 Portable export
-- **Footprint name collisions:** two categories with a same-named footprint overwrite each other in the merged `.pretty`.
-- **Relative 3D model paths** (`../../3dmodels/x.step`) aren't officially defined by KiCad, so Altium/Fusion/KiCad may not find the models.
-- No "Export…" button in the GUI yet; CLI only.
+These pass automated tests but have not been tried by a person in the app, in KiCad or on a real project. They will be trimmed as [TESTING.md](TESTING.md) is worked through.
 
----
-
-## Wave 3
-
-### W3.1 Standardise to KLC + overrides
-- **Wires can come loose.** Moving a footprint's origin or lengthening a pin moves its connection point, so schematics and boards that later update the part from the library may lose connections. The dry run lists every such change before anything is written.
-- **Pin-1 marker on large pads.** On pads larger than about 6 mm, the added marker can land more than 2 mm from pin 1, and the W1.2 check may still report it as missing.
-- ~~**UI freeze.**~~ Fixed in W4.5.8. Dry run and Apply run on the UI thread, so a very large library may freeze the window briefly. This is marked `shortcut:` in the code.
-- **Naming rules not used yet.** W3.3's name template isn't applied during standardise. See the `TODO(W3.3)` in `standardise/mod.rs`.
-- Left out on purpose: symbols with two pins or fewer, power symbols and hidden pins.
-
-### W3.2 Alternatives and duplicates
-- ~~**No ungroup.**~~ ~~**Rejected suggestions come back.**~~ Fixed in W8.3. Rejections are stored as `mpn@raw footprint name` and resolved to package ids when read, so editing the alias table keeps them. Confirming a group clears older rejections between its members.
-- **Scale with rejections (W8-fix):** `suggest_unrejected` over 2,000 parts with 1,024 stored rejections takes about 36 ms (release build, Windows 11, one run; `cargo test --release -p klm-core --test scale_e2e rejections -- --nocapture`).
-- **SOIC body widths:** 3.9 mm (`SOIC-8`, `P600`), 5.3 mm (208 mil, `P800`) and 7.5 mm (`SOIC-8W`, `P1030`) are separate packages. Other SOIC-like widths (e.g. `P760`) fall back to `raw:` and group only with the same name.
-- **Packages are matched by footprint name**, so the same package under different vendor names (`R_0603` vs `RESC1608X55N`) won't group. This is marked `shortcut:` in the code.
-
-### W3.3 Naming and category rules
-- **The name template isn't applied anywhere.** The symbol name is the MPN, so renaming on import or edit would rewrite the MPN. The template is only exposed for standardise or a later rename feature to call.
-- **Batch import and the CLI ignore the rules.** `batch::plan` and `klm-cli import` still fall back to the built-in `categories::guess`.
-
-### W3.4 Search cache, history and favourites
-- **No Settings control for the cache TTL.** It can only be changed through `cache_ttl_minutes` in `settings.json` (the default is a day, and 0 turns the cache off).
-- **Stale stock and prices.** Within the TTL, cached results can show stock or prices that are out of date by up to a day.
-- `Part` now derives serde for caching, so changing its fields can make old cache entries fail to load. When that happens it falls back to a fresh search.
+- The KiCad PCM install (from the repository URL and from file), on KiCad 9 and 10, and the toolbar button in the PCB and schematic editors.
+- Working with KiCad open: queued library tables, Relink, Change location and rollback, and what KiCad does with them afterwards.
+- Placing imported parts in KiCad and seeing footprint, 3D model and datasheet.
+- Hidden fields: that KiCad reads the `(hide yes)` flag Standardise writes as hidden.
+- Standardise on an existing library, including the fab fixes once a fab is chosen.
+- The 3D fit fix in KiCad's 3D viewer.
+- Footprint generator output opening in KiCad and passing DRC.
+- Project check on a real project, for one fab and for All fabs.
+- Edit in KiCad (standalone symbol and footprint editors, and re-check on save), the in-app symbol editor, Reimport and Delete.
+- DigiKey, Mouser and Nexar searches and BOM prices with real keys; the BOM Assembler choice and Use best alternates.
+- BOM import from CSV and spreadsheets, and the look-up from sources.
+- Importing real Altium and Eagle libraries through the app (the files are covered by automated corpus tests).
+- Moving the global library, on the same drive and to another.
+- The update badge against a real newer release.

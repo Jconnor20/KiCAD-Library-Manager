@@ -14,11 +14,11 @@
 //! - "Unused" is information only: it means no file of the chosen projects names the library.
 
 use crate::batch::{self, Op, Target};
+use crate::kicad_env;
 use crate::library::{LibraryRoot, property};
 use crate::rules::Rules;
 use crate::sexpr;
 use crate::sources::foreign;
-use crate::kicad_env;
 use anyhow::{Context, Result, bail};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -402,13 +402,8 @@ pub fn scan(config: &Path, project_dirs: &[PathBuf]) -> Report {
     let mut r = Report { projects: find_projects(project_dirs), ..Report::default() };
     let vars = user_vars(config);
     if let Some(parent) = config.parent() {
-        r.other_configs = std::fs::read_dir(parent)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p != config && p.join("sym-lib-table").exists())
-            .collect();
+        r.other_configs =
+            std::fs::read_dir(parent).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p != config && p.join("sym-lib-table").exists()).collect();
     }
     let mut tables: Vec<(PathBuf, Kind, Option<PathBuf>)> = vec![];
     for kind in [Kind::Symbol, Kind::Footprint] {
@@ -484,7 +479,9 @@ pub fn scan(config: &Path, project_dirs: &[PathBuf]) -> Report {
 /// the library too, so a shared name there is normal and would bury everything else.
 fn duplicates(r: &mut Report) {
     let own: Vec<usize> = (0..r.entries.len())
-        .filter(|&i| !r.entries[i].disabled && r.entries[i].locked != Some("a KiCad or plugin-manager library") && r.entries[i].path.as_ref().is_some_and(|p| p.exists()))
+        .filter(|&i| {
+            !r.entries[i].disabled && r.entries[i].locked != Some("a KiCad or plugin-manager library") && r.entries[i].path.as_ref().is_some_and(|p| p.exists())
+        })
         .collect();
     let names: BTreeMap<usize, BTreeSet<String>> = own.iter().map(|&i| (i, names_in(&r.entries[i]).into_iter().collect())).collect();
     let canon = |i: usize| r.entries[i].path.as_ref().and_then(|p| p.canonicalize().ok());
@@ -501,7 +498,11 @@ fn duplicates(r: &mut Report) {
             let list = shared.iter().take(5).map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
             let more = if shared.len() > 5 { format!(" and {} more", shared.len() - 5) } else { String::new() };
             for (x, y) in [(a, b), (b, a)] {
-                found.push(Issue { entry: x, kind: IssueKind::Duplicate, message: format!("{} part(s) also in {}: {list}{more}", shared.len(), r.entries[y].name) });
+                found.push(Issue {
+                    entry: x,
+                    kind: IssueKind::Duplicate,
+                    message: format!("{} part(s) also in {}: {list}{more}", shared.len(), r.entries[y].name),
+                });
             }
         }
     }
@@ -529,7 +530,11 @@ fn unused(r: &mut Report) {
         let refs = texts.iter().filter(|t| t.contains(&quoted) || t.contains(&bare)).count();
         e.refs = Some(refs);
         if refs == 0 && e.locked.is_none() {
-            found.push(Issue { entry: i, kind: IssueKind::Unused, message: format!("no schematic, board or symbol library of the {n} chosen project(s) uses it; other projects may") });
+            found.push(Issue {
+                entry: i,
+                kind: IssueKind::Unused,
+                message: format!("no schematic, board or symbol library of the {n} chosen project(s) uses it; other projects may"),
+            });
         }
     }
     r.issues.extend(found);
@@ -584,7 +589,10 @@ pub fn plan(report: &Report, actions: &[Action]) -> Result<Plan> {
             if !touched.insert(name) {
                 bail!("{name} has two actions");
             }
-            let raw = raws.iter().find(|r| r.name == name && r.uri == entry.uri).with_context(|| format!("{name} changed in {} since it was scanned; scan again", table.display()))?;
+            let raw = raws
+                .iter()
+                .find(|r| r.name == name && r.uri == entry.uri)
+                .with_context(|| format!("{name} changed in {} since it was scanned; scan again", table.display()))?;
             match a {
                 Action::Remove { .. } => {
                     let (mut s, mut e) = (raw.start, raw.end);
@@ -597,7 +605,10 @@ pub fn plan(report: &Report, actions: &[Action]) -> Result<Plan> {
                     edits.push((s..e, String::new()));
                     out.lines.push(format!("{}: remove {name} ({})", table.display(), entry.uri));
                     if entry.refs.is_some_and(|n| n > 0) {
-                        out.warnings.push(format!("{name} is used by {} project file(s); they keep working from their own copies, but \"Update from library\" will not find it", entry.refs.unwrap_or(0)));
+                        out.warnings.push(format!(
+                            "{name} is used by {} project file(s); they keep working from their own copies, but \"Update from library\" will not find it",
+                            entry.refs.unwrap_or(0)
+                        ));
                     }
                 }
                 Action::FixPath { new_path, .. } => {
@@ -662,17 +673,23 @@ pub fn apply(plan: &Plan, check_kicad: bool) -> Result<Vec<PathBuf>> {
         backups.push(bak.clone());
         // A table that is a link (a dotfiles repo) is written through, so the link survives.
         let write = |text: &str| {
-            if std::fs::symlink_metadata(&t.file).is_ok_and(|m| m.file_type().is_symlink()) { std::fs::write(&t.file, text).map_err(anyhow::Error::from) } else { kicad_env::write_atomic(&t.file, text) }
+            if std::fs::symlink_metadata(&t.file).is_ok_and(|m| m.file_type().is_symlink()) {
+                std::fs::write(&t.file, text).map_err(anyhow::Error::from)
+            } else {
+                kicad_env::write_atomic(&t.file, text)
+            }
         };
-        let done = write(&t.after).and_then(|()| {
-            if std::fs::read_to_string(&t.file)? == t.after { Ok(()) } else { bail!("{} doesn't read back as written", t.file.display()) }
-        });
+        let done = write(&t.after)
+            .and_then(|()| if std::fs::read_to_string(&t.file)? == t.after { Ok(()) } else { bail!("{} doesn't read back as written", t.file.display()) });
         if let Err(e) = done {
             // Put back this table and every one already written, so a failed run changes nothing.
             for w in written.iter().copied().chain([t]) {
                 let _ = std::fs::write(&w.file, &w.before);
             }
-            return Err(e.context(format!("every table was put back as it was; backups: {}", backups.iter().map(|b| b.display().to_string()).collect::<Vec<_>>().join(", "))));
+            return Err(e.context(format!(
+                "every table was put back as it was; backups: {}",
+                backups.iter().map(|b| b.display().to_string()).collect::<Vec<_>>().join(", ")
+            )));
         }
         written.push(t);
     }
@@ -736,7 +753,12 @@ pub fn plan_move(report: &Report, entry: &Entry, rules: &Rules, global: &Library
     for nick in nicks {
         // The symbol's own project table overrides the global one of the same name.
         let usable = |e: &&Entry| e.kind == Kind::Footprint && e.name == nick && !e.disabled && e.path.as_ref().is_some_and(|p| p.is_dir());
-        let fp = report.entries.iter().filter(usable).find(|e| e.project == entry.project).or_else(|| report.entries.iter().filter(usable).find(|e| e.project.is_none()));
+        let fp = report
+            .entries
+            .iter()
+            .filter(usable)
+            .find(|e| e.project == entry.project)
+            .or_else(|| report.entries.iter().filter(usable).find(|e| e.project.is_none()));
         match fp.and_then(|e| e.path.as_ref()) {
             Some(dir) => copy_dir(dir, &stage.join(format!("{nick}.pretty"))).with_context(|| format!("copying {}", dir.display()))?,
             None => mv.caveats.push(format!("footprint library {nick} isn't in any scanned table, so its footprints can't come along")),
@@ -782,7 +804,16 @@ mod tests {
         std::fs::write(libs.join("MyFp.pretty/R.kicad_mod"), "(footprint \"R\")").unwrap();
         std::fs::write(libs.join("Other.pretty/R.kicad_mod"), "(footprint \"R\")").unwrap();
         let l = libs.to_string_lossy().replace('\\', "/");
-        let mut sym = table("sym", &[("Good", &format!("{l}/good.kicad_sym")), ("Same", &format!("{l}/same.kicad_sym")), ("Gone", &format!("{l}/gone.kicad_sym")), ("Env", "${NOPE_VAR}/x.kicad_sym"), ("Stock", "${KICAD9_SYMBOL_DIR}/Device.kicad_sym")]);
+        let mut sym = table(
+            "sym",
+            &[
+                ("Good", &format!("{l}/good.kicad_sym")),
+                ("Same", &format!("{l}/same.kicad_sym")),
+                ("Gone", &format!("{l}/gone.kicad_sym")),
+                ("Env", "${NOPE_VAR}/x.kicad_sym"),
+                ("Stock", "${KICAD9_SYMBOL_DIR}/Device.kicad_sym"),
+            ],
+        );
         sym.insert(0, BOM);
         std::fs::write(cfg.join("sym-lib-table"), sym).unwrap();
         std::fs::write(cfg.join("fp-lib-table"), table("fp", &[("MyFp", &format!("{l}/MyFp.pretty")), ("Other", &format!("{l}/Other.pretty"))])).unwrap();
@@ -821,7 +852,19 @@ mod tests {
         let after = std::fs::read_to_string(&table).unwrap();
         assert!(after.starts_with(BOM) && after.contains("\r\n"), "BOM and CRLF kept");
         assert!(!after.contains("Gone") && !after.contains("NOPE_VAR"));
-        let want = before.lines().filter(|l| !l.contains("\"Gone\"")).map(|l| if l.contains("\"Env\"") { l.replace("${NOPE_VAR}/x.kicad_sym", &libs.join("good.kicad_sym").to_string_lossy().replace('\\', "/")) } else { l.to_string() }).collect::<Vec<_>>().join("\r\n") + "\r\n";
+        let want = before
+            .lines()
+            .filter(|l| !l.contains("\"Gone\""))
+            .map(|l| {
+                if l.contains("\"Env\"") {
+                    l.replace("${NOPE_VAR}/x.kicad_sym", &libs.join("good.kicad_sym").to_string_lossy().replace('\\', "/"))
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\r\n")
+            + "\r\n";
         assert_eq!(after, want, "every other byte is as it was");
         assert!(std::fs::read_dir(&cfg).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains("klm-cleanup")), "backup made");
         assert!(libs.join("good.kicad_sym").exists(), "library files stay");

@@ -41,7 +41,10 @@ const KICAD_CLI: &str = "kicad-cli";
 
 const TREE: &[(&str, &[(Section, &str)])] = &[
     ("General", &[(Section::Libraries, "Libraries"), (Section::WatchFolders, "Watch folders"), (Section::KiCad, "KiCad")]),
-    ("Sources", &[(Section::Lcsc, "LCSC"), (Section::DigiKey, "DigiKey"), (Section::Mouser, "Mouser"), (Section::Nexar, "Nexar"), (Section::SnapMagic, "SnapMagic")]),
+    (
+        "Sources",
+        &[(Section::Lcsc, "LCSC"), (Section::DigiKey, "DigiKey"), (Section::Mouser, "Mouser"), (Section::Nexar, "Nexar"), (Section::SnapMagic, "SnapMagic")],
+    ),
     ("Workflow", &[(Section::Search, "Search"), (Section::Import, "Import"), (Section::Bom, "BOM"), (Section::History, "History")]),
     ("Standards", &[(Section::Symbols, "Symbols"), (Section::Footprints, "Footprints"), (Section::PartInfo, "Part information")]),
 ];
@@ -51,7 +54,6 @@ fn page_of(s: Section) -> Section {
     match s {
         Section::General => Section::Libraries,
         Section::Sources => Section::Lcsc,
-        Section::Standards => Section::Symbols,
         s => s,
     }
 }
@@ -180,7 +182,10 @@ impl SettingsTab {
             let result = if what == KICAD_CLI {
                 kicad_env::kicad_cli_version().map(|v| format!("version {v}"))
             } else {
-                klm_core::sources::build(what).ok_or_else(|| anyhow::anyhow!("keys missing")).and_then(|s| s.search("LM358")).map(|p| format!("{} results", p.len()))
+                klm_core::sources::build(what)
+                    .ok_or_else(|| anyhow::anyhow!("keys missing"))
+                    .and_then(|s| s.search("LM358"))
+                    .map(|p| format!("{} results", p.len()))
             };
             let _ = tx.send(AppMsg::Settings(Msg::Tested(what, result.map_err(|e| format!("{e:#}")))));
             ctx.request_repaint();
@@ -188,11 +193,7 @@ impl SettingsTab {
     }
 
     fn refresh(&mut self) {
-        self.stored = SOURCES
-            .iter()
-            .flat_map(|s| s.fields.iter().map(move |f| (s.name, f.0)))
-            .filter(|(s, f)| credentials::get(s, f).is_some())
-            .collect();
+        self.stored = SOURCES.iter().flat_map(|s| s.fields.iter().map(move |f| (s.name, f.0))).filter(|(s, f)| credentials::get(s, f).is_some()).collect();
     }
 
     fn contents(&mut self, ui: &mut egui::Ui, d: &mut Settings, live: &Settings) -> (Footer, Option<Cmd>) {
@@ -214,7 +215,11 @@ impl SettingsTab {
                     if ui.button("Discard").on_hover_text("Puts every page back to what is saved").clicked() {
                         footer = Footer::Discard;
                     }
-                    if ui.add_enabled(pages::has_defaults(self.section), egui::Button::new("Restore defaults").frame(false)).on_hover_text("Puts this page's options back to their defaults; Save keeps them").clicked() {
+                    if ui
+                        .add_enabled(pages::has_defaults(self.section), egui::Button::new("Restore defaults").frame(false))
+                        .on_hover_text("Puts this page's options back to their defaults; Save keeps them")
+                        .clicked()
+                    {
                         pages::restore(d, self.section);
                     }
                 });
@@ -223,7 +228,8 @@ impl SettingsTab {
         let line = egui::Stroke::new(1.0, pal.line);
         ui.painter().line_segment([bar.response.rect.left_top(), bar.response.rect.right_top()], line);
         let tree_frame = egui::Frame::new().inner_margin(egui::Margin { right: 12, ..Default::default() });
-        let tree = egui::Panel::left("settings_tree").resizable(true).default_size(210.0).size_range(150.0..=300.0).frame(tree_frame).show(ui, |ui| self.tree(ui));
+        let tree =
+            egui::Panel::left("settings_tree").resizable(true).default_size(210.0).size_range(150.0..=300.0).frame(tree_frame).show(ui, |ui| self.tree(ui));
         ui.painter().line_segment([tree.response.rect.right_top(), tree.response.rect.right_bottom()], line);
         let mut cmd = None;
         egui::CentralPanel::default().frame(egui::Frame::new().inner_margin(egui::Margin { left: 4, ..Default::default() })).show(ui, |ui| {

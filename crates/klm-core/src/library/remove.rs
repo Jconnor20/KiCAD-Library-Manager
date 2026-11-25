@@ -63,7 +63,10 @@ impl LibraryRoot {
         let mut users = vec![];
         for pretty in std::fs::read_dir(self.dir.join("footprints")).into_iter().flatten().flatten() {
             for f in std::fs::read_dir(pretty.path()).into_iter().flatten().flatten().map(|e| e.path()) {
-                if !skip.contains(&f) && super::has_ext(&f, &["kicad_mod"]) && std::fs::read_to_string(&f).with_context(|| format!("reading {}", f.display()))?.contains(needle) {
+                if !skip.contains(&f)
+                    && super::has_ext(&f, &["kicad_mod"])
+                    && std::fs::read_to_string(&f).with_context(|| format!("reading {}", f.display()))?.contains(needle)
+                {
                     users.push(f.file_stem().unwrap_or_default().to_string_lossy().into_owned());
                 }
             }
@@ -96,10 +99,13 @@ impl LibraryRoot {
         for (c, n) in &skip[..skip.len() - 1] {
             let Ok((l, i)) = self.load_symbol(c, n) else { continue };
             let field = property(&l.items()[i], "Footprint").unwrap_or("").trim().to_string();
-            if let Some(fp) = field.strip_prefix(&format!("{}:", self.nickname(c))) {
-                if !fp.is_empty() && !fp.contains(['/', '\\']) && !fp.contains("..") && self.symbols_using(skip, &field)?.is_empty() {
-                    gone_files.push(self.footprint_file(c, fp));
-                }
+            if let Some(fp) = field.strip_prefix(&format!("{}:", self.nickname(c)))
+                && !fp.is_empty()
+                && !fp.contains(['/', '\\'])
+                && !fp.contains("..")
+                && self.symbols_using(skip, &field)?.is_empty()
+            {
+                gone_files.push(self.footprint_file(c, fp));
             }
         }
         let mut plan = RemovePlan {
@@ -111,7 +117,7 @@ impl LibraryRoot {
             files: vec![],
         };
         let var = self.var();
-        let decide =|plan: &mut RemovePlan, kind: &'static str, name: String, file: Option<PathBuf>, users: Vec<String>, why_not: &str| {
+        let decide = |plan: &mut RemovePlan, kind: &'static str, name: String, file: Option<PathBuf>, users: Vec<String>, why_not: &str| {
             if !users.is_empty() {
                 plan.keeps.push(Piece { kind, name, why: format!("also used by {}", users.join(", ")) });
             } else if let Some(file) = file.filter(|f| f.is_file()) {
@@ -239,13 +245,19 @@ mod tests {
         assert!(plan.keeps.iter().any(|p| p.kind == "footprint" && p.why.contains("ICs / B")), "{:?}", plan.lines());
         root.remove_part(&plan).unwrap();
         assert!(!root.has_part("ICs", "A") && root.has_part("ICs", "B"));
-        assert!(exists(&root, "footprints/ICs.pretty/FP1.kicad_mod") && exists(&root, "3dmodels/ICs.3dshapes/FP1.step") && exists(&root, "datasheets/shared.pdf"));
+        assert!(
+            exists(&root, "footprints/ICs.pretty/FP1.kicad_mod") && exists(&root, "3dmodels/ICs.3dshapes/FP1.step") && exists(&root, "datasheets/shared.pdf")
+        );
         assert!(!crate::snapshot::list(&root).is_empty(), "no snapshot taken");
 
         // Now B is the last user, so everything of it goes.
         let plan = root.plan_remove("ICs", "B").unwrap();
         root.remove_part(&plan).unwrap();
-        assert!(!exists(&root, "footprints/ICs.pretty/FP1.kicad_mod") && !exists(&root, "3dmodels/ICs.3dshapes/FP1.step") && !exists(&root, "datasheets/shared.pdf"));
+        assert!(
+            !exists(&root, "footprints/ICs.pretty/FP1.kicad_mod")
+                && !exists(&root, "3dmodels/ICs.3dshapes/FP1.step")
+                && !exists(&root, "datasheets/shared.pdf")
+        );
     }
 
     #[test]
@@ -280,7 +292,8 @@ mod tests {
     fn a_model_shared_by_two_footprints_is_kept() {
         let root = fixture("remove_model");
         let g = root.var();
-        std::fs::write(root.dir.join("footprints/ICs.pretty/FP3.kicad_mod"), format!(r#"(footprint "FP3" (model "{g}/3dmodels/ICs.3dshapes/FP2.step"))"#)).unwrap();
+        std::fs::write(root.dir.join("footprints/ICs.pretty/FP3.kicad_mod"), format!(r#"(footprint "FP3" (model "{g}/3dmodels/ICs.3dshapes/FP2.step"))"#))
+            .unwrap();
         let plan = root.plan_remove("ICs", "C").unwrap();
         assert!(plan.keeps.iter().any(|p| p.kind == "3D model" && p.why.contains("FP3")), "{:?}", plan.lines());
         root.remove_part(&plan).unwrap();

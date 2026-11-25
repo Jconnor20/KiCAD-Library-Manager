@@ -19,6 +19,7 @@
 //! wants them undone as one (a batch) holds a [`guard`] for the whole run; [`ensure`] then does nothing.
 
 use crate::library::LibraryRoot;
+use crate::settings::{AutoVersion, History};
 use crate::store::Store;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,6 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use crate::settings::{AutoVersion, History};
 use std::time::SystemTime;
 
 /// Folder inside each library root that holds its snapshots.
@@ -313,7 +313,8 @@ fn read_manifest(snap: &Path) -> Result<Manifest> {
 /// Every readable snapshot's id and manifest, newest first.
 fn manifests(root: &LibraryRoot) -> Vec<(String, Manifest)> {
     let hist = root.dir.join(DIR);
-    let mut ids: Vec<String> = std::fs::read_dir(&hist).into_iter().flatten().flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| !n.ends_with(".tmp")).collect();
+    let mut ids: Vec<String> =
+        std::fs::read_dir(&hist).into_iter().flatten().flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| !n.ends_with(".tmp")).collect();
     ids.sort_by(|a, b| b.cmp(a));
     ids.into_iter().filter_map(|id| Some((id.clone(), read_manifest(&hist.join(&id)).ok()?))).collect()
 }
@@ -374,7 +375,11 @@ pub fn changes(root: &LibraryRoot, id: &str) -> Result<Vec<Change>> {
             let (a, b) = (old_dir.join(f), new_dir.join(f));
             let same = match (std::fs::metadata(&a), std::fs::metadata(&b)) {
                 (Ok(x), Ok(y)) if x.len() == y.len() => {
-                    if is_text(f) { std::fs::read(&a)? == std::fs::read(&b)? } else { x.modified()? == y.modified()? }
+                    if is_text(f) {
+                        std::fs::read(&a)? == std::fs::read(&b)?
+                    } else {
+                        x.modified()? == y.modified()?
+                    }
                 }
                 _ => false,
             };
@@ -446,7 +451,11 @@ pub fn rollback(root: &LibraryRoot, id: &str) -> Result<()> {
         let (src, dest) = (snap.join("files").join(f), root.dir.join(f));
         let same = match (std::fs::metadata(&src), std::fs::metadata(&dest)) {
             (Ok(s), Ok(d)) if s.len() == d.len() => {
-                if is_text(f) { std::fs::read(&src)? == std::fs::read(&dest)? } else { s.modified()? == d.modified()? }
+                if is_text(f) {
+                    std::fs::read(&src)? == std::fs::read(&dest)?
+                } else {
+                    s.modified()? == d.modified()?
+                }
             }
             _ => false,
         };
@@ -507,7 +516,8 @@ mod tests {
                 r#"(symbol "{n}" (property "Value" "{n}" (at 0 0 0)) (property "Footprint" "KLM_ICs:{fp}" (at 0 0 0)) (property "Manufacturer" "ACME" (at 0 0 0)))"#
             )
         };
-        std::fs::write(root.dir.join("symbols/ICs.kicad_sym"), format!("(kicad_symbol_lib (version 20251024) {} {})", part("A", "FP1"), part("B", "FP2"))).unwrap();
+        std::fs::write(root.dir.join("symbols/ICs.kicad_sym"), format!("(kicad_symbol_lib (version 20251024) {} {})", part("A", "FP1"), part("B", "FP2")))
+            .unwrap();
         let pretty = root.dir.join("footprints/ICs.pretty");
         std::fs::create_dir_all(&pretty).unwrap();
         std::fs::write(pretty.join("FP1.kicad_mod"), r#"(footprint "FP1" (pad "1" smd rect (at 0 0) (size 1 1)))"#).unwrap();

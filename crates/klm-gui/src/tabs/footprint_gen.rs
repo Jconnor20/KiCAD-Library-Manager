@@ -33,7 +33,18 @@ impl Default for FootprintTab {
         Self {
             family: Family::Soic,
             category: String::new(),
-            dims: Dims { pins: 8, pitch: 1.27, span: Range::new(5.8, 6.2), lead_len: Range::new(0.4, 0.7), lead_w: Range::new(0.31, 0.51), height: 1.75, rows: 4, cols: 4, ball: 0.5, ..Default::default() },
+            dims: Dims {
+                pins: 8,
+                pitch: 1.27,
+                span: Range::new(5.8, 6.2),
+                lead_len: Range::new(0.4, 0.7),
+                lead_w: Range::new(0.31, 0.51),
+                height: 1.75,
+                rows: 4,
+                cols: 4,
+                ball: 0.5,
+                ..Default::default()
+            },
             body: (3.9, 4.9),
             thermal: (0.0, 0.0),
             density: 'B',
@@ -173,7 +184,9 @@ impl FootprintTab {
         let root = if self.project { cx.project_root() } else { cx.global_root() };
         caption(ui, "Will save as");
         match (&self.result, &root) {
-            (Some(Ok(g)), Some(r)) if !self.category.trim().is_empty() => ui.label(RichText::new(format!("{}.pretty/{}.kicad_mod", r.nickname(self.category.trim()), g.name)).monospace()),
+            (Some(Ok(g)), Some(r)) if !self.category.trim().is_empty() => {
+                ui.label(RichText::new(format!("{}.pretty/{}.kicad_mod", r.nickname(self.category.trim()), g.name)).monospace())
+            }
             _ => ui.weak("Generate, name a category and set up a library to save."),
         };
         ui.add_space(8.0);
@@ -213,12 +226,12 @@ impl FootprintTab {
                 self.result = Some(self.build(cx));
             }
             let ready = matches!(self.result, Some(Ok(_))) && root.is_some() && !self.category.trim().is_empty();
-            if ui.add_enabled(ready, egui::Button::new("Save to library")).clicked() {
-                if let (Some(Ok(g)), Some(root)) = (&self.result, &root) {
-                    match footprint_gen::save(root, self.category.trim(), g, self.overwrite) {
-                        Ok(p) => cx.log(Level::Info, format!("Wrote {}", p.display())),
-                        Err(e) => cx.log(Level::Error, format!("Could not write the footprint: {e:#}")),
-                    }
+            if ui.add_enabled(ready, egui::Button::new("Save to library")).clicked()
+                && let (Some(Ok(g)), Some(root)) = (&self.result, &root)
+            {
+                match footprint_gen::save(root, self.category.trim(), g, self.overwrite) {
+                    Ok(p) => cx.log(Level::Info, format!("Wrote {}", p.display())),
+                    Err(e) => cx.log(Level::Error, format!("Could not write the footprint: {e:#}")),
                 }
             }
         });
@@ -263,7 +276,9 @@ fn pad_sizes(text: &str) -> Vec<(&'static str, String)> {
     if let Some(p) = pads.first() {
         out.push(("Signal", format!("{:.2} × {:.2} mm", p.2.0, p.2.1)));
     }
-    if let Some(p) = pads.iter().max_by(|a, b| (a.2.0 * a.2.1).total_cmp(&(b.2.0 * b.2.1))).filter(|p| pads.len() > 1 && p.2.0 * p.2.1 > 2.0 * pads[0].2.0 * pads[0].2.1) {
+    if let Some(p) =
+        pads.iter().max_by(|a, b| (a.2.0 * a.2.1).total_cmp(&(b.2.0 * b.2.1))).filter(|p| pads.len() > 1 && p.2.0 * p.2.1 > 2.0 * pads[0].2.0 * pads[0].2.1)
+    {
         out.push(("Exposed", format!("{:.2} × {:.2} mm", p.2.0, p.2.1)));
     }
     let span = |f: fn(&(String, (f64, f64), (f64, f64))) -> (f64, f64)| pads.iter().map(f).fold((f64::MAX, f64::MIN), |a, v| (a.0.min(v.0), a.1.max(v.1)));
@@ -328,5 +343,11 @@ fn paint(p: &egui::Painter, area: egui::Rect, text: &str, layers: &[bool; 4], pa
         }
     }
     let courtyard = (hi.x - lo.x) as f64;
-    p.text(Pos2::new(area.center().x, area.bottom() - 4.0), egui::Align2::CENTER_BOTTOM, format!("{:.2} × {:.2} mm", courtyard, hi.y - lo.y), egui::FontId::monospace(11.0), pal.muted);
+    p.text(
+        Pos2::new(area.center().x, area.bottom() - 4.0),
+        egui::Align2::CENTER_BOTTOM,
+        format!("{:.2} × {:.2} mm", courtyard, hi.y - lo.y),
+        egui::FontId::monospace(11.0),
+        pal.muted,
+    );
 }

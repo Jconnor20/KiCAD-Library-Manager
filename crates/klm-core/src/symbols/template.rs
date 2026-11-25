@@ -39,8 +39,10 @@ const R: Template = Template {
 };
 
 const C: Template = Template {
-    body: Cow::Borrowed("(polyline (pts (xy -2.032 0.762) (xy 2.032 0.762)) (stroke (width 0.508) (type default)) (fill (type none)))
-           (polyline (pts (xy -2.032 -0.762) (xy 2.032 -0.762)) (stroke (width 0.508) (type default)) (fill (type none)))"),
+    body: Cow::Borrowed(
+        "(polyline (pts (xy -2.032 0.762) (xy 2.032 0.762)) (stroke (width 0.508) (type default)) (fill (type none)))
+           (polyline (pts (xy -2.032 -0.762) (xy 2.032 -0.762)) (stroke (width 0.508) (type default)) (fill (type none)))",
+    ),
     slots: Cow::Borrowed(&[Slot(0.0, 5.08, 270.0, 4.064), Slot(0.0, -5.08, 90.0, 4.064)]),
     roles: &[],
     hide_numbers: true,
@@ -49,10 +51,12 @@ const C: Template = Template {
 };
 
 const L: Template = Template {
-    body: Cow::Borrowed("(arc (start 0 2.54) (mid 0.6323 1.905) (end 0 1.27) (stroke (width 0.254) (type default)) (fill (type none)))
+    body: Cow::Borrowed(
+        "(arc (start 0 2.54) (mid 0.6323 1.905) (end 0 1.27) (stroke (width 0.254) (type default)) (fill (type none)))
            (arc (start 0 1.27) (mid 0.6323 0.635) (end 0 0) (stroke (width 0.254) (type default)) (fill (type none)))
            (arc (start 0 0) (mid 0.6323 -0.635) (end 0 -1.27) (stroke (width 0.254) (type default)) (fill (type none)))
-           (arc (start 0 -1.27) (mid 0.6323 -1.905) (end 0 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))"),
+           (arc (start 0 -1.27) (mid 0.6323 -1.905) (end 0 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))",
+    ),
     slots: Cow::Borrowed(&[Slot(0.0, 5.08, 270.0, 2.54), Slot(0.0, -5.08, 90.0, 2.54)]),
     roles: &[],
     hide_numbers: true,
@@ -68,7 +72,8 @@ const DIODE_BODY: &str = "(polyline (pts (xy -1.27 1.27) (xy -1.27 -1.27)) (stro
 const DIODE_SLOTS: &[Slot] = &[Slot(-2.54, 0.0, 0.0, 1.27), Slot(2.54, 0.0, 180.0, 1.27)];
 const DIODE_ROLES: &[&[&str]] = &[&["K", "C", "CATHODE", "-"], &["A", "ANODE", "+"]];
 
-const D: Template = Template { body: Cow::Borrowed(DIODE_BODY), slots: Cow::Borrowed(DIODE_SLOTS), roles: DIODE_ROLES, hide_numbers: true, fields: None, field_sizes: None };
+const D: Template =
+    Template { body: Cow::Borrowed(DIODE_BODY), slots: Cow::Borrowed(DIODE_SLOTS), roles: DIODE_ROLES, hide_numbers: true, fields: None, field_sizes: None };
 
 const LED: Template = Template {
     body: Cow::Borrowed("(polyline (pts (xy -3.048 -0.762) (xy -4.572 -2.286) (xy -3.81 -2.286) (xy -4.572 -2.286) (xy -4.572 -1.524)) (stroke (width 0.254) (type default)) (fill (type none)))
@@ -142,12 +147,12 @@ impl Template {
         let num = |x: &Sexpr, i: usize| x.arg(i).and_then(|v| v.parse::<f64>().ok());
         let mut slots = vec![];
         for &i in &order {
-            // `source_pins` made sure every pin has both.
-            let (at, len) = (pins[i].child("at").unwrap(), pins[i].child("length").unwrap());
+            let (Some(at), Some(len)) = (pins[i].child("at"), pins[i].child("length")) else { bail!("pin {} has no position or length", pin_number(&pins[i])) };
             let (Some(x), Some(y), Some(l)) = (num(at, 0), num(at, 1), num(len, 0)) else { bail!("pin {} has a bad position", pin_number(&pins[i])) };
             slots.push(Slot(x, y, num(at, 2).unwrap_or(0.0), l));
         }
-        let body: Vec<String> = sym.children("symbol").flat_map(|u| u.items().iter().skip(2)).filter(|c| c.head() != Some("pin")).map(sexpr::to_string).collect();
+        let body: Vec<String> =
+            sym.children("symbol").flat_map(|u| u.items().iter().skip(2)).filter(|c| c.head() != Some("pin")).map(sexpr::to_string).collect();
         if body.is_empty() {
             bail!("has no body graphics");
         }
@@ -212,28 +217,6 @@ impl Template {
     pub fn set_shapes(&mut self, shapes: &[super::shapes::Shape]) {
         self.body = Cow::Owned(super::shapes::to_body(shapes));
     }
-
-    /// Left, bottom, right, top of the body graphics (pins not included).
-    pub fn body_bounds(&self) -> Option<(f64, f64, f64, f64)> {
-        fn walk(x: &Sexpr, pts: &mut Vec<(f64, f64)>) {
-            let num = |i| x.arg(i).and_then(|v| v.parse::<f64>().ok());
-            match x.head() {
-                Some("start" | "end" | "mid" | "xy") => pts.extend(num(0).zip(num(1))),
-                Some("circle") => {
-                    let (c, r) = (x.child("center").and_then(|c| Some((c.arg(0)?.parse::<f64>().ok()?, c.arg(1)?.parse::<f64>().ok()?))), x.child("radius").and_then(|r| r.arg(0)?.parse::<f64>().ok()));
-                    if let (Some(c), Some(r)) = (c, r) {
-                        pts.extend([(c.0 - r, c.1 - r), (c.0 + r, c.1 + r)]);
-                    }
-                }
-                _ => x.items().iter().for_each(|c| walk(c, pts)),
-            }
-        }
-        let mut pts = vec![];
-        walk(&sexpr::parse(&format!("(g {})", self.body)).ok()?, &mut pts);
-        let (x0, x1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
-        let (y0, y1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.1), a.1.max(p.1)));
-        (!pts.is_empty()).then_some((x0, y0, x1, y1))
-    }
 }
 
 #[cfg(test)]
@@ -248,7 +231,6 @@ mod tests {
             t.slots.to_mut()[0].1 += 2.54;
             let back = Template::from_symbol(&t.to_symbol(class).unwrap(), class).unwrap();
             assert_eq!((back.slots.to_vec(), back.fields, back.hide_numbers), (t.slots.to_vec(), t.fields, t.hide_numbers), "{class:?}");
-            assert_eq!(back.body_bounds(), t.body_bounds());
         }
     }
 
@@ -258,7 +240,6 @@ mod tests {
         let mut shapes = t.shapes();
         shapes[0].translate((0.0, 1.0));
         t.set_shapes(&shapes);
-        assert_eq!(t.body_bounds(), Some((-1.016, -1.54, 1.016, 3.54)));
         assert_eq!(t.shapes(), shapes);
     }
 }

@@ -3,6 +3,7 @@
 use crate::library::{AttachKind, Check, LibraryRoot};
 use crate::sources::Source;
 use anyhow::{Context, Result, bail};
+use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -80,6 +81,7 @@ pub fn held() -> Option<(&'static str, Duration, bool)> {
 }
 
 // Some datasheet hosts turn away anything that doesn't look like a browser.
+const MAX_PDF: u64 = 50 * 1024 * 1024;
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
 /// Sends the request `build` makes, paced with every other download (see [`take_turn`]), and again after a wait (the server's
@@ -95,7 +97,14 @@ pub(crate) fn send_retrying(blocks_with_403: bool, build: impl Fn() -> reqwest::
             went_fine();
             return Ok(resp);
         }
-        let wait = Duration::from_secs(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or((if code == 403 { 10 } else { 3 }) << attempt).min(60));
+        let wait = Duration::from_secs(
+            resp.headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .unwrap_or((if code == 403 { 10 } else { 3 }) << attempt)
+                .min(60),
+        );
         backed_off(wait);
         note_wait("the server", wait, true);
         if sleep_unless_aborted(wait) {
@@ -109,28 +118,46 @@ pub(crate) fn send_retrying(blocks_with_403: bool, build: impl Fn() -> reqwest::
 /// Saves the PDF at `url` to `dest`. Redirects are followed. Many "datasheet" links lead to an HTML
 /// viewer page, so anything that doesn't start with `%PDF` is refused; `dest` is only written for a PDF.
 pub fn download_pdf(url: &str, dest: &Path) -> Result<()> {
-    let http = reqwest::blocking::Client::builder().user_agent(BROWSER_USER_AGENT).timeout(Duration::from_secs(60)).build().expect("HTTP client");
+    // Plain http is only for this machine (the tests' stub server); a datasheet link from a library file must not be fetched unencrypted.
+    let local = reqwest::Url::parse(url).is_ok_and(|u| u.scheme() == "http" && matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")));
+    if !url.starts_with("https://") && !local {
+        bail!("{url}: only https:// links are downloaded");
+    }
+    let http = crate::sources::http::client_with(BROWSER_USER_AGENT, 60);
     let resp = send_retrying(false, || http.get(url)).with_context(|| format!("requesting {url}"))?;
     if !resp.status().is_success() {
-        let hint = if matches!(resp.status().as_u16(), 403 | 429) { " (the server is refusing requests, likely rate limiting; try again in a few minutes)" } else { "" };
+        let hint = if matches!(resp.status().as_u16(), 403 | 429) {
+            " (the server is refusing requests, likely rate limiting; try again in a few minutes)"
+        } else {
+            ""
+        };
         bail!("{url}: HTTP {}{hint}", resp.status());
     }
-    let body = resp.bytes().with_context(|| format!("reading {url}"))?;
+    let mut body = vec![];
+    resp.take(MAX_PDF + 1).read_to_end(&mut body).with_context(|| format!("reading {url}"))?;
+    if body.len() as u64 > MAX_PDF {
+        bail!("{url} is larger than {} MB", MAX_PDF >> 20);
+    }
     if !body.starts_with(b"%PDF") {
         bail!("{url} is not a PDF");
     }
-    let tmp = dest.with_extension("klm-tmp");
-    std::fs::write(&tmp, &body).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, dest).with_context(|| format!("replacing {}", dest.display()))
+    // An unpredictable temp name in the same folder, so another local user can't pre-plant a link there; it goes away if anything fails.
+    let dir = dest.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(dir).with_context(|| format!("writing in {}", dir.display()))?;
+    tmp.write_all(&body).with_context(|| format!("writing {}", tmp.path().display()))?;
+    tmp.persist(dest).map(|_| ()).with_context(|| format!("replacing {}", dest.display()))
 }
 
 impl LibraryRoot {
     /// Downloads a local PDF for every part whose datasheet is only a web link, as a manual Attach
     /// would. Returns (MPN, outcome) per part tried; a part that fails keeps its link.
     pub fn download_missing_datasheets(&self) -> Vec<(String, Result<()>)> {
-        let tmp = std::env::temp_dir().join(format!("klm-datasheet-{}.pdf", std::process::id()));
         let mut out = vec![];
-        let todo: Vec<_> = self.list_parts().into_iter().filter(|p| p.datasheet == Check::Link && p.datasheet_target.as_ref().is_some_and(|u| u.starts_with("http"))).collect();
+        let todo: Vec<_> = self
+            .list_parts()
+            .into_iter()
+            .filter(|p| p.datasheet == Check::Link && p.datasheet_target.as_ref().is_some_and(|u| u.starts_with("http")))
+            .collect();
         if todo.is_empty() {
             return out;
         }
@@ -138,12 +165,16 @@ impl LibraryRoot {
             Ok(g) => g,
             Err(e) => return vec![(String::new(), Err(e))],
         };
+        let scratch = match tempfile::tempdir() {
+            Ok(d) => d,
+            Err(e) => return vec![(String::new(), Err(e.into()))],
+        };
+        let tmp = scratch.path().join("datasheet.pdf");
         for p in todo {
             let url = p.datasheet_target.clone().unwrap_or_default();
             let result = download_pdf(&url, &tmp).and_then(|()| self.attach_file(&p.category, &p.name, AttachKind::Datasheet, &tmp));
             out.push((p.mpn, result));
         }
-        let _ = std::fs::remove_file(&tmp);
         out
     }
 }
@@ -151,7 +182,13 @@ impl LibraryRoot {
 /// Finds a real PDF for `mpn`: the part's existing link first, then every `datasheet_url` the
 /// `sources` return for the MPN. `fetch` saves a URL to `dest` (it is `download_pdf` outside tests).
 /// Returns the URL that worked, or why each attempt failed.
-pub fn find_datasheet(mpn: &str, existing: Option<&str>, sources: &[Box<dyn Source>], dest: &Path, fetch: &dyn Fn(&str, &Path) -> Result<()>) -> Result<String> {
+pub fn find_datasheet(
+    mpn: &str,
+    existing: Option<&str>,
+    sources: &[Box<dyn Source>],
+    dest: &Path,
+    fetch: &dyn Fn(&str, &Path) -> Result<()>,
+) -> Result<String> {
     let mut why = vec![];
     let mut tried = vec![];
     let mut try_url = |url: &str, from: &str, why: &mut Vec<String>| {
@@ -167,10 +204,10 @@ pub fn find_datasheet(mpn: &str, existing: Option<&str>, sources: &[Box<dyn Sour
             }
         }
     };
-    if let Some(url) = existing {
-        if try_url(url, "existing link", &mut why) {
-            return Ok(url.to_string());
-        }
+    if let Some(url) = existing
+        && try_url(url, "existing link", &mut why)
+    {
+        return Ok(url.to_string());
     }
     if mpn.is_empty() {
         bail!("no MPN to search for{}", if why.is_empty() { String::new() } else { format!("; {}", why.join("; ")) });
@@ -206,17 +243,18 @@ impl LibraryRoot {
             Ok(g) => g,
             Err(e) => return vec![(String::new(), Err(e))],
         };
-        let tmp = std::env::temp_dir().join(format!("klm-datasheet-{}.pdf", std::process::id()));
-        let out = todo
-            .into_iter()
+        let scratch = match tempfile::tempdir() {
+            Ok(d) => d,
+            Err(e) => return vec![(String::new(), Err(e.into()))],
+        };
+        let tmp = scratch.path().join("datasheet.pdf");
+        todo.into_iter()
             .map(|p| {
                 let result = find_datasheet(&p.mpn, p.datasheet_target.as_deref(), sources, &tmp, &download_pdf)
                     .and_then(|url| self.attach_file(&p.category, &p.name, AttachKind::Datasheet, &tmp).map(|()| url));
                 (if p.mpn.is_empty() { p.name } else { p.mpn }, result)
             })
-            .collect();
-        let _ = std::fs::remove_file(&tmp);
-        out
+            .collect()
     }
 }
 
@@ -225,7 +263,6 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
-
 
     struct Stub(&'static str, Vec<&'static str>);
     impl Source for Stub {
@@ -294,10 +331,21 @@ mod tests {
     }
 
     #[test]
+    fn plain_http_links_are_refused_before_any_request() {
+        let dir = crate::test_dir("download_http");
+        for url in ["http://example.com/a.pdf", "ftp://example.com/a.pdf", "http://127.0.0.1:80@example.com/a.pdf"] {
+            let e = download_pdf(url, &dir.join("a.pdf")).unwrap_err();
+            assert!(format!("{e:#}").contains("only https"), "{url}: {e:#}");
+        }
+    }
+
+    #[test]
     fn link_only_parts_get_a_local_pdf_and_failures_keep_their_link() {
         let base = serve();
         let sym = |mpn: &str, ds: &str| {
-            format!(r#"(symbol "{mpn}" (property "Reference" "U" (at 0 0 0)) (property "MPN" "{mpn}" (at 0 0 0)) (property "Manufacturer" "ACME" (at 0 0 0)) (property "Footprint" "" (at 0 0 0)) (property "Datasheet" "{ds}" (at 0 0 0)))"#)
+            format!(
+                r#"(symbol "{mpn}" (property "Reference" "U" (at 0 0 0)) (property "MPN" "{mpn}" (at 0 0 0)) (property "Manufacturer" "ACME" (at 0 0 0)) (property "Footprint" "" (at 0 0 0)) (property "Datasheet" "{ds}" (at 0 0 0)))"#
+            )
         };
         let lib = format!(
             "(kicad_symbol_lib (version 20241209)\n{}\n{}\n{}\n{}\n)",

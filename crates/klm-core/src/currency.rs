@@ -70,8 +70,15 @@ fn cache_path() -> Option<PathBuf> {
 
 fn fetch(now: u64) -> Result<Rates> {
     let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(15)).user_agent("KiCAD-Library-Manager").build()?;
-    let body: serde_json::Value = client.get(RATES_URL).send().and_then(|r| r.error_for_status()).and_then(|r| r.json()).map_err(reqwest::Error::without_url).context("fetching exchange rates")?;
-    let mut per_usd: BTreeMap<String, f64> = body["rates"].as_object().context("unreadable exchange rates")?.iter().filter_map(|(k, v)| Some((k.clone(), v.as_f64()?))).collect();
+    let body: serde_json::Value = client
+        .get(RATES_URL)
+        .send()
+        .and_then(|r| r.error_for_status())
+        .and_then(|r| r.json())
+        .map_err(reqwest::Error::without_url)
+        .context("fetching exchange rates")?;
+    let mut per_usd: BTreeMap<String, f64> =
+        body["rates"].as_object().context("unreadable exchange rates")?.iter().filter_map(|(k, v)| Some((k.clone(), v.as_f64()?))).collect();
     per_usd.insert("USD".into(), 1.0);
     Ok(Rates { date: body["date"].as_str().unwrap_or_default().into(), fetched: now, per_usd })
 }
@@ -105,7 +112,15 @@ mod tests {
 
     #[test]
     fn detects_currency() {
-        for (text, want) in [("$0.1 @1", Some("USD")), ("US$ 5", Some("USD")), ("0,10 € @1", Some("EUR")), ("£2", Some("GBP")), ("CHF 0.5 @10", Some("CHF")), ("¥100", None), ("", None)] {
+        for (text, want) in [
+            ("$0.1 @1", Some("USD")),
+            ("US$ 5", Some("USD")),
+            ("0,10 € @1", Some("EUR")),
+            ("£2", Some("GBP")),
+            ("CHF 0.5 @10", Some("CHF")),
+            ("¥100", None),
+            ("", None),
+        ] {
             assert_eq!(detect(text).as_deref(), want, "{text}");
         }
         // The quantity break after '@' is not part of the price.

@@ -1,4 +1,4 @@
-//! W7.5: Import, History, BOM and Clean up (see docs/ui-review/W7.5.md).
+//! Import, History, BOM and Clean up.
 
 use super::harness::*;
 use crate::Tab;
@@ -27,9 +27,15 @@ fn bom_with(size: (f32, f32), quotes: [Vec<Quote>; 3]) -> Gui<'static> {
     let lib = klm_core::alternatives::scan(&root);
     let store = klm_core::store::Store::open(&klm_core::store::Store::default_path().unwrap()).unwrap();
     for (mpn, maker, role) in [("LM358", "Texas Instruments", "preferred"), ("LM358B", "Texas Instruments", "substitute")] {
-        store.set_alternative("LM358", &klm_core::store::Alternative { mpn: mpn.into(), manufacturer: maker.into(), supplier_ids: vec![], role: role.into() }).unwrap();
+        store
+            .set_alternative("LM358", &klm_core::store::Alternative { mpn: mpn.into(), manufacturer: maker.into(), supplier_ids: vec![], role: role.into() })
+            .unwrap();
     }
-    let lines = vec![line(&["U1"], "LM358", "Texas Instruments"), line(&["U2", "U3"], "RP2040", "Raspberry Pi"), line(&["C1", "C2", "C3", "C4", "C5"], "GRM155R71C104KA88D", "Murata")];
+    let lines = vec![
+        line(&["U1"], "LM358", "Texas Instruments"),
+        line(&["U2", "U3"], "RP2040", "Raspberry Pi"),
+        line(&["C1", "C2", "C3", "C4", "C5"], "GRM155R71C104KA88D", "Murata"),
+    ];
     let project = app.cx.project.clone().unwrap();
     app.bom_tab.seed(&app.cx, project, lines, quotes.to_vec(), lib);
     h.run_ok();
@@ -82,7 +88,9 @@ fn i3_watch_folder_link_opens_settings() {
 }
 
 fn history(size: (f32, f32)) -> Gui<'static> {
-    app(size, Tab::History)
+    let mut h = app(size, Tab::History);
+    settle(&mut h); // the snapshot list is read on a worker
+    h
 }
 
 fn menu_buttons<'a>(h: &'a Gui) -> Vec<egui_kittest::Node<'a>> {
@@ -102,7 +110,8 @@ fn h1_row_menu() {
         assert_eq!(menu_buttons(&h).len(), 3);
         menu_buttons(&h)[0].click();
         h.run_ok();
-        let (roll, mark, del) = (h.get_by_label("Roll back to before this").rect(), h.get_by_label("Mark as version…").rect(), h.get_by_label("Delete…").rect());
+        let (roll, mark, del) =
+            (h.get_by_label("Roll back to before this").rect(), h.get_by_label("Mark as version…").rect(), h.get_by_label("Delete…").rect());
         assert!(roll.top() < mark.top() && mark.top() < del.top(), "Delete is last");
         assert!(del.top() - mark.bottom() > 4.0 && del.top() - mark.bottom() > mark.top() - roll.bottom(), "a separator sits above Delete");
         assert!(snap(&mut h, "history-row-menu").is_empty());
@@ -126,6 +135,7 @@ fn h2_delete_is_confirmed() {
     h.run_ok();
     click(&mut h, "Delete…");
     click(&mut h, "Delete");
+    settle(&mut h);
     assert_eq!(snapshots(&h), before - 1);
 }
 
@@ -150,6 +160,7 @@ fn h4_what_changed() {
         let mut h = history(size);
         assert!(h.query_by_label("Click a row to see which files that change touched.").is_some());
         click(&mut h, "import RP2040");
+        settle(&mut h);
         assert!(h.query_all_by_label_contains("CHANGED SINCE THIS SNAPSHOT").next().is_some(), "{}", dump(&h));
         assert!(h.query_all_by_label("added").next().is_some(), "the files the import added are listed");
         assert!(snap(&mut h, "history-what-changed").is_empty());
@@ -228,7 +239,8 @@ fn b4_swap_alternate() {
     click(&mut h, "LM358B (substitute)");
     assert!(h.query_by_label("LM358B").is_some() && h.query_by_label("LM358").is_none(), "{}", dump(&h));
     assert!(h.query_by_label("close to LM358").is_some(), "the swapped part is matched against the library again");
-    assert!(h.query_by_label("LM358 ▾").is_some(), "the old part is now the alternate");
+    // The old part kept its in-stock quotes and LM358B has none, so JLC mode marks the old one as better.
+    assert!(h.query_by_label("better: LM358 ▾").is_some(), "the old part is now the alternate");
     assert!(h.state().cx.log.lines.iter().any(|(_, s)| s.contains("LM358B in place of LM358")));
     snap(&mut h, "bom-swapped");
 }
@@ -248,11 +260,22 @@ fn c1_cleanup_issues() {
     let cfg = klm_core::kicad_env::config_dir().unwrap();
     std::fs::create_dir_all(&cfg).unwrap();
     let gone = env.dir.join("gone");
-    let entry = |n: &str, t: &str| format!("(lib (name \"{n}\")(type \"KiCad\")(uri \"{}/{n}\")(options \"\")(descr \"\"))", gone.display().to_string().replace('\\', "/") + t);
-    std::fs::write(cfg.join("sym-lib-table"), format!("(sym_lib_table\n  (version 7)\n  {}\n  {}\n)\n", entry("Old_A", "").replace("Old_A\"", "Old_A.kicad_sym\""), entry("Old_B", "").replace("Old_B\"", "Old_B.kicad_sym\""))).unwrap();
+    let entry = |n: &str, t: &str| {
+        format!("(lib (name \"{n}\")(type \"KiCad\")(uri \"{}/{n}\")(options \"\")(descr \"\"))", gone.display().to_string().replace('\\', "/") + t)
+    };
+    std::fs::write(
+        cfg.join("sym-lib-table"),
+        format!(
+            "(sym_lib_table\n  (version 7)\n  {}\n  {}\n)\n",
+            entry("Old_A", "").replace("Old_A\"", "Old_A.kicad_sym\""),
+            entry("Old_B", "").replace("Old_B\"", "Old_B.kicad_sym\"")
+        ),
+    )
+    .unwrap();
     for size in SIZES {
         let mut h = app(size, Tab::Cleanup);
         click(&mut h, "Scan KiCad's library tables");
+        settle(&mut h);
         assert!(h.query_all_by_label("Broken · 3").next().is_some(), "{}", dump(&h));
         assert!(snap(&mut h, "cleanup-scan").is_empty());
         click(&mut h, "Remove from table");
@@ -267,8 +290,19 @@ fn c2_standards_pages() {
     let env = setup();
     // The fixture parts have one pin each, which no house class accepts; a two-pin capacitor gives Classes something to count.
     let prop = |k: &str, v: &str| format!("(property \"{k}\" \"{v}\" (at 0 0 0) (effects (font (size 1.27 1.27))))");
-    let pin = |n: &str, x: i32, r: i32| format!("(pin passive line (at {x} 0 {r}) (length 1) (name \"{n}\" (effects (font (size 1 1)))) (number \"{n}\" (effects (font (size 1 1)))))");
-    let sym = format!("(kicad_symbol_lib (version 20251024) (generator \"t\") (symbol \"CL05\" {} {} {} {} {} (symbol \"CL05_1_1\" {} {})))", prop("Reference", "U"), prop("Value", "CL05"), prop("Footprint", ""), prop("Description", "Capacitor"), prop("MPN", "CL05"), pin("1", -5, 0), pin("2", 5, 180));
+    let pin = |n: &str, x: i32, r: i32| {
+        format!("(pin passive line (at {x} 0 {r}) (length 1) (name \"{n}\" (effects (font (size 1 1)))) (number \"{n}\" (effects (font (size 1 1)))))")
+    };
+    let sym = format!(
+        "(kicad_symbol_lib (version 20251024) (generator \"t\") (symbol \"CL05\" {} {} {} {} {} (symbol \"CL05_1_1\" {} {})))",
+        prop("Reference", "U"),
+        prop("Value", "CL05"),
+        prop("Footprint", ""),
+        prop("Description", "Capacitor"),
+        prop("MPN", "CL05"),
+        pin("1", -5, 0),
+        pin("2", 5, 180)
+    );
     std::fs::write(env.lib.join("symbols/Capacitors.kicad_sym"), sym).unwrap();
     for size in SIZES {
         let mut h = app(size, Tab::Classes);
@@ -306,7 +340,11 @@ fn c3_template_editor_saves_to_the_profile() {
     click(&mut h, "Save to standard");
     settle(&mut h);
     assert!(h.query_by_label("Save to standard").is_none(), "the editor stayed open");
-    assert!(h.state().cx.settings.standard.templates.contains_key("Resistor"), "nothing stored: {:?}", h.state().cx.settings.standard.templates.keys().collect::<Vec<_>>());
+    assert!(
+        h.state().cx.settings.standard.templates.contains_key("Resistor"),
+        "nothing stored: {:?}",
+        h.state().cx.settings.standard.templates.keys().collect::<Vec<_>>()
+    );
     // Editing again starts from what was saved, not from the built-in.
     click(&mut h, "Edit symbol…");
     settle(&mut h);
@@ -325,7 +363,11 @@ fn x1_nothing_clipped_or_missing() {
             for n in h.root().children_recursive() {
                 let a = n.accesskit_node();
                 let Some(r) = a.bounding_box().filter(|r| r.width() > 0.0 && a.label().is_some()) else { continue };
-                assert!(r.x0 >= -1.0 && r.y0 >= -1.0 && r.x1 <= w as f64 + 1.0 && r.y1 <= hgt as f64 + 1.0, "{what} at {size:?}: {:?} {r:?} is outside the window", a.label());
+                assert!(
+                    r.x0 >= -1.0 && r.y0 >= -1.0 && r.x1 <= w as f64 + 1.0 && r.y1 <= hgt as f64 + 1.0,
+                    "{what} at {size:?}: {:?} {r:?} is outside the window",
+                    a.label()
+                );
             }
         };
         let mut h = app(size, Tab::Import);
@@ -368,7 +410,13 @@ fn i4_waiting_part_table_detail_and_badge() {
     let env = setup();
     for size in SIZES {
         let mut h = app(size, Tab::Import);
-        let part = klm_core::part::Part { mpn: "TPS54331DR".into(), manufacturer: "Texas Instruments".into(), source: "Ultra Librarian ZIP".into(), symbol_file: Some(env.dir.join("src/LM358.kicad_sym")), ..Default::default() };
+        let part = klm_core::part::Part {
+            mpn: "TPS54331DR".into(),
+            manufacturer: "Texas Instruments".into(),
+            source: "Ultra Librarian ZIP".into(),
+            symbol_file: Some(env.dir.join("src/LM358.kicad_sym")),
+            ..Default::default()
+        };
         let s = h.state_mut();
         s.import_tab.handle(crate::tabs::import::Msg::Found(part, env.dir.join("work")), &mut s.cx);
         settle(&mut h);
@@ -420,11 +468,15 @@ fn w1_light_theme_and_bom_inspector() {
 fn i6_bom_lookup_only_selected_lines() {
     let env = setup();
     let bom = env.dir.join("b.csv");
-    std::fs::write(&bom, "Reference,Value,Footprint,MPN,LCSC
+    std::fs::write(
+        &bom,
+        "Reference,Value,Footprint,MPN,LCSC
 R1,10k,R_0603,RC0603FR-0710KL,C25804
 C1,100nF,C_0603,,C14663
 TP1,TestPoint,TP,,
-").unwrap();
+",
+    )
+    .unwrap();
     let mut h = app((1280.0, 800.0), Tab::BomImport);
     let s = h.state_mut();
     s.bom_import_tab.open(bom, &mut s.cx);
@@ -435,6 +487,10 @@ TP1,TestPoint,TP,,
     click(&mut h, "Look up selected (1)");
     settle(&mut h);
     settle(&mut h);
-    assert!(h.query_by_label("0 standard library, 0 from sources, 1 not found, 0 ambiguous. Lines not found or ambiguous are left out.").is_some(), "{}", dump(&h));
+    assert!(
+        h.query_by_label("0 standard library, 0 from sources, 1 not found, 0 ambiguous. Lines not found or ambiguous are left out.").is_some(),
+        "{}",
+        dump(&h)
+    );
     assert!(h.query_by_label("Generate: none of the ticked lines was found").is_some(), "nothing found, so nothing to generate: {}", dump(&h));
 }

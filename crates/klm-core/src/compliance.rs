@@ -42,7 +42,10 @@ fn judge(root: &LibraryRoot, plan: standardise::Plan, checked: HashMap<Key, Vec<
         let (cat, name) = &key;
         let mut reasons = vec![];
         let lib = libs.entry(cat.clone()).or_insert_with(|| std::fs::read_to_string(symbol_lib(root, cat)).ok().and_then(|t| crate::sexpr::parse(&t).ok()));
-        let fp = lib.as_ref().and_then(|l| l.children("symbol").find(|s| s.arg(0) == Some(name.as_str()))).and_then(|s| Some(crate::library::property(s, "Footprint")?.rsplit(':').next()?.to_string()));
+        let fp = lib
+            .as_ref()
+            .and_then(|l| l.children("symbol").find(|s| s.arg(0) == Some(name.as_str())))
+            .and_then(|s| Some(crate::library::property(s, "Footprint")?.rsplit(':').next()?.to_string()));
         let prefix = format!("{name}: ");
         for f in &plan.files {
             let own_symbols = f.path == symbol_lib(root, cat);
@@ -59,7 +62,9 @@ fn judge(root: &LibraryRoot, plan: standardise::Plan, checked: HashMap<Key, Vec<
 pub fn findings(results: &HashMap<Key, Compliance>) -> Vec<Finding> {
     let mut bad: Vec<_> = results.iter().filter(|(_, c)| !c.ok).collect();
     bad.sort_by(|a, b| a.0.cmp(b.0));
-    bad.into_iter().map(|((cat, name), c)| Finding { severity: Severity::Warning, kind: "compliance", item: format!("{cat}/{name}"), message: c.reasons.join("; ") }).collect()
+    bad.into_iter()
+        .map(|((cat, name), c)| Finding { severity: Severity::Warning, kind: "compliance", item: format!("{cat}/{name}"), message: c.reasons.join("; ") })
+        .collect()
 }
 
 pub(crate) fn symbol_lib(root: &LibraryRoot, cat: &str) -> PathBuf {
@@ -167,7 +172,11 @@ mod tests {
     /// A library that Standardise has already tidied, so only the checks can object.
     fn tidy(name: &str) -> LibraryRoot {
         let root = LibraryRoot::project(&crate::test_dir(name));
-        for (sub, file, text) in [("symbols", "Test.kicad_sym", SYM.as_bytes()), ("footprints/Test.pretty", "FP.kicad_mod", FP.as_bytes()), ("3dmodels/Test.3dshapes", "p.step", STEP)] {
+        for (sub, file, text) in [
+            ("symbols", "Test.kicad_sym", SYM.as_bytes()),
+            ("footprints/Test.pretty", "FP.kicad_mod", FP.as_bytes()),
+            ("3dmodels/Test.3dshapes", "p.step", STEP),
+        ] {
             std::fs::create_dir_all(root.dir.join(sub)).unwrap();
             std::fs::write(root.dir.join(sub).join(file), text).unwrap();
         }

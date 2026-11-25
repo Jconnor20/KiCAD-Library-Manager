@@ -1,12 +1,12 @@
-//! W7.0 shared look: glyph coverage, status colours, the table, the log levels and the settings hook.
-//! Test IDs (K1…) are the rows of docs/ui-review/W7.0.md.
+//! Shared look: glyph coverage, status colours, the table, the log levels and the settings hook.
+//! Test IDs (K1…) are the ones used in this file.
 
 use super::harness::*;
 use crate::tabs::ui_kit::{self, Col, Level, Section, Sort, Status};
 use crate::{Msg, Tab};
 use eframe::egui::{self, Rect, Vec2};
-use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 
 struct Demo {
     sort: Sort,
@@ -66,7 +66,14 @@ fn ink_of(h: &mut Harness<Demo>, label: &str) -> [f32; 3] {
 fn k1_no_missing_glyphs_on_any_tab() {
     let _env = setup();
     for size in SIZES {
-        for (tab, name) in [(Tab::Search, "search"), (Tab::Import, "import"), (Tab::Library, "library"), (Tab::Bom, "bom"), (Tab::History, "history"), (Tab::Cleanup, "cleanup")] {
+        for (tab, name) in [
+            (Tab::Search, "search"),
+            (Tab::Import, "import"),
+            (Tab::Library, "library"),
+            (Tab::Bom, "bom"),
+            (Tab::History, "history"),
+            (Tab::Cleanup, "cleanup"),
+        ] {
             let mut h = app(size, tab);
             if name == "search" {
                 with_probe(&mut h);
@@ -85,10 +92,11 @@ fn k1_no_missing_glyphs_on_any_tab() {
 fn k1b_every_glyph_in_the_source_is_covered() {
     let _env = setup();
     let h = app(SIZES[0], Tab::Library);
-    let src: String = ["main.rs", "tabs/search.rs", "tabs/library.rs", "tabs/ui_kit.rs", "tabs/settings.rs", "tabs/preview.rs", "tabs/alternatives.rs", "tabs/import.rs"]
-        .iter()
-        .map(|f| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(f)).unwrap())
-        .collect();
+    let src: String =
+        ["main.rs", "tabs/search.rs", "tabs/library.rs", "tabs/ui_kit.rs", "tabs/settings.rs", "tabs/preview.rs", "tabs/alternatives.rs", "tabs/import.rs"]
+            .iter()
+            .map(|f| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(f)).unwrap())
+            .collect();
     let missing: std::collections::BTreeSet<char> = h.ctx.fonts_mut(|f| {
         let id = egui::FontId::proportional(14.0);
         src.chars().filter(|c| !c.is_ascii() && !f.has_glyph(&id, *c)).collect()
@@ -175,7 +183,13 @@ fn k9_header_stays_while_scrolling_and_columns_resize() {
     let header = h.get_by_label("Name").rect();
     h.hover_at(egui::pos2(200.0, 150.0));
     for _ in 0..5 {
-        h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -100.0), phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel, modifiers: egui::Modifiers::NONE });
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -100.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+            modifiers: egui::Modifiers::NONE,
+        });
         h.run_ok();
     }
     assert!(h.query_by_label("row 0").is_none(), "the body did not scroll");

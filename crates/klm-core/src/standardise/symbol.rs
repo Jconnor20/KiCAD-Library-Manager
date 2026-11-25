@@ -61,15 +61,23 @@ fn pin_length(sym: &mut Sexpr, min: f64) -> Option<String> {
     let mut n = 0;
     for pin in units(sym).flat_map(|u| u.items_mut().iter_mut().filter(|c| c.head() == Some("pin"))) {
         let hidden = pin.child("hide").is_some_and(|h| h.arg(0) != Some("no")) || pin.items().contains(&Sexpr::Atom("hide".into()));
-        let (Some(len), Some(dir), Some((x, y))) = (pin.child("length").and_then(|l| num(l, 0)), direction(pin), pin.child("at").and_then(|a| Some((num(a, 0)?, num(a, 1)?)))) else { continue };
+        let (Some(len), Some(dir), Some((x, y))) =
+            (pin.child("length").and_then(|l| num(l, 0)), direction(pin), pin.child("at").and_then(|a| Some((num(a, 0)?, num(a, 1)?))))
+        else {
+            continue;
+        };
         if hidden || len >= min - 1e-4 {
             continue;
         }
         // Keep the body end where it is and move the connection point outwards.
         let grow = min - len;
-        move_to(child_mut(pin, "at").unwrap(), (x - dir.0 * grow, y - dir.1 * grow));
-        set_num(child_mut(pin, "length").unwrap(), 0, min);
-        n += 1;
+        if let Some(at) = child_mut(pin, "at") {
+            move_to(at, (x - dir.0 * grow, y - dir.1 * grow));
+        }
+        if let Some(length) = child_mut(pin, "length") {
+            set_num(length, 0, min);
+            n += 1;
+        }
     }
     (n > 0).then(|| format!("{n} pin(s) lengthened to {} mm", fmt(min)))
 }
@@ -89,7 +97,11 @@ fn line_width(sym: &mut Sexpr, width: f64) -> Option<String> {
 /// Device library. Hidden pins don't count: two visible terminals make a two-pin part. Not for
 /// connectors, whose pin numbers matter: the caller picks by category.
 pub(crate) fn two_pin_labels(sym: &mut Sexpr) -> Option<String> {
-    let pins = sym.children("symbol").flat_map(|u| u.children("pin")).filter(|p| !p.child("hide").is_some_and(|h| h.arg(0) != Some("no")) && !p.items().contains(&Sexpr::Atom("hide".into()))).count();
+    let pins = sym
+        .children("symbol")
+        .flat_map(|u| u.children("pin"))
+        .filter(|p| !p.child("hide").is_some_and(|h| h.arg(0) != Some("no")) && !p.items().contains(&Sexpr::Atom("hide".into())))
+        .count();
     if sym.child("power").is_some() || pins != 2 {
         return None;
     }
@@ -221,6 +233,13 @@ mod tests {
         assert!(two_pin_labels(&mut parse(SYM).unwrap()).is_some());
     }
 
+    #[test]
+    fn malformed_pins_are_skipped() {
+        // Pins with no `at` or no `length` (a hand-edited or foreign file) must not panic the standardise pass.
+        let mut s = parse(r#"(symbol "M" (symbol "M_1_1" (pin input line (length 1) (name "A") (number "1")) (pin input line (at 0 0 0) (name "B") (number "2")) (pin input line (at 0 0 0) (length 1) (name "C") (number "3")) (pin input line (at 5 0 0) (length 1) (name "D") (number "4"))))"#).unwrap();
+        assert_eq!(pin_length(&mut s, 2.54).as_deref(), Some("2 pin(s) lengthened to 2.54 mm"));
+    }
+
     const SYM: &str = r#"(symbol "U1"
         (property "Reference" "U" (at 9 9 90) (effects (font (size 2 2))))
         (property "Value" "U1" (at 9 9 0) (effects (font (size 1.27 1.27))))
@@ -251,7 +270,8 @@ mod tests {
         assert_eq!(to_string(pin.child("at").unwrap()).trim(), "(at -7.54 2.54 0)", "body end stays at x = -5");
         assert_eq!(pin.child("length").unwrap().arg(0), Some("2.54"));
         // Two-pin symbols (resistors) keep their short pins.
-        let mut r = parse(r#"(symbol "R" (symbol "R_1_1" (pin passive line (at 0 3.81 270) (length 1.27)) (pin passive line (at 0 -3.81 90) (length 1.27))))"#).unwrap();
+        let mut r = parse(r#"(symbol "R" (symbol "R_1_1" (pin passive line (at 0 3.81 270) (length 1.27)) (pin passive line (at 0 -3.81 90) (length 1.27))))"#)
+            .unwrap();
         assert!(fix(&mut r, &Rules { pin_length_min: Some(2.54), ..only(Rules::default()) }).is_empty());
     }
 

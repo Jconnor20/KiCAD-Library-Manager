@@ -48,7 +48,12 @@ impl Row {
     }
 
     fn alternative(&self) -> Alternative {
-        Alternative { mpn: self.get("mpn").into(), manufacturer: self.get("manufacturer").into(), supplier_ids: self.supplier_ids(), role: self.get("role").into() }
+        Alternative {
+            mpn: self.get("mpn").into(),
+            manufacturer: self.get("manufacturer").into(),
+            supplier_ids: self.supplier_ids(),
+            role: self.get("role").into(),
+        }
     }
 }
 
@@ -300,7 +305,14 @@ pub fn build(root: &LibraryRoot, store: &Store, manifests: &[Manifest], stock: &
             let mut sym = stock.symbol(p.get("symbol"))?;
             header = header.or_else(|| stock.header(p.get("symbol")));
             rename_symbol(&mut sym, &sanitize(p.get("part_id")));
-            for (field, col) in [("Value", "value"), ("Footprint", "footprint"), ("Datasheet", "datasheet"), ("Description", "description"), ("Manufacturer", "manufacturer"), ("MPN", "mpn")] {
+            for (field, col) in [
+                ("Value", "value"),
+                ("Footprint", "footprint"),
+                ("Datasheet", "datasheet"),
+                ("Description", "description"),
+                ("Manufacturer", "manufacturer"),
+                ("MPN", "mpn"),
+            ] {
                 if !p.get(col).is_empty() {
                     set_property(&mut sym, field, p.get(col));
                 }
@@ -421,7 +433,9 @@ mod tests {
         let root = LibraryRoot::global(dir.join("lib"), dir.join("kicad"));
         std::fs::create_dir_all(&root.table_dir).unwrap();
         let store = Store::open(&dir.join("parts.db")).unwrap();
-        let m = manifest(&format!("{GOOD}R_small,1k,Device:R_Small,Resistor_SMD:R_0603_1608Metric,,,RC0603FR-071KL,YAGEO,,,,preferred\nBAD,1k,Device:R,,,,X9,M,,,,preferred\n"));
+        let m = manifest(&format!(
+            "{GOOD}R_small,1k,Device:R_Small,Resistor_SMD:R_0603_1608Metric,,,RC0603FR-071KL,YAGEO,,,,preferred\nBAD,1k,Device:R,,,,X9,M,,,,preferred\n"
+        ));
         let built = build(&root, &store, &[m], &mut s).unwrap();
         assert_eq!((built.parts, built.libraries, built.skipped.len()), (2, 1, 1));
         let text = std::fs::read_to_string(root.dir.join("symbols/STD_Resistors.kicad_sym")).unwrap();

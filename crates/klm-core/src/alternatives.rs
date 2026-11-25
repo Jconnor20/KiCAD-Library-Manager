@@ -8,8 +8,8 @@
 
 use crate::kicad_env::write_atomic;
 use crate::library::{LibraryRoot, property, sanitize};
-use crate::part::Part;
 use crate::matching::{Kind, key, package_id, package_ids, same_mpn, value_key};
+use crate::part::Part;
 use crate::sexpr;
 use crate::store::{Alternative, Store};
 use anyhow::{Context, Result, bail};
@@ -141,8 +141,7 @@ fn canonical_id(id: &str) -> String {
 /// [`suggest`] without the groups the user rejected. A group is hidden when every pair of its members
 /// was rejected, so a part added to it later brings it back.
 pub fn suggest_unrejected(store: &Store, parts: &[LibPart]) -> Result<Vec<Vec<usize>>> {
-    let rejected: std::collections::HashSet<_> =
-        store.rejected()?.iter().map(|(a, b)| pairs(&[canonical_id(a), canonical_id(b)]).remove(0)).collect();
+    let rejected: std::collections::HashSet<_> = store.rejected()?.iter().map(|(a, b)| pairs(&[canonical_id(a), canonical_id(b)]).remove(0)).collect();
     let mut groups = suggest(parts);
     groups.retain(|g| {
         let ids: Vec<String> = g.iter().map(|&i| canonical_id(&parts[i].member_id())).collect();
@@ -370,7 +369,8 @@ pub fn write_back(root: &LibraryRoot, group: &[Alternative]) -> Result<usize> {
         let mut changed = false;
         for sym in lib.items_mut().iter_mut().filter(|s| s.head() == Some("symbol")) {
             let mpn = property(sym, "MPN").map(str::trim).filter(|m| !m.is_empty()).or(sym.arg(0)).unwrap_or_default().to_string();
-            let lists_member = sym.children("property").any(|p| p.arg(0).is_some_and(|k| k.starts_with("MPN_Alt") && is_alt_field(k)) && p.arg(1).is_some_and(in_group));
+            let lists_member =
+                sym.children("property").any(|p| p.arg(0).is_some_and(|k| k.starts_with("MPN_Alt") && is_alt_field(k)) && p.arg(1).is_some_and(in_group));
             if !in_group(&mpn) && !lists_member {
                 continue;
             }
@@ -463,7 +463,11 @@ mod tests {
         let s = Store::open(&crate::test_dir("alt_write_db").join("parts.db")).unwrap();
         let parts = scan(&root);
         let by = |sym: &str| parts.iter().find(|p| p.symbol == sym).unwrap();
-        let group = confirm(&s, &[by("ERJ-3EKF1002V").as_alternative("substitute"), by("RC0603FR-0710KL").as_alternative("preferred"), by("LM358").as_alternative("obsolete")]).unwrap();
+        let group = confirm(
+            &s,
+            &[by("ERJ-3EKF1002V").as_alternative("substitute"), by("RC0603FR-0710KL").as_alternative("preferred"), by("LM358").as_alternative("obsolete")],
+        )
+        .unwrap();
         assert_eq!(write_back(&root, &group).unwrap(), 4, "both Yageo copies, Panasonic and LM358");
         assert_eq!(crate::snapshot::list(&root).len(), 1, "one snapshot for the whole write");
 
@@ -492,7 +496,15 @@ mod tests {
     }
 
     fn lp(sym: &str, mpn: &str, value: &str, fp: &str) -> LibPart {
-        LibPart { category: "X".into(), symbol: sym.into(), mpn: mpn.into(), manufacturer: String::new(), value: value.into(), footprint: fp.into(), supplier_ids: vec![] }
+        LibPart {
+            category: "X".into(),
+            symbol: sym.into(),
+            mpn: mpn.into(),
+            manufacturer: String::new(),
+            value: value.into(),
+            footprint: fp.into(),
+            supplier_ids: vec![],
+        }
     }
 
     #[test]
@@ -536,7 +548,7 @@ mod tests {
         let stored = s.rejected().unwrap();
         assert!(stored.iter().all(|(a, b)| a.contains("@resc1608x55n") || a.contains("@r_0603") && b.contains('@') && !a.contains("chip:")), "{stored:?}");
         // What a changed alias table does: the stored footprint names resolve to whatever the table says now,
-        // so an entry written under an old package id (W8.3 data) and the raw one hide the same group.
+        // so an entry written under an old package id and the raw one hide the same group.
         s.add_rejected(&[("c1@chip:0603".into(), "d1@chip:0603".into())]).unwrap();
         let more = [lp("c", "C1", "10k", "R_0603"), lp("d", "D1", "10k", "RESC1608X55N")];
         assert!(suggest_unrejected(&s, &more).unwrap().is_empty());
@@ -568,7 +580,10 @@ mod tests {
         assert!(alternatives_of(&s, "RC0603FR-0710KL").unwrap().is_empty());
         let text = std::fs::read_to_string(root.dir.join("symbols/Resistors.kicad_sym")).unwrap();
         assert!(!text.contains("MPN_Alt"), "all _AltN fields gone");
-        assert!(suggest_unrejected(&s, &parts).unwrap().iter().all(|g| !g.contains(&parts.iter().position(|p| p.symbol == "ERJ-3EKF1002V").unwrap())), "not suggested again");
+        assert!(
+            suggest_unrejected(&s, &parts).unwrap().iter().all(|g| !g.contains(&parts.iter().position(|p| p.symbol == "ERJ-3EKF1002V").unwrap())),
+            "not suggested again"
+        );
     }
 
     #[test]
@@ -607,7 +622,12 @@ mod tests {
         let s = Store::open(&crate::test_dir("alt_add_db").join("parts.db")).unwrap();
         let parts = scan(&root);
         let base = parts.iter().find(|p| p.symbol == "RC0603FR-0710KL").unwrap();
-        let alt = Alternative { mpn: "CRCW060310K0FKEA".into(), manufacturer: "Vishay".into(), supplier_ids: vec![("Mouser".into(), "71-CRCW0603-10K".into())], role: "substitute".into() };
+        let alt = Alternative {
+            mpn: "CRCW060310K0FKEA".into(),
+            manufacturer: "Vishay".into(),
+            supplier_ids: vec![("Mouser".into(), "71-CRCW0603-10K".into())],
+            role: "substitute".into(),
+        };
         assert!(add_alternate(&root, &s, base, Alternative { mpn: " ".into(), ..alt.clone() }).is_err());
         assert_eq!(add_alternate(&root, &s, base, alt).unwrap(), 2, "both Yageo copies");
         assert_eq!(alternatives_of(&s, "CRCW060310K0FKEA").unwrap().len(), 2);

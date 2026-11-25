@@ -8,8 +8,8 @@
 //!
 //! Restyling moves pin positions: a schematic that already uses the symbol may need its wires fixed.
 
-pub mod edit;
 mod class;
+pub mod edit;
 pub(crate) mod pintype;
 pub mod shapes;
 mod template;
@@ -269,8 +269,10 @@ fn ic_box(pins: &[Sexpr]) -> (Vec<Sexpr>, Vec<Sexpr>) {
         match twin_new {
             Some(t) => {
                 for c in moved.items_mut() {
-                    if matches!(c.head(), Some("at" | "length")) {
-                        *c = t.child(c.head().unwrap()).cloned().unwrap();
+                    if let Some(h) = c.head().filter(|h| matches!(*h, "at" | "length"))
+                        && let Some(n) = t.child(h)
+                    {
+                        *c = n.clone();
                     }
                 }
             }
@@ -279,15 +281,8 @@ fn ic_box(pins: &[Sexpr]) -> (Vec<Sexpr>, Vec<Sexpr>) {
         out.push(moved);
     }
     let [stroke, fill] = stroke_fill("background");
-    let rect = Sexpr::list(
-        "rectangle",
-        vec![
-            Sexpr::list("start", vec![atom(-hw), atom(y_top)]),
-            Sexpr::list("end", vec![atom(hw), atom(y_bottom)]),
-            stroke,
-            fill,
-        ],
-    );
+    let rect =
+        Sexpr::list("rectangle", vec![Sexpr::list("start", vec![atom(-hw), atom(y_top)]), Sexpr::list("end", vec![atom(hw), atom(y_bottom)]), stroke, fill]);
     (vec![rect], out)
 }
 
@@ -432,7 +427,11 @@ pub fn restyle_part(root: &LibraryRoot, category: &str, name: &str, naming: &rul
     let path = lib_path(root, category);
     let text = std::fs::read_to_string(&path).with_context(|| format!("no library {}", root.nickname(category)))?;
     let mut lib = sexpr::parse(&text)?;
-    let idx = lib.items().iter().position(|c| c.head() == Some("symbol") && c.arg(0) == Some(name)).with_context(|| format!("{name} is not in {}", root.nickname(category)))?;
+    let idx = lib
+        .items()
+        .iter()
+        .position(|c| c.head() == Some("symbol") && c.arg(0) == Some(name))
+        .with_context(|| format!("{name} is not in {}", root.nickname(category)))?;
     if lib.children("symbol").any(|s| s.child("extends").and_then(|e| e.arg(0)) == Some(name)) {
         bail!("other symbols in {} are derived from {name}; restyling it would change them", root.nickname(category));
     }
@@ -516,8 +515,7 @@ pub(crate) fn restyle_imported(category: &str, symbol: &mut Sexpr) {
         NOTE.with(|n| *n.borrow_mut() = Some("Kept the vendor symbol (ICs are not restyled on import)".into()));
         return;
     }
-    let note = match class_of(category, symbol, &naming).and_then(|class| restyle(symbol, class, &profile).map(|new| (class, new)))
-    {
+    let note = match class_of(category, symbol, &naming).and_then(|class| restyle(symbol, class, &profile).map(|new| (class, new))) {
         Ok((class, new)) => {
             *symbol = new;
             format!("Redrew the symbol as {class:?} (house style)")

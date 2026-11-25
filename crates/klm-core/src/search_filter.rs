@@ -55,7 +55,12 @@ pub struct Filter {
 
 impl Filter {
     pub fn is_empty(&self) -> bool {
-        self.hidden_sources.is_empty() && !self.in_stock && self.manufacturer.is_empty() && self.package.is_empty() && self.max_price.is_empty() && self.text.is_empty()
+        self.hidden_sources.is_empty()
+            && !self.in_stock
+            && self.manufacturer.is_empty()
+            && self.package.is_empty()
+            && self.max_price.is_empty()
+            && self.text.is_empty()
     }
 
     fn matches(&self, src: usize, p: &Part, price: &dyn Fn(&Part) -> Option<f64>) -> bool {
@@ -113,7 +118,15 @@ mod tests {
     use super::*;
 
     fn part(mpn: &str, mfr: &str, pkg: &str, stock: Option<u64>, price: &str) -> Part {
-        Part { mpn: mpn.into(), manufacturer: mfr.into(), package: pkg.into(), stock, unit_price: price.into(), description: format!("{mpn} thing"), ..Part::default() }
+        Part {
+            mpn: mpn.into(),
+            manufacturer: mfr.into(),
+            package: pkg.into(),
+            stock,
+            unit_price: price.into(),
+            description: format!("{mpn} thing"),
+            ..Part::default()
+        }
     }
 
     fn unit(p: &Part) -> Option<f64> {

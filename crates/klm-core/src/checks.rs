@@ -7,8 +7,8 @@ use crate::fab_data::FabLimits;
 use crate::fields;
 use crate::library::{LibraryRoot, property, sanitize};
 use crate::part::Part;
-use crate::standardise::profile::Profile;
 use crate::sexpr::{self, Sexpr};
+use crate::standardise::profile::Profile;
 use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -192,7 +192,7 @@ pub fn check_files(symbol: &Path, footprint: &Path, model: Option<&Path>) -> Vec
     let read = || -> anyhow::Result<(Sexpr, Sexpr)> {
         let scratch = crate::preview::scratch_dir(&std::env::temp_dir())?;
         let up = scratch.join("sym.kicad_sym");
-        let lib = crate::kicad_env::upgrade_symbols(symbol, &up).and_then(|_| Ok(sexpr::parse(&std::fs::read_to_string(&up)?)?));
+        let lib = crate::kicad_env::upgrade_symbols(symbol, &up).and_then(|_| sexpr::parse(&std::fs::read_to_string(&up)?));
         let _ = std::fs::remove_dir_all(&scratch);
         Ok((lib?, sexpr::parse(&std::fs::read_to_string(footprint)?)?))
     };
@@ -276,8 +276,13 @@ fn check_duplicate_pins(pins: &[(u32, u32, String)], out: &mut Vec<Issue>) {
     for &u in &units {
         for &s in &styles {
             let mut seen = BTreeSet::new();
-            let dups: Vec<&str> = pins.iter().filter(|p| (p.0 == 0 || p.0 == u) && (p.1 == 0 || p.1 == s)).filter(|p| !seen.insert(&p.2)).map(|p| p.2.as_str()).collect();
-            let msg = format!("Pin number(s) {} used more than once{}", list(dups.iter().copied().collect::<BTreeSet<_>>()), if units.len() > 1 { format!(" in unit {u}") } else { String::new() });
+            let dups: Vec<&str> =
+                pins.iter().filter(|p| (p.0 == 0 || p.0 == u) && (p.1 == 0 || p.1 == s)).filter(|p| !seen.insert(&p.2)).map(|p| p.2.as_str()).collect();
+            let msg = format!(
+                "Pin number(s) {} used more than once{}",
+                list(dups.iter().copied().collect::<BTreeSet<_>>()),
+                if units.len() > 1 { format!(" in unit {u}") } else { String::new() }
+            );
             if !dups.is_empty() && !out.iter().any(|i| i.message == msg) {
                 error(out, msg);
             }
@@ -468,7 +473,11 @@ mod tests {
     fn lib(name: &str, sym: &str, fp: &str, model: &[u8]) -> LibraryRoot {
         let dir = crate::test_dir(name);
         let root = LibraryRoot::project(&dir);
-        for (sub, file, text) in [("symbols", "Test.kicad_sym", sym.as_bytes()), ("footprints/Test.pretty", "FP.kicad_mod", fp.as_bytes()), ("3dmodels/Test.3dshapes", "p.step", model)] {
+        for (sub, file, text) in [
+            ("symbols", "Test.kicad_sym", sym.as_bytes()),
+            ("footprints/Test.pretty", "FP.kicad_mod", fp.as_bytes()),
+            ("3dmodels/Test.3dshapes", "p.step", model),
+        ] {
             std::fs::create_dir_all(root.dir.join(sub)).unwrap();
             std::fs::write(root.dir.join(sub).join(file), text).unwrap();
         }
@@ -522,16 +531,19 @@ mod tests {
 
     #[test]
     fn a_number_shared_by_several_units_is_fine() {
-        let units = SYM.replace(
-            r#"(symbol "P1_1_1""#,
-            r#"(symbol "P1_2_1" (pin passive line (at 0 0 0) (length 2) (name "A") (number "1"))) (symbol "P1_1_1""#,
-        );
+        let units =
+            SYM.replace(r#"(symbol "P1_1_1""#, r#"(symbol "P1_2_1" (pin passive line (at 0 0 0) (length 2) (name "A") (number "1"))) (symbol "P1_1_1""#);
         assert!(messages(&lib("checks_units", &units, FP, STEP)).is_empty());
     }
 
     #[test]
     fn required_fields() {
-        let m = messages(&lib("checks_fields", &SYM.replace(r#"(property "MPN" "P1""#, r#"(property "MPN" "  ""#).replace(r#"(property "Manufacturer" "Acme" (at 0 0 0))"#, ""), FP, STEP));
+        let m = messages(&lib(
+            "checks_fields",
+            &SYM.replace(r#"(property "MPN" "P1""#, r#"(property "MPN" "  ""#).replace(r#"(property "Manufacturer" "Acme" (at 0 0 0))"#, ""),
+            FP,
+            STEP,
+        ));
         assert!(m.len() == 2 && m[0].contains("MPN") && m[1].contains("Manufacturer"), "{m:?}");
     }
 
@@ -545,10 +557,7 @@ mod tests {
     fn pin_1_marker() {
         let same_shape = FP.replace(r#"(pad "1" smd rect"#, r#"(pad "1" smd roundrect"#);
         assert_only(&lib("checks_pin1", SYM, &same_shape, STEP), "pin 1");
-        let with_triangle = same_shape.replace(
-            r#"(pad "1""#,
-            r#"(fp_poly (pts (xy -1.5 -1) (xy -1.8 -1.2) (xy -1.8 -0.8)) (layer "F.SilkS")) (pad "1""#,
-        );
+        let with_triangle = same_shape.replace(r#"(pad "1""#, r#"(fp_poly (pts (xy -1.5 -1) (xy -1.8 -1.2) (xy -1.8 -0.8)) (layer "F.SilkS")) (pad "1""#);
         assert!(messages(&lib("checks_pin1_marked", SYM, &with_triangle, STEP)).is_empty());
         let far_away = with_triangle.replace("-1.5 -1", "-9 -9").replace("-1.8 -1.2", "-9 -9.2").replace("-1.8 -0.8", "-9.2 -9");
         assert_only(&lib("checks_pin1_far", SYM, &far_away, STEP), "pin 1");
@@ -598,7 +607,11 @@ mod tests {
     #[test]
     fn installed_kicad_footprints_pass_the_heuristics() {
         let base = Path::new("C:/Program Files/KiCad/10.0/share/kicad/footprints");
-        for f in ["Package_SO.pretty/SOIC-8_3.9x4.9mm_P1.27mm", "Connector_PinHeader_2.54mm.pretty/PinHeader_1x03_P2.54mm_Vertical", "Package_QFP.pretty/LQFP-48_7x7mm_P0.5mm"] {
+        for f in [
+            "Package_SO.pretty/SOIC-8_3.9x4.9mm_P1.27mm",
+            "Connector_PinHeader_2.54mm.pretty/PinHeader_1x03_P2.54mm_Vertical",
+            "Package_QFP.pretty/LQFP-48_7x7mm_P0.5mm",
+        ] {
             let Ok(text) = std::fs::read_to_string(base.join(format!("{f}.kicad_mod"))) else { return };
             let fp = sexpr::parse(&text).unwrap();
             assert!(on_layer(&fp, &["F.CrtYd"]), "{f}: courtyard");

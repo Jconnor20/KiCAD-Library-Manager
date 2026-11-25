@@ -14,7 +14,9 @@ fn vendor(name: &str, reference: &str, desc: &str, pins: &[(&str, &str, &str, bo
     let pin = |(typ, num, pname, hide): &(&str, &str, &str, bool), i: usize| {
         format!(
             r#"(pin {typ} line (at {} {} 0) (length 1) {}(name "{pname}" (effects (font (size 1 1)))) (number "{num}" (effects (font (size 1 1)))) (alternate "ALT{num}" input line))"#,
-            -7 - i as i32, 3 * i, if *hide { "(hide yes) " } else { "" }
+            -7 - i as i32,
+            3 * i,
+            if *hide { "(hide yes) " } else { "" }
         )
     };
     let pins: String = pins.iter().enumerate().map(|(i, p)| pin(p, i)).collect();
@@ -74,8 +76,24 @@ fn every_class_is_redrawn_and_keeps_its_fields() {
         ("LQ0603", "U", "Power inductor", "Inductors", two("", "").to_vec(), Class::Inductor, "L"),
         ("1N4148", "U", "Switching diode", "Diodes", two("A", "K").to_vec(), Class::Diode, "D"),
         ("LED0603", "U", "Red LED", "Optoelectronics", two("K", "A").to_vec(), Class::Led, "D"),
-        ("BC847", "U", "NPN transistor", "Transistors", vec![("input", "1", "B", false), ("passive", "3", "C", false), ("passive", "2", "E", false)], Class::Npn, "Q"),
-        ("BC857", "U", "PNP transistor", "Transistors", vec![("input", "1", "BASE", false), ("passive", "2", "Emitter", false), ("passive", "3", "Collector", false)], Class::Pnp, "Q"),
+        (
+            "BC847",
+            "U",
+            "NPN transistor",
+            "Transistors",
+            vec![("input", "1", "B", false), ("passive", "3", "C", false), ("passive", "2", "E", false)],
+            Class::Npn,
+            "Q",
+        ),
+        (
+            "BC857",
+            "U",
+            "PNP transistor",
+            "Transistors",
+            vec![("input", "1", "BASE", false), ("passive", "2", "Emitter", false), ("passive", "3", "Collector", false)],
+            Class::Pnp,
+            "Q",
+        ),
     ];
     for (name, reference, desc, category, pins, class, prefix) in cases {
         let (old, new, got) = restyled(name, reference, desc, category, &pins);
@@ -108,7 +126,13 @@ fn pins_go_where_their_role_says() {
 
 #[test]
 fn built_in_two_pin_pins_are_on_the_100_mil_grid_and_unlabelled() {
-    for (name, desc, cat, pins) in [("R1", "Resistor", "Resistors", ("1", "2")), ("C1", "Capacitor", "Capacitors", ("1", "2")), ("L1", "Inductor", "Inductors", ("1", "2")), ("D1", "Diode", "Diodes", ("A", "K")), ("LED1", "Red LED", "Optoelectronics", ("K", "A"))] {
+    for (name, desc, cat, pins) in [
+        ("R1", "Resistor", "Resistors", ("1", "2")),
+        ("C1", "Capacitor", "Capacitors", ("1", "2")),
+        ("L1", "Inductor", "Inductors", ("1", "2")),
+        ("D1", "Diode", "Diodes", ("A", "K")),
+        ("LED1", "Red LED", "Optoelectronics", ("K", "A")),
+    ] {
         let (_, new, _) = restyled(name, "U", desc, cat, &[("passive", "1", pins.0, false), ("passive", "2", pins.1, false)]);
         let on = |v: f64| ((v / 2.54).round() * 2.54 - v).abs() < 1e-6;
         for p in source_pins(&new).unwrap() {
@@ -137,7 +161,20 @@ fn an_edited_built_in_template_is_what_restyle_uses() {
     assert_eq!(pin_at(&new, "1"), "(at 0 7.62 270)");
     let at = |k: &str| to_string(new.children("property").find(|p| p.arg(0) == Some(k)).unwrap().child("at").unwrap()).trim().to_string();
     assert_eq!((at("Reference"), at("Value")), ("(at -2.54 2.54 0)".into(), "(at -2.54 -2.54 0)".into()));
-    let size = |k: &str| new.children("property").find(|p| p.arg(0) == Some(k)).unwrap().child("effects").unwrap().child("font").unwrap().child("size").unwrap().arg(0).unwrap().to_string();
+    let size = |k: &str| {
+        new.children("property")
+            .find(|p| p.arg(0) == Some(k))
+            .unwrap()
+            .child("effects")
+            .unwrap()
+            .child("font")
+            .unwrap()
+            .child("size")
+            .unwrap()
+            .arg(0)
+            .unwrap()
+            .to_string()
+    };
     assert_eq!((size("Reference"), size("Value")), ("2".into(), "1.5".into()));
     assert!(to_string(&new).contains("(start -1.016 -5.08)"), "the edited body is drawn");
 }
@@ -167,7 +204,8 @@ fn ic_box_groups_pins_by_function() {
     let hidden = pin_at(&new, "9");
     assert!(source_pins(&new).unwrap().iter().filter(|p| pin_number(p) != "9").all(|p| to_string(p.child("at").unwrap()).trim() != hidden));
     for p in source_pins(&new).unwrap() {
-        let (x, y) = (p.child("at").and_then(|a| a.arg(0)).unwrap().parse::<f64>().unwrap(), p.child("at").and_then(|a| a.arg(1)).unwrap().parse::<f64>().unwrap());
+        let (x, y) =
+            (p.child("at").and_then(|a| a.arg(0)).unwrap().parse::<f64>().unwrap(), p.child("at").and_then(|a| a.arg(1)).unwrap().parse::<f64>().unwrap());
         assert!(((x / 2.54).round() * 2.54 - x).abs() < 1e-3 && ((y / 2.54).round() * 2.54 - y).abs() < 1e-3, "pin {} off the 100 mil grid", pin_number(&p));
     }
 }
@@ -273,7 +311,11 @@ fn import_step_restyles_or_keeps_the_vendor_symbol() {
 fn kicad_opens_the_generated_symbols() {
     let dir = "C:/Program Files/KiCad/10.0/share/kicad/symbols";
     let Ok(version) = crate::kicad_env::kicad_cli_version() else { return };
-    let (Ok(device), Ok(bjt)) = (std::fs::read_to_string(format!("{dir}/Device.kicad_sym")), std::fs::read_to_string(format!("{dir}/Transistor_BJT.kicad_sym"))) else { return };
+    let (Ok(device), Ok(bjt)) =
+        (std::fs::read_to_string(format!("{dir}/Device.kicad_sym")), std::fs::read_to_string(format!("{dir}/Transistor_BJT.kicad_sym")))
+    else {
+        return;
+    };
     let (device, bjt) = (parse(&device).unwrap(), parse(&bjt).unwrap());
     let get = |lib: &Sexpr, n: &str| lib.children("symbol").find(|s| s.arg(0) == Some(n)).unwrap().clone();
     let mut out = vec![];
@@ -318,7 +360,18 @@ fn corpus_battery_symbols_are_refused() {
 
 #[test]
 fn hidden_pad_pin_stays_on_its_visible_twin_and_extra_hidden_pins_stay_clear() {
-    let mut text = vendor("REG", "U", "LDO", &[("power_in", "1", "VIN", false), ("power_in", "2", "GND", false), ("output", "3", "VOUT", false), ("passive", "4", "EP", true), ("power_in", "5", "VDD", true)]);
+    let mut text = vendor(
+        "REG",
+        "U",
+        "LDO",
+        &[
+            ("power_in", "1", "VIN", false),
+            ("power_in", "2", "GND", false),
+            ("output", "3", "VOUT", false),
+            ("passive", "4", "EP", true),
+            ("power_in", "5", "VDD", true),
+        ],
+    );
     // Stack the exposed pad (4) on GND (2) as vendors do.
     text = text.replace("(at -10 9 0) (length 1) (hide yes)", "(at -8 3 0) (length 1) (hide yes)");
     let sym = parse(&text).unwrap();
@@ -399,22 +452,30 @@ fn set_house_template_takes_the_symbol_and_footprint_style_used_by_restyle_and_s
     let pretty = root.dir.join("footprints/Resistors.pretty");
     std::fs::create_dir_all(&pretty).unwrap();
     // House footprint: text on F.Fab, 1 mm outside the courtyard, 0.15 mm silkscreen.
-    std::fs::write(pretty.join("FP_HOUSE.kicad_mod"), r#"(footprint "FP_HOUSE" (layer "F.Cu")
+    std::fs::write(
+        pretty.join("FP_HOUSE.kicad_mod"),
+        r#"(footprint "FP_HOUSE" (layer "F.Cu")
         (property "Reference" "REF**" (at 0 -2 0) (layer "F.Fab") (effects (font (size 0.8 0.8) (thickness 0.12))))
         (property "Value" "FP_HOUSE" (at 0 2 0) (layer "F.Fab") (effects (font (size 0.8 0.8) (thickness 0.12))))
         (attr smd)
         (fp_line (start -0.5 -0.8) (end 0.5 -0.8) (stroke (width 0.15) (type solid)) (layer "F.SilkS"))
         (fp_rect (start -1.5 -1) (end 1.5 1) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
         (pad "1" smd rect (at -0.8 0) (size 0.6 0.8) (layers "F.Cu"))
-        (pad "2" smd rect (at 0.8 0) (size 0.6 0.8) (layers "F.Cu")))"#).unwrap();
-    std::fs::write(pretty.join("FP_RC0603.kicad_mod"), r#"(footprint "FP_RC0603" (layer "F.Cu")
+        (pad "2" smd rect (at 0.8 0) (size 0.6 0.8) (layers "F.Cu")))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pretty.join("FP_RC0603.kicad_mod"),
+        r#"(footprint "FP_RC0603" (layer "F.Cu")
         (property "Reference" "REF**" (at 0 0 0) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))
         (property "Value" "FP_RC0603" (at 0 0 0) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
         (attr smd)
         (fp_line (start -1 -2) (end 1 -2) (stroke (width 0.2) (type solid)) (layer "F.SilkS"))
         (fp_rect (start -3 -3) (end 3 3) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
         (pad "1" smd rect (at -1 0) (size 1 1) (layers "F.Cu"))
-        (pad "2" smd rect (at 1 0) (size 1 1) (layers "F.Cu")))"#).unwrap();
+        (pad "2" smd rect (at 1 0) (size 1 1) (layers "F.Cu")))"#,
+    )
+    .unwrap();
 
     let mut profile = Profile::default();
     assert_eq!(set_house_template(&mut profile, &root, "Resistors", "R_HOUSE", &rules()).unwrap(), (Class::Resistor, true));
@@ -427,7 +488,10 @@ fn set_house_template_takes_the_symbol_and_footprint_style_used_by_restyle_and_s
 
     let plan = standardise::plan(&root, &profile, &rules());
     let text = plan.to_string();
-    assert!(text.contains("1 F.SilkS line width(s) set to 0.15 mm") && text.contains("Reference and Value placed and styled like the house footprint"), "{text}");
+    assert!(
+        text.contains("1 F.SilkS line width(s) set to 0.15 mm") && text.contains("Reference and Value placed and styled like the house footprint"),
+        "{text}"
+    );
     standardise::apply(&plan).unwrap();
     let fp = parse(&std::fs::read_to_string(pretty.join("FP_RC0603.kicad_mod")).unwrap()).unwrap();
     let flat = |x: &Sexpr| to_string(x).split_whitespace().collect::<Vec<_>>().join(" ").replace("( ", "(").replace(" )", ")");

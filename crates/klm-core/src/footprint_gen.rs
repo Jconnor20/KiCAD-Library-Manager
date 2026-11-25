@@ -126,8 +126,8 @@ impl Dims {
             Family::Sot => {
                 pos(matches!(self.pins, 3 | 5 | 6) && self.pitch > 0.0, "3, 5 or 6 pins and a pitch")?;
             }
-            Family::Soic => pos(self.pins >= 4 && self.pins % 2 == 0 && self.pitch > 0.0, "an even pin count and a pitch")?,
-            _ => pos(self.pins >= 4 && self.pins % 4 == 0 && self.pitch > 0.0, "a pin count divisible by 4 and a pitch")?,
+            Family::Soic => pos(self.pins >= 4 && self.pins.is_multiple_of(2) && self.pitch > 0.0, "an even pin count and a pitch")?,
+            _ => pos(self.pins >= 4 && self.pins.is_multiple_of(4) && self.pitch > 0.0, "a pin count divisible by 4 and a pitch")?,
         }
         // The lead span minus the foot length is not the body of a gull-wing part, so the outline needs the real one.
         pos(self.body.is_some() || matches!(f, Family::Chip | Family::Qfn), "the body size")?;
@@ -479,7 +479,14 @@ mod tests {
     fn sod_123_nominal() {
         // L 3.55–3.85, T 0.25–0.75, W 0.8–1.0, body 2.7 × 1.6 (gull table). CS = √(0.3² + 2·0.5²) = 0.7616, Smax = 3.35 − 0.2192 = 3.1308 (before Jh).
         // Z = 3.55 + 0.7 + 0.3052 = 4.5552; G = 3.1308 − 0.7 − 0.7633 = 1.6139?; len 1.47, centre 1.54, X = 0.8 + 0.06 + 0.2077 = 1.0677.
-        let d = Dims { span: Range::new(3.55, 3.85), lead_len: Range::new(0.25, 0.75), lead_w: Range::new(0.8, 1.0), body: Some((2.7, 1.6)), height: 1.35, ..Default::default() };
+        let d = Dims {
+            span: Range::new(3.55, 3.85),
+            lead_len: Range::new(0.25, 0.75),
+            lead_w: Range::new(0.8, 1.0),
+            body: Some((2.7, 1.6)),
+            height: 1.35,
+            ..Default::default()
+        };
         let (g, fp) = make(Family::Sod, &d, 'B');
         assert_eq!(g.name, "SOD3716X135N");
         near(pad_of(&fp, "2"), (1.54, 0.0, 1.47, 1.07));
@@ -489,7 +496,16 @@ mod tests {
     #[test]
     fn sot23_nominal() {
         // L 2.6–3.0, T 0.3–0.6, W 0.3–0.5, pitch 0.95. Z = 3.7039, G = 0.9058, len 1.40, centre 1.15, X = 0.5677.
-        let d = Dims { pins: 3, pitch: 0.95, span: Range::new(2.6, 3.0), lead_len: Range::new(0.3, 0.6), lead_w: Range::new(0.3, 0.5), body: Some((1.3, 2.9)), height: 1.25, ..Default::default() };
+        let d = Dims {
+            pins: 3,
+            pitch: 0.95,
+            span: Range::new(2.6, 3.0),
+            lead_len: Range::new(0.3, 0.6),
+            lead_w: Range::new(0.3, 0.5),
+            body: Some((1.3, 2.9)),
+            height: 1.25,
+            ..Default::default()
+        };
         let (g, fp) = make(Family::Sot, &d, 'B');
         assert_eq!(g.name, "SOT95P280X125-3N");
         near(pad_of(&fp, "1"), (-1.15, -0.95, 1.4, 0.57));
@@ -501,7 +517,16 @@ mod tests {
     fn soic8_nominal() {
         // L 5.8–6.2, T 0.4–0.7, W 0.31–0.51: CS = √(0.4² + 2·0.3²) = 0.5831, Z = 6.9039, G = 3.9058,
         // len 1.50, centre 2.70, X = 0.5777 (PCB Libraries\' published SOIC-8 is 1.55 at 2.70).
-        let d = Dims { pins: 8, pitch: 1.27, span: Range::new(5.8, 6.2), lead_len: Range::new(0.4, 0.7), lead_w: Range::new(0.31, 0.51), body: Some((3.9, 4.9)), height: 1.75, ..Default::default() };
+        let d = Dims {
+            pins: 8,
+            pitch: 1.27,
+            span: Range::new(5.8, 6.2),
+            lead_len: Range::new(0.4, 0.7),
+            lead_w: Range::new(0.31, 0.51),
+            body: Some((3.9, 4.9)),
+            height: 1.75,
+            ..Default::default()
+        };
         let (g, fp) = make(Family::Soic, &d, 'B');
         assert_eq!(g.name, "SOIC127P600X175-8N");
         near(pad_of(&fp, "1"), (-2.7, -1.91, 1.5, 0.58));
@@ -513,7 +538,17 @@ mod tests {
     fn qfn_nominal_with_thermal_pad() {
         // 4 × 4 body, L 3.9–4.1, T 0.3–0.5, W 0.2–0.3, pitch 0.5, 16 pins (toe-fillet table): Z = 4.7077, G = 3.0223,
         // len 0.84, centre 1.93, X = 0.2346.
-        let d = Dims { pins: 16, pitch: 0.5, span: Range::new(3.9, 4.1), lead_len: Range::new(0.3, 0.5), lead_w: Range::new(0.2, 0.3), body: Some((4.0, 4.0)), height: 0.8, thermal: Some((2.0, 2.0)), ..Default::default() };
+        let d = Dims {
+            pins: 16,
+            pitch: 0.5,
+            span: Range::new(3.9, 4.1),
+            lead_len: Range::new(0.3, 0.5),
+            lead_w: Range::new(0.2, 0.3),
+            body: Some((4.0, 4.0)),
+            height: 0.8,
+            thermal: Some((2.0, 2.0)),
+            ..Default::default()
+        };
         let (g, fp) = make(Family::Qfn, &d, 'B');
         assert_eq!(g.name, "QFN50P400X400X80-17N");
         near(pad_of(&fp, "1"), (-1.93, -0.75, 0.84, 0.23));
@@ -525,7 +560,16 @@ mod tests {
     fn qfp_fine_pitch_nominal() {
         // LQFP-32: 7 × 7 body, lead span 8.8–9.2, T 0.45–0.75, W 0.30–0.45, pitch 0.8 (gull table): Z = 9.9039, G = 6.8058,
         // len 1.55, centre 4.18, X = 0.5201.
-        let d = Dims { pins: 32, pitch: 0.8, span: Range::new(8.8, 9.2), lead_len: Range::new(0.45, 0.75), lead_w: Range::new(0.3, 0.45), body: Some((7.0, 7.0)), height: 1.6, ..Default::default() };
+        let d = Dims {
+            pins: 32,
+            pitch: 0.8,
+            span: Range::new(8.8, 9.2),
+            lead_len: Range::new(0.45, 0.75),
+            lead_w: Range::new(0.3, 0.45),
+            body: Some((7.0, 7.0)),
+            height: 1.6,
+            ..Default::default()
+        };
         let (g, fp) = make(Family::Qfp, &d, 'B');
         assert_eq!(g.name, "QFP80P900X900X160-32N");
         near(pad_of(&fp, "1"), (-4.18, -2.8, 1.55, 0.52));
@@ -545,7 +589,16 @@ mod tests {
 
     #[test]
     fn density_moves_the_land_and_the_courtyard() {
-        let d = Dims { pins: 8, pitch: 1.27, span: Range::new(5.8, 6.2), lead_len: Range::new(0.4, 0.7), lead_w: Range::new(0.31, 0.51), body: Some((3.9, 4.9)), height: 1.75, ..Default::default() };
+        let d = Dims {
+            pins: 8,
+            pitch: 1.27,
+            span: Range::new(5.8, 6.2),
+            lead_len: Range::new(0.4, 0.7),
+            lead_w: Range::new(0.31, 0.51),
+            body: Some((3.9, 4.9)),
+            height: 1.75,
+            ..Default::default()
+        };
         let (most, least) = (make(Family::Soic, &d, 'A').1, make(Family::Soic, &d, 'C').1);
         assert!(pad_of(&most, "1").2 > pad_of(&least, "1").2);
         for (fp, e) in [(&most, 0.5), (&least, 0.1)] {

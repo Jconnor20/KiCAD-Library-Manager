@@ -8,7 +8,20 @@ use crate::{AppCtx, theme};
 use eframe::egui::{self, Align2, FontId, Pos2, RichText, Stroke, Vec2};
 use klm_core::symbols::Class;
 
-const TYPES: [&str; 12] = ["input", "output", "bidirectional", "tri_state", "passive", "free", "unspecified", "power_in", "power_out", "open_collector", "open_emitter", "no_connect"];
+const TYPES: [&str; 12] = [
+    "input",
+    "output",
+    "bidirectional",
+    "tri_state",
+    "passive",
+    "free",
+    "unspecified",
+    "power_in",
+    "power_out",
+    "open_collector",
+    "open_emitter",
+    "no_connect",
+];
 const NOT_BACKED: &str = "Not available yet: KLM can restyle and edit symbols already in a library but doesn't build a new one from a pin table.";
 
 #[derive(Clone, Copy, PartialEq)]
@@ -49,7 +62,15 @@ pub struct SymbolForm {
 
 impl Default for SymbolForm {
     fn default() -> Self {
-        Self { class: Class::Ic, library: "ICs".into(), name: String::new(), value: String::new(), footprint: String::new(), datasheet: String::new(), pins: String::new() }
+        Self {
+            class: Class::Ic,
+            library: "ICs".into(),
+            name: String::new(),
+            value: String::new(),
+            footprint: String::new(),
+            datasheet: String::new(),
+            pins: String::new(),
+        }
     }
 }
 
@@ -69,7 +90,9 @@ fn parse(text: &str) -> (Vec<Pin>, Vec<(usize, String)>) {
     for (i, line) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
         let f: Vec<_> = line.split(',').map(str::trim).collect();
         match f[..] {
-            [number, name, kind] if !number.is_empty() && !name.is_empty() && TYPES.contains(&kind) => pins.push(Pin { number: number.into(), name: name.into(), kind: kind.into(), side: side_of(name, kind) }),
+            [number, name, kind] if !number.is_empty() && !name.is_empty() && TYPES.contains(&kind) => {
+                pins.push(Pin { number: number.into(), name: name.into(), kind: kind.into(), side: side_of(name, kind) })
+            }
             [_, _, kind] => bad.push((i + 1, format!("unknown pin type \"{kind}\""))),
             _ => bad.push((i + 1, "expected number, name, type".into())),
         }
@@ -114,11 +137,14 @@ impl SymbolForm {
             ui.add(egui::TextEdit::singleline(text).hint_text(hint).desired_width(f32::INFINITY));
         };
         ui.label(RichText::new("Class").weak());
-        egui::ComboBox::from_id_salt("sym_class").selected_text(format!("{} · {}", super::classes::name(self.class), self.class.prefix())).width(ui.available_width()).show_ui(ui, |ui| {
-            for c in Class::ALL {
-                ui.selectable_value(&mut self.class, c, format!("{} · {}", super::classes::name(c), c.prefix()));
-            }
-        });
+        egui::ComboBox::from_id_salt("sym_class")
+            .selected_text(format!("{} · {}", super::classes::name(self.class), self.class.prefix()))
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                for c in Class::ALL {
+                    ui.selectable_value(&mut self.class, c, format!("{} · {}", super::classes::name(c), c.prefix()));
+                }
+            });
         field(ui, "Library", &mut self.library, "e.g. ICs");
         field(ui, "Name", &mut self.name, "the MPN, e.g. TPS62130");
         field(ui, "Value", &mut self.value, "defaults to the name");
@@ -128,7 +154,13 @@ impl SymbolForm {
         ui.label(RichText::new("Pins").weak());
         super::standards::seg(ui, 0, &[("Paste a pin table", true, ""), ("From footprint pads", false, NOT_BACKED), ("Blank", false, NOT_BACKED)]);
         ui.add_space(4.0);
-        ui.add(egui::TextEdit::multiline(&mut self.pins).hint_text("1,PGND,power_in\n2,SW,power_out\n3,VIN,power_in\n4,EN,input").font(egui::TextStyle::Monospace).desired_rows(6).desired_width(f32::INFINITY));
+        ui.add(
+            egui::TextEdit::multiline(&mut self.pins)
+                .hint_text("1,PGND,power_in\n2,SW,power_out\n3,VIN,power_in\n4,EN,input")
+                .font(egui::TextStyle::Monospace)
+                .desired_rows(6)
+                .desired_width(f32::INFINITY),
+        );
         ui.weak("One pin per line: number, name, type. Pins are placed by the house standard: inputs left, outputs right, power top and bottom.");
     }
 
@@ -182,7 +214,10 @@ impl SymbolForm {
     fn paint(&self, p: &egui::Painter, rect: egui::Rect, pins: &[Pin], pal: &theme::Palette) {
         let on = |s| pins.iter().filter(|x| x.side == s).count().max(1) as f32;
         let pitch = 18.0f32.min((rect.height() - 120.0) / on(Side::Left).max(on(Side::Right)).max(4.0)).max(8.0);
-        let body = Vec2::new((on(Side::Top).max(on(Side::Bottom)) * pitch + pitch * 4.0).max(pitch * 8.0), (on(Side::Left).max(on(Side::Right)) * pitch + pitch).max(pitch * 5.0));
+        let body = Vec2::new(
+            (on(Side::Top).max(on(Side::Bottom)) * pitch + pitch * 4.0).max(pitch * 8.0),
+            (on(Side::Left).max(on(Side::Right)) * pitch + pitch).max(pitch * 5.0),
+        );
         let b = egui::Rect::from_center_size(rect.center(), body);
         let line = Stroke::new(1.4, pal.fg);
         p.rect(b, 0.0, pal.row, line, egui::StrokeKind::Middle);
@@ -208,7 +243,13 @@ impl SymbolForm {
         }
         let value = if self.value.trim().is_empty() { self.name.trim() } else { self.value.trim() };
         p.text(b.left_top() - Vec2::new(0.0, len + 6.0), Align2::LEFT_BOTTOM, format!("{}?", self.class.prefix()), FontId::proportional(12.0), pal.accent);
-        p.text(b.left_bottom() + Vec2::new(0.0, len + 6.0), Align2::LEFT_TOP, if value.is_empty() { "Value" } else { value }, FontId::proportional(12.0), pal.accent);
+        p.text(
+            b.left_bottom() + Vec2::new(0.0, len + 6.0),
+            Align2::LEFT_TOP,
+            if value.is_empty() { "Value" } else { value },
+            FontId::proportional(12.0),
+            pal.accent,
+        );
     }
 }
 
@@ -218,13 +259,15 @@ mod tests {
 
     #[test]
     fn pins_are_parsed_and_placed_by_type() {
-        let (pins, bad) = parse("1,PGND,power_in
+        let (pins, bad) = parse(
+            "1,PGND,power_in
 2,SW,power_out
 
 3,VIN,power_in
 4,EN,input
 5,X,weird
-nope");
+nope",
+        );
         let sides: Vec<_> = pins.iter().map(|p| p.side.label()).collect();
         assert_eq!(sides, ["Bottom", "Right", "Top", "Left"]);
         assert_eq!(bad.iter().map(|b| b.0).collect::<Vec<_>>(), [6, 7]);

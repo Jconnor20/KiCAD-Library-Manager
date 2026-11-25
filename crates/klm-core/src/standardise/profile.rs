@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The profile used when none is chosen: the KiCad Library Conventions.
-// shortcut: only KLC is built in; W10 adds fab/IPC profiles once a profile can hold those settings.
+// shortcut: only KLC is built in; fab/IPC profiles come once a profile can hold those settings.
 pub const BUILT_IN: &str = "KLC";
 
 /// Format version written into every profile, for later migrations.
@@ -40,7 +40,15 @@ pub struct Profile {
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { name: BUILT_IN.into(), version: VERSION, rules: Rules::default(), templates: BTreeMap::new(), footprint_styles: BTreeMap::new(), classes: BTreeMap::new(), fab: Default::default() }
+        Self {
+            name: BUILT_IN.into(),
+            version: VERSION,
+            rules: Rules::default(),
+            templates: BTreeMap::new(),
+            footprint_styles: BTreeMap::new(),
+            classes: BTreeMap::new(),
+            fab: Default::default(),
+        }
     }
 }
 
@@ -142,7 +150,10 @@ mod tests {
         assert!(old.templates.is_empty() && old.footprint_styles.is_empty());
         let mut p = Profile { name: "Acme".into(), ..Profile::default() };
         p.templates.insert("Resistor".into(), "(symbol \"R\" (property \"Reference\" \"R\"))".into());
-        p.footprint_styles.insert("Resistor".into(), FootprintStyle { widths: [("F.SilkS".to_string(), 0.15)].into(), pin1: Some("(fp_circle)".into()), ..Default::default() });
+        p.footprint_styles.insert(
+            "Resistor".into(),
+            FootprintStyle { widths: [("F.SilkS".to_string(), 0.15)].into(), pin1: Some("(fp_circle)".into()), ..Default::default() },
+        );
         assert_eq!(parse(&serde_json::to_string_pretty(&p).unwrap(), "x").unwrap(), p);
     }
 }

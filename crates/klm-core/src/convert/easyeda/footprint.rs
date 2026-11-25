@@ -85,14 +85,21 @@ fn pad(ctx: &mut Ctx, f: &[&str]) -> Option<String> {
 
     let mut s = format!("(pad {number:?} {kind} {shape} {at} ");
     if shape == "custom" {
-        let outline: Vec<String> = points(g(10)).into_iter().map(|p| {
-            let q = ctx.pt(p);
-            format!("(xy {} {})", fmt(q.0 - pos.0), fmt(q.1 - pos.1))
-        }).collect();
+        let outline: Vec<String> = points(g(10))
+            .into_iter()
+            .map(|p| {
+                let q = ctx.pt(p);
+                format!("(xy {} {})", fmt(q.0 - pos.0), fmt(q.1 - pos.1))
+            })
+            .collect();
         if outline.len() < 3 {
             return None;
         }
-        let _ = write!(s, "(size 0.1 0.1) (layers {layers}) (options (clearance outline) (anchor circle)) (primitives (gr_poly (pts {}) (width 0) (fill yes)))", outline.join(" "));
+        let _ = write!(
+            s,
+            "(size 0.1 0.1) (layers {layers}) (options (clearance outline) (anchor circle)) (primitives (gr_poly (pts {}) (width 0) (fill yes)))",
+            outline.join(" ")
+        );
     } else {
         let _ = write!(s, "(size {} {}) (layers {layers})", fmt(w), fmt(h));
         if drilled {
@@ -132,7 +139,15 @@ fn graphics(ctx: &mut Ctx, f: &[&str]) -> String {
             if let Some(layer) = layer_name(g(5)) {
                 let (c, r) = ((num(g(1)), num(g(2))), num(g(3)));
                 let (m, e) = (ctx.pt(c), ctx.pt((c.0 + r, c.1)));
-                let _ = writeln!(out, "(fp_circle (center {} {}) (end {} {}) {} (fill none) (layer {layer:?}))", fmt(m.0), fmt(m.1), fmt(e.0), fmt(e.1), stroke(num(g(4)) * MM_PER_UNIT));
+                let _ = writeln!(
+                    out,
+                    "(fp_circle (center {} {}) (end {} {}) {} (fill none) (layer {layer:?}))",
+                    fmt(m.0),
+                    fmt(m.1),
+                    fmt(e.0),
+                    fmt(e.1),
+                    stroke(num(g(4)) * MM_PER_UNIT)
+                );
             }
         }
         "ARC" => {
@@ -141,7 +156,17 @@ fn graphics(ctx: &mut Ctx, f: &[&str]) -> String {
                     if let Some(Seg::Arc(a)) = sub.segs.first() {
                         let (_, mid) = arc_centre_mid(sub.start, a);
                         let (p1, pm, p2) = (ctx.pt(sub.start), ctx.pt(mid), ctx.pt(a.to));
-                        let _ = writeln!(out, "(fp_arc (start {} {}) (mid {} {}) (end {} {}) {} (layer {layer:?}))", fmt(p1.0), fmt(p1.1), fmt(pm.0), fmt(pm.1), fmt(p2.0), fmt(p2.1), stroke(num(g(1)) * MM_PER_UNIT));
+                        let _ = writeln!(
+                            out,
+                            "(fp_arc (start {} {}) (mid {} {}) (end {} {}) {} (layer {layer:?}))",
+                            fmt(p1.0),
+                            fmt(p1.1),
+                            fmt(pm.0),
+                            fmt(pm.1),
+                            fmt(p2.0),
+                            fmt(p2.1),
+                            stroke(num(g(1)) * MM_PER_UNIT)
+                        );
                     }
                 }
             }
@@ -150,20 +175,36 @@ fn graphics(ctx: &mut Ctx, f: &[&str]) -> String {
             if let Some(layer) = layer_name(g(5)) {
                 let (x, y) = (num(g(1)), num(g(2)));
                 let (a, b) = (ctx.pt((x, y)), ctx.pt((x + num(g(3)), y + num(g(4)))));
-                let _ = writeln!(out, "(fp_rect (start {} {}) (end {} {}) {} (fill none) (layer {layer:?}))", fmt(a.0), fmt(a.1), fmt(b.0), fmt(b.1), stroke(num(g(8)) * MM_PER_UNIT));
+                let _ = writeln!(
+                    out,
+                    "(fp_rect (start {} {}) (end {} {}) {} (fill none) (layer {layer:?}))",
+                    fmt(a.0),
+                    fmt(a.1),
+                    fmt(b.0),
+                    fmt(b.1),
+                    stroke(num(g(8)) * MM_PER_UNIT)
+                );
             }
         }
         "SOLIDREGION" => {
             // Cut-outs inside copper pours have no footprint equivalent.
             if let (Some(layer), "solid" | "npth") = (layer_name(g(1)), g(4)) {
-                let (layer, filled) = if g(4) == "npth" { ("Edge.Cuts", false) } else { (layer, matches!(layer, "F.SilkS" | "B.SilkS" | "F.Cu" | "B.Cu" | "F.Mask" | "B.Mask" | "F.Paste" | "B.Paste")) };
+                let (layer, filled) = if g(4) == "npth" {
+                    ("Edge.Cuts", false)
+                } else {
+                    (layer, matches!(layer, "F.SilkS" | "B.SilkS" | "F.Cu" | "B.Cu" | "F.Mask" | "B.Mask" | "F.Paste" | "B.Paste"))
+                };
                 for sub in parse_path(g(3)) {
-                    let pts: Vec<String> = flatten(&sub).into_iter().map(|p| {
-                        let q = ctx.pt(p);
-                        format!("(xy {} {})", fmt(q.0), fmt(q.1))
-                    }).collect();
+                    let pts: Vec<String> = flatten(&sub)
+                        .into_iter()
+                        .map(|p| {
+                            let q = ctx.pt(p);
+                            format!("(xy {} {})", fmt(q.0), fmt(q.1))
+                        })
+                        .collect();
                     if pts.len() >= 3 {
-                        let _ = writeln!(out, "(fp_poly (pts {}) {} (fill {}) (layer {layer:?}))", pts.join(" "), stroke(0.0), if filled { "yes" } else { "no" });
+                        let _ =
+                            writeln!(out, "(fp_poly (pts {}) {} (fill {}) (layer {layer:?}))", pts.join(" "), stroke(0.0), if filled { "yes" } else { "no" });
                     }
                 }
             }
@@ -172,14 +213,31 @@ fn graphics(ctx: &mut Ctx, f: &[&str]) -> String {
             // HOLE~x~y~radius ; VIA~x~y~diameter~net~holeRadius
             let (p, d) = (ctx.pt((num(g(1)), num(g(2)))), if f[0] == "HOLE" { num(g(3)) * 2.0 } else { num(g(5)) * 2.0 } * MM_PER_UNIT);
             let (kind, pad_d, number) = if f[0] == "HOLE" { ("np_thru_hole", d, "") } else { ("thru_hole", num(g(3)) * MM_PER_UNIT, "") };
-            let _ = writeln!(out, "(pad {number:?} {kind} circle (at {} {}) (size {} {}) (drill {}) (layers \"*.Cu\" \"*.Mask\"))", fmt(p.0), fmt(p.1), fmt(pad_d), fmt(pad_d), fmt(d));
+            let _ = writeln!(
+                out,
+                "(pad {number:?} {kind} circle (at {} {}) (size {} {}) (drill {}) (layers \"*.Cu\" \"*.Mask\"))",
+                fmt(p.0),
+                fmt(p.1),
+                fmt(pad_d),
+                fmt(pad_d),
+                fmt(d)
+            );
         }
         "TEXT" => {
             // Types "P" and "N" are the reference and name; KiCad has its own.
             if let (Some(layer), true) = (layer_name(g(7)), g(1) == "L" && !g(10).is_empty()) {
                 let p = ctx.pt((num(g(2)), num(g(3))));
                 let size = (num(g(9)) * MM_PER_UNIT).clamp(0.5, 2.0);
-                let _ = writeln!(out, "(fp_text user {:?} (at {} {} {}) (layer {layer:?}) (effects (font (size {} {}) (thickness 0.15))))", g(10), fmt(p.0), fmt(p.1), fmt(kicad_angle(num(g(5)))), fmt(size), fmt(size));
+                let _ = writeln!(
+                    out,
+                    "(fp_text user {:?} (at {} {} {}) (layer {layer:?}) (effects (font (size {} {}) (thickness 0.15))))",
+                    g(10),
+                    fmt(p.0),
+                    fmt(p.1),
+                    fmt(kicad_angle(num(g(5)))),
+                    fmt(size),
+                    fmt(size)
+                );
             }
         }
         _ => {}
@@ -192,13 +250,23 @@ fn graphics(ctx: &mut Ctx, f: &[&str]) -> String {
 /// `c_origin` and `z` as offsets visibly displaces the body, checked against KiCad's 3D render).
 fn model(ds: &Value) -> Option<(String, String)> {
     let shapes = ds["shape"].as_array()?;
-    let attrs = shapes.iter().filter_map(|s| s.as_str()?.strip_prefix("SVGNODE~")).filter_map(|j| serde_json::from_str::<Value>(j).ok()).map(|v| v["attrs"].clone()).find(|a| a["c_etype"] == "outline3D")?;
+    let attrs = shapes
+        .iter()
+        .filter_map(|s| s.as_str()?.strip_prefix("SVGNODE~"))
+        .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+        .map(|v| v["attrs"].clone())
+        .find(|a| a["c_etype"] == "outline3D")?;
     let uuid = attrs["uuid"].as_str()?.to_string();
     let rot: Vec<f64> = attrs["c_rotation"].as_str().unwrap_or("").split(',').map(num).collect();
     let r = |i: usize| rot.get(i).copied().unwrap_or(0.0);
     // Z turns the opposite way in KiCad (checked on SO-8, SOT-23 and USB-C); X is taken as given (checked on one JST XH).
-    let text = format!("(model \"model.step\" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz {} {} {})))
-", fmt(r(0)), fmt(r(1)), fmt(-r(2)));
+    let text = format!(
+        "(model \"model.step\" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz {} {} {})))
+",
+        fmt(r(0)),
+        fmt(r(1)),
+        fmt(-r(2))
+    );
     Some((uuid, text))
 }
 
@@ -234,9 +302,15 @@ pub fn convert(name: &str, docs: &Docs, ds: &Value) -> Footprint {
     let [_, y0, _, y1] = ctx.bbox.unwrap_or([-1.0, -1.0, 1.0, 1.0]);
     let mut out = String::new();
     let _ = writeln!(out, "(footprint {name:?} (version 20240108) (generator \"klm\") (generator_version \"1.0\") (layer \"F.Cu\")");
-    let _ = writeln!(out, "(descr {:?})
-(tags {:?})", docs.description, docs.tags);
-    let text = |k: &str, v: &str, y: f64, layer: &str| format!("(property {k:?} {v:?} (at 0 {}) (layer {layer:?}) (effects (font (size 1 1) (thickness 0.15))))\n", fmt(y));
+    let _ = writeln!(
+        out,
+        "(descr {:?})
+(tags {:?})",
+        docs.description, docs.tags
+    );
+    let text = |k: &str, v: &str, y: f64, layer: &str| {
+        format!("(property {k:?} {v:?} (at 0 {}) (layer {layer:?}) (effects (font (size 1 1) (thickness 0.15))))\n", fmt(y))
+    };
     out += &text("Reference", "REF**", y0 - 1.0, "F.SilkS");
     out += &text("Value", name, y1 + 1.0, "F.Fab");
     let _ = writeln!(out, "(property \"Datasheet\" {:?} (at 0 0 0) (layer \"F.Fab\") (hide yes) (effects (font (size 1 1) (thickness 0.15))))", docs.datasheet);
@@ -244,7 +318,14 @@ pub fn convert(name: &str, docs: &Docs, ds: &Value) -> Footprint {
     out += &gfx;
     if let Some([px0, py0, px1, py1]) = ctx.pad_bbox {
         const MARGIN: f64 = 0.25;
-        let _ = writeln!(out, "(fp_rect (start {} {}) (end {} {}) (stroke (width 0.05) (type solid)) (fill none) (layer \"F.CrtYd\"))", fmt(px0 - MARGIN), fmt(py0 - MARGIN), fmt(px1 + MARGIN), fmt(py1 + MARGIN));
+        let _ = writeln!(
+            out,
+            "(fp_rect (start {} {}) (end {} {}) (stroke (width 0.05) (type solid)) (fill none) (layer \"F.CrtYd\"))",
+            fmt(px0 - MARGIN),
+            fmt(py0 - MARGIN),
+            fmt(px1 + MARGIN),
+            fmt(py1 + MARGIN)
+        );
     }
     out += &pads;
     let model_uuid = m.map(|(uuid, text)| {

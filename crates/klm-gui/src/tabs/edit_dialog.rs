@@ -9,9 +9,15 @@ use klm_core::store::{Alternative, Store};
 pub enum EditAction {
     None,
     Cancel,
-    Apply { scope: Scope, targets: Vec<(String, String)>, edit: PartEdit },
+    Apply {
+        scope: Scope,
+        targets: Vec<(String, String)>,
+        edit: PartEdit,
+    },
     /// The Delete… button: the Library tab shows what deleting these would remove.
-    Delete { targets: Vec<(String, String)> },
+    Delete {
+        targets: Vec<(String, String)>,
+    },
 }
 
 /// Fields that take a whole row; the others sit two to a row.
@@ -64,7 +70,12 @@ impl EditDialog {
         let current = (self.targets.len() == 1).then(|| self.targets[0].0.as_str());
         PartEdit {
             category: Some(self.category.trim().to_string()).filter(|c| !c.is_empty() && Some(c.as_str()) != current),
-            fields: self.fields.iter().filter(|(_, now, was)| now.trim() != was).map(|(k, now, _)| (k.to_string(), if *k == "MPN" { self.rules.normalise_mpn(now) } else { now.trim().to_string() })).collect(),
+            fields: self
+                .fields
+                .iter()
+                .filter(|(_, now, was)| now.trim() != was)
+                .map(|(k, now, _)| (k.to_string(), if *k == "MPN" { self.rules.normalise_mpn(now) } else { now.trim().to_string() }))
+                .collect(),
         }
     }
 
@@ -140,10 +151,10 @@ impl EditDialog {
                 }
             });
         });
-        if let Some(c) = suggestion {
-            if ui.button(format!("Use {c}")).on_hover_text("Category from your naming rules").clicked() {
-                self.category = c;
-            }
+        if let Some(c) = suggestion
+            && ui.button(format!("Use {c}")).on_hover_text("Category from your naming rules").clicked()
+        {
+            self.category = c;
         }
         let field = |ui: &mut egui::Ui, f: &mut (&'static str, String, String)| {
             ui.label(RichText::new(f.0).weak().size(12.0));

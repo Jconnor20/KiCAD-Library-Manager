@@ -100,7 +100,7 @@ pub fn prune_cache(cache: &Path, max_age: Duration) {
 /// Names of the symbols in a symbol file, in file order; any format `kicad-cli` can upgrade.
 pub fn symbol_names(file: &Path) -> Result<Vec<String>> {
     let scratch = scratch_dir(&std::env::temp_dir())?;
-    let lib = as_kicad_sym(file, &scratch).and_then(|p| Ok(sexpr::parse(&std::fs::read_to_string(p)?)?));
+    let lib = as_kicad_sym(file, &scratch).and_then(|p| sexpr::parse(&std::fs::read_to_string(p)?));
     let _ = std::fs::remove_dir_all(&scratch);
     Ok(lib?.children("symbol").filter_map(|s| s.arg(0).map(String::from)).collect())
 }
@@ -172,12 +172,7 @@ fn cache_key(kind: Kind, src: &Sources) -> Result<u64> {
 fn find_output(dir: &Path, ext: &str, prefer: &str) -> Result<PathBuf> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)?.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == ext)).collect();
     files.sort();
-    files
-        .iter()
-        .find(|p| p.to_string_lossy().ends_with(prefer))
-        .or(files.first())
-        .cloned()
-        .context("kicad-cli drew nothing (is the file a valid KiCad file?)")
+    files.iter().find(|p| p.to_string_lossy().ends_with(prefer)).or(files.first()).cloned().context("kicad-cli drew nothing (is the file a valid KiCad file?)")
 }
 
 fn draw_symbol(src: &Sources, scratch: &Path) -> Result<PathBuf> {
@@ -205,7 +200,8 @@ fn draw_footprint(src: &Sources, scratch: &Path) -> Result<PathBuf> {
     std::fs::copy(file, pretty.join("fp.kicad_mod"))?;
     let out = scratch.join("svg");
     std::fs::create_dir_all(&out)?;
-    let args: [&OsStr; 9] = ["fp".as_ref(), "export".as_ref(), "svg".as_ref(), "--fp".as_ref(), "fp".as_ref(), "-l".as_ref(), LAYERS.as_ref(), "-o".as_ref(), out.as_os_str()];
+    let args: [&OsStr; 9] =
+        ["fp".as_ref(), "export".as_ref(), "svg".as_ref(), "--fp".as_ref(), "fp".as_ref(), "-l".as_ref(), LAYERS.as_ref(), "-o".as_ref(), out.as_os_str()];
     run_cli(&[&args[..], &[pretty.as_os_str()]].concat()).map_err(short)?;
     find_output(&out, "svg", "fp.svg")
 }
@@ -246,8 +242,21 @@ fn draw_model(src: &Sources, scratch: &Path) -> Result<PathBuf> {
     std::fs::write(&board, format!("{BOARD_HEAD}{})\n", sexpr::to_string(&fp)))?;
     let png = scratch.join("model.png");
     let args: [&OsStr; 15] = [
-        "pcb".as_ref(), "render".as_ref(), "-o".as_ref(), png.as_os_str(), "-w".as_ref(), "480".as_ref(), "-h".as_ref(), "360".as_ref(),
-        "--rotate".as_ref(), "-45,0,45".as_ref(), "--zoom".as_ref(), "0.8".as_ref(), "--background".as_ref(), "opaque".as_ref(), board.as_os_str(),
+        "pcb".as_ref(),
+        "render".as_ref(),
+        "-o".as_ref(),
+        png.as_os_str(),
+        "-w".as_ref(),
+        "480".as_ref(),
+        "-h".as_ref(),
+        "360".as_ref(),
+        "--rotate".as_ref(),
+        "-45,0,45".as_ref(),
+        "--zoom".as_ref(),
+        "0.8".as_ref(),
+        "--background".as_ref(),
+        "opaque".as_ref(),
+        board.as_os_str(),
     ];
     run_cli(&args).map_err(short)?;
     Ok(png)

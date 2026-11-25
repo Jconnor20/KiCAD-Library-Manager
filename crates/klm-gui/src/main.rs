@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use tabs::ui_kit::{Level, Section};
-use tabs::{bom, bom_import, classes, cleanup, footprint_gen, health, history, import, library, search, settings};
+use tabs::{bom, bom_import, classes, cleanup, footprint_gen, health, history, import, library, project_check, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
@@ -47,6 +47,8 @@ enum Msg {
     /// Add queued libraries to KiCad's tables, after the close-KiCad prompt if it is open.
     ApplyPending,
     MoveGlobal(PathBuf),
+    /// A newer release exists: (version, release page).
+    Update(String, String),
     Search(search::Msg),
     Import(import::Msg),
     Library(library::Msg),
@@ -68,6 +70,7 @@ enum Tab {
     Cleanup,
     Classes,
     Health,
+    ProjectCheck,
     Footprint,
 }
 
@@ -206,6 +209,7 @@ struct App {
     cleanup_tab: cleanup::CleanupTab,
     classes_tab: classes::ClassesTab,
     health_tab: health::HealthTab,
+    project_check_tab: project_check::ProjectCheckTab,
     footprint_tab: footprint_gen::FootprintTab,
     bom_tab: bom::BomTab,
     bom_import_tab: bom_import::BomImportTab,
@@ -213,6 +217,8 @@ struct App {
     log_open: bool,
     checklist_hidden: bool,
     omni: shell::Omni,
+    /// A newer release, once the start-up check has found one.
+    update: Option<(String, String)>,
 }
 
 fn main() -> eframe::Result {
@@ -229,7 +235,7 @@ fn main() -> eframe::Result {
 /// Window size and position are remembered between runs, in the config folder (so a sandbox keeps them too).
 fn native_options() -> eframe::NativeOptions {
     eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 800.0]).with_title("KiCad Library Manager"),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 800.0]).with_title(concat!("KiCad Library Manager ", env!("CARGO_PKG_VERSION"))),
         persistence_path: klm_core::settings::app_dir().map(|d| d.join("window.ron")),
         ..Default::default()
     }
@@ -290,6 +296,7 @@ impl App {
             cleanup_tab: cleanup::CleanupTab::default(),
             classes_tab: Default::default(),
             health_tab: Default::default(),
+            project_check_tab: Default::default(),
             footprint_tab: footprint_gen::FootprintTab::default(),
             bom_tab: bom::BomTab::default(),
             bom_import_tab: bom_import::BomImportTab::default(),
@@ -297,12 +304,30 @@ impl App {
             log_open: false,
             checklist_hidden: false,
             omni: shell::Omni::default(),
+            update: None,
             cx,
             rx,
         };
         app.apply_pending();
         app.check_links();
+        app.check_update();
         app
+    }
+
+    /// One worker asks GitHub for the latest release; failures (offline, no release yet) are silent. Never under a sandbox, i.e. tests.
+    fn check_update(&self) {
+        if !self.cx.settings.check_updates || klm_core::settings::sandbox_dir().is_some() {
+            return;
+        }
+        let (tx, ctx) = (self.cx.tx.clone(), self.cx.ctx.clone());
+        std::thread::spawn(move || {
+            if let Ok((version, url)) = klm_core::update::latest_release()
+                && klm_core::update::is_newer(&version, env!("CARGO_PKG_VERSION"))
+            {
+                let _ = tx.send(Msg::Update(version, url));
+                ctx.request_repaint();
+            }
+        });
     }
 
     /// Adds queued libraries to KiCad's tables if KiCad is closed.
@@ -340,37 +365,23 @@ impl App {
         }
     }
 
+    /// Re-adds missing libraries on a worker (it can copy footprints into projects), logging what it did.
     fn relink(&mut self) {
-        let cx = &mut self.cx;
-        let mut any = false;
-        for root in cx.roots() {
-            match root.fix_old_paths() {
-                Ok(0) => {}
-                Ok(n) => {
-                    cx.log.push(format!("Replaced ${{KLM_LIB}} with {} in {n} files", root.dir.display()));
-                    any = true;
-                }
-                Err(e) => cx.log.push(format!("Could not update old paths: {e:#}")),
+        let (roots, tx, ctx) = (self.cx.roots(), self.cx.tx.clone(), self.cx.ctx.clone());
+        std::thread::spawn(move || {
+            let r = LibraryRoot::relink_all(&roots);
+            for n in r.notes {
+                let _ = tx.send(Msg::Log(n));
             }
-            for cat in root.unlinked() {
-                match root.link(&cat) {
-                    Ok(_) => cx.log.push(format!("Re-linked {} in KiCad", root.nickname(&cat))),
-                    Err(e) => cx.log.push(format!("Could not re-link {}: {e:#}", root.nickname(&cat))),
-                }
-                any = true;
+            for e in r.errors {
+                let _ = tx.send(Msg::LogAt(Level::Error, e));
             }
-            for note in klm_core::shadow::sync_shadowing_projects(&root, false).notes() {
-                cx.log.push(note);
-                any = true;
+            if r.changed && kicad_env::kicad_running() {
+                let _ = tx.send(Msg::Log("KiCad is open: the changes are queued and re-checked when it closes.".into()));
             }
-        }
-        if any && kicad_env::kicad_running() {
-            cx.log.push("KiCad is open: the changes are queued and re-checked when it closes.".into());
-        }
-        if !any {
-            cx.log.push("All KLM libraries are already in KiCad's library list.".into());
-        }
-        cx.send(Msg::Library(library::Msg::Refresh));
+            let _ = tx.send(Msg::Library(library::Msg::Refresh));
+            ctx.request_repaint();
+        });
     }
 
     /// Moves the global library (or adopts it where the user moved it) and fixes every path.
@@ -400,6 +411,7 @@ impl App {
                 }
                 Msg::ApplyPending => self.apply_pending(),
                 Msg::MoveGlobal(dir) => self.move_global(&dir),
+                Msg::Update(version, url) => self.update = Some((version, url)),
                 Msg::Search(m) => self.search_tab.handle(m, &mut self.cx),
                 Msg::Import(m) => self.import_tab.handle(m, &mut self.cx),
                 Msg::Library(m) => self.library_tab.handle(m, &mut self.cx),
@@ -446,7 +458,7 @@ impl App {
     /// The first-run steps still open, each with a button to the Settings page for it. Hidden once all are done.
     fn checklist(&mut self, ui: &mut egui::Ui) {
         let cx = &self.cx;
-        // W7.1 adds Libraries / KiCad / Sources / Watch folders pages; point each step at its own then.
+        // The Settings sections (Libraries, KiCad, Sources, Watch folders) could each get their own step here.
         let steps = [
             ("Global library", cx.settings.global_root.is_some(), Section::Libraries),
             ("KiCad found", cx.kicad_config.is_ok(), Section::KiCad),

@@ -89,7 +89,10 @@ pub(crate) fn expand(uri: &str, project_dir: &Path, config: Option<&Path>) -> Op
     while let Some(open) = s.find("${") {
         let len = s[open..].find('}')?;
         let var = &s[open + 2..open + len];
-        let value = std::env::var(var).ok().or_else(|| user.get(var).cloned()).or_else(|| crate::kicad_env::default_var_dir(var).map(|d| d.to_string_lossy().into_owned()))?;
+        let value = std::env::var(var)
+            .ok()
+            .or_else(|| user.get(var).cloned())
+            .or_else(|| crate::kicad_env::default_var_dir(var).map(|d| d.to_string_lossy().into_owned()))?;
         s.replace_range(open..open + len + 1, &value);
     }
     Some(s)
@@ -176,8 +179,15 @@ pub fn scan(project_dir: &Path, global_tables: Option<&Path>) -> Vec<Finding> {
         };
         for sym in lib.children("symbol") {
             let name = sym.arg(0).unwrap_or_default();
-            if let Some((nick, _)) = property(sym, "Footprint").and_then(|f| f.split_once(':')) && !fp_nicks.contains(nick) {
-                out.add(Severity::Error, "library-reference", format!("{cat}/{name}"), format!("Footprint library {nick} is in neither the project's nor the global fp-lib-table"));
+            if let Some((nick, _)) = property(sym, "Footprint").and_then(|f| f.split_once(':'))
+                && !fp_nicks.contains(nick)
+            {
+                out.add(
+                    Severity::Error,
+                    "library-reference",
+                    format!("{cat}/{name}"),
+                    format!("Footprint library {nick} is in neither the project's nor the global fp-lib-table"),
+                );
             }
         }
         symbol_text += &text;
@@ -208,7 +218,8 @@ pub fn scan(project_dir: &Path, global_tables: Option<&Path>) -> Vec<Finding> {
         }
     }
     // A part with no footprint is already reported above; the field check would say it again.
-    let no_footprint: BTreeSet<(String, String)> = parts.iter().filter(|p| p.footprint == Check::Missing).map(|p| (p.category.clone(), p.name.clone())).collect();
+    let no_footprint: BTreeSet<(String, String)> =
+        parts.iter().filter(|p| p.footprint == Check::Missing).map(|p| (p.category.clone(), p.name.clone())).collect();
     let mut part_issues: Vec<_> = checks::check_library(&root).into_iter().collect();
     part_issues.sort_by(|a, b| a.0.cmp(&b.0));
     for ((cat, name), issues) in part_issues {
@@ -430,14 +441,26 @@ mod tests {
     #[test]
     fn schematic_symbols_missing_from_every_library() {
         let dir = project("health_sch");
-        std::fs::write(dir.join("a.kicad_sch"), sch(&[("PRJ_Test:P1", "U1"), ("PRJ_Test:Gone", "U2"), ("PRJ_Test:Gone", "U3"), ("Nowhere:X", "U4"), ("power:GND", "#PWR01"), ("PRJ_Test:Gone", "#FLG1")])).unwrap();
+        std::fs::write(
+            dir.join("a.kicad_sch"),
+            sch(&[
+                ("PRJ_Test:P1", "U1"),
+                ("PRJ_Test:Gone", "U2"),
+                ("PRJ_Test:Gone", "U3"),
+                ("Nowhere:X", "U4"),
+                ("power:GND", "#PWR01"),
+                ("PRJ_Test:Gone", "#FLG1"),
+            ]),
+        )
+        .unwrap();
         let f: Vec<_> = scan(&dir, None).into_iter().filter(|f| f.kind == "schematic-symbol").collect();
         assert_eq!(f.len(), 2, "one per symbol, not per placement: {f:?}");
         assert!(f[0].item == "Nowhere:X" && f[0].message.contains("neither"));
         assert!(f[1].item == "PRJ_Test:Gone" && f[1].message.contains("U2 (a.kicad_sch), U3 (a.kicad_sch)") && !f[1].message.contains("#FLG"), "{f:?}");
         // A library on an unresolvable path variable is trusted; a healthy placement is clean.
         let g = crate::test_dir("health_sch_global");
-        std::fs::write(g.join("sym-lib-table"), "(sym_lib_table (lib (name \"Device\") (type \"KiCad\") (uri \"${KLM_TEST_UNSET_VAR}/Device.kicad_sym\")))").unwrap();
+        std::fs::write(g.join("sym-lib-table"), "(sym_lib_table (lib (name \"Device\") (type \"KiCad\") (uri \"${KLM_TEST_UNSET_VAR}/Device.kicad_sym\")))")
+            .unwrap();
         std::fs::write(dir.join("a.kicad_sch"), sch(&[("PRJ_Test:P1", "U1"), ("Device:R", "R1")])).unwrap();
         assert!(!scan(&dir, Some(&g)).iter().any(|f| f.kind == "schematic-symbol"));
     }
@@ -450,8 +473,13 @@ mod tests {
         std::fs::create_dir_all(&libs).unwrap();
         std::fs::write(libs.join("Device.kicad_sym"), SYM).unwrap();
         // The variable comes from kicad_common.json, as KiCad's Configure Paths dialog stores it.
-        std::fs::write(g.join("kicad_common.json"), format!(r#"{{"environment":{{"vars":{{"KLM_TEST_LIBS":"{}"}}}}}}"#, libs.to_string_lossy().replace('\\', "/"))).unwrap();
-        std::fs::write(g.join("sym-lib-table"), "(sym_lib_table (lib (name \"Device\") (type \"KiCad\") (uri \"${KLM_TEST_LIBS}/Device.kicad_sym\")))").unwrap();
+        std::fs::write(
+            g.join("kicad_common.json"),
+            format!(r#"{{"environment":{{"vars":{{"KLM_TEST_LIBS":"{}"}}}}}}"#, libs.to_string_lossy().replace('\\', "/")),
+        )
+        .unwrap();
+        std::fs::write(g.join("sym-lib-table"), "(sym_lib_table (lib (name \"Device\") (type \"KiCad\") (uri \"${KLM_TEST_LIBS}/Device.kicad_sym\")))")
+            .unwrap();
         std::fs::write(dir.join("a.kicad_sch"), sch(&[("Device:P1", "U1"), ("Device:Gone", "U2")])).unwrap();
         let f: Vec<_> = scan(&dir, Some(&g)).into_iter().filter(|f| f.kind == "schematic-symbol").collect();
         assert_eq!(f.len(), 1, "{f:?}");
@@ -494,7 +522,11 @@ mod tests {
         let f = found(&dir);
         assert!(f.iter().any(|m| m.starts_with("Error library-reference") && m.contains("Ghost")), "{f:?}");
         let global = crate::test_dir("health_global");
-        std::fs::write(global.join("fp-lib-table"), "(fp_lib_table (version 7) (lib (name \"Ghost\") (type \"KiCad\") (uri \"x\") (options \"\") (descr \"\")))").unwrap();
+        std::fs::write(
+            global.join("fp-lib-table"),
+            "(fp_lib_table (version 7) (lib (name \"Ghost\") (type \"KiCad\") (uri \"x\") (options \"\") (descr \"\")))",
+        )
+        .unwrap();
         assert!(!scan(&dir, Some(&global)).iter().any(|f| f.kind == "library-reference"));
 
         // A project library with the global one's name shadows it.

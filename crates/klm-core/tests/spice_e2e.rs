@@ -71,8 +71,7 @@ fn foreign_scan_preserves_spice_files_and_sets_device_and_pins() {
     let dir = fresh("foreign-sim");
     let kicad_dir = dir.join("vendor_lib");
     std::fs::create_dir_all(kicad_dir.join("sim")).unwrap();
-    let sym = format!(
-        r#"(kicad_symbol_lib (version 20241209) (generator kicad_symbol_editor)
+    let sym = r#"(kicad_symbol_lib (version 20241209) (generator kicad_symbol_editor)
   (symbol "1N4148" (in_bom yes) (on_board yes)
     (property "Reference" "D" (at 0 2.54 0) (effects (font (size 1.27 1.27))))
     (property "Value" "1N4148" (at 0 -2.54 0) (effects (font (size 1.27 1.27))))
@@ -86,13 +85,9 @@ fn foreign_scan_preserves_spice_files_and_sets_device_and_pins() {
     )
   )
 )"#
-    );
+    .to_string();
     std::fs::write(kicad_dir.join("Diodes.kicad_sym"), sym).unwrap();
-    std::fs::write(
-        kicad_dir.join("sim/diodes.mod"),
-        ".model BAV99 D(IS=4n)\n.model 1N4148 D(IS=2.52n RS=0.568 N=1.752 BV=100)\n",
-    )
-    .unwrap();
+    std::fs::write(kicad_dir.join("sim/diodes.mod"), ".model BAV99 D(IS=4n)\n.model 1N4148 D(IS=2.52n RS=0.568 N=1.752 BV=100)\n").unwrap();
 
     let scan = foreign::scan(&kicad_dir, &Rules::default(), &dir.join("work")).unwrap();
     assert_eq!(scan.parts.len(), 1);
@@ -132,11 +127,7 @@ fn close_variant_matching_and_datasheet_plus_similar_generation_on_import() {
     let lm358_sym = src.join("LM358.kicad_sym");
     let lm358_sp = src.join("LM358.lib");
     std::fs::write(&lm358_sym, opamp_symbol("LM358")).unwrap();
-    std::fs::write(
-        &lm358_sp,
-        ".subckt LM358 IN+ IN- VCC VEE OUT\nRin IN+ IN- 2Meg\nEout OUT 0 IN+ IN- 100k\n.ends LM358\n",
-    )
-    .unwrap();
+    std::fs::write(&lm358_sp, ".subckt LM358 IN+ IN- VCC VEE OUT\nRin IN+ IN- 2Meg\nEout OUT 0 IN+ IN- 100k\n.ends LM358\n").unwrap();
     root.add_part(
         &Part {
             mpn: "LM358".into(),
@@ -197,11 +188,7 @@ fn close_variant_matching_and_datasheet_plus_similar_generation_on_import() {
     let b5819_sym = src.join("B5819W.kicad_sym");
     let b5819_pdf = src.join("B5819W.pdf");
     std::fs::write(&b5819_sym, diode_symbol("B5819W")).unwrap();
-    std::fs::write(
-        &b5819_pdf,
-        make_pdf("B5819W 40V 1A Schottky Barrier Diode Forward Voltage Vf 0.45V Reverse Voltage VRRM 40V"),
-    )
-    .unwrap();
+    std::fs::write(&b5819_pdf, make_pdf("B5819W 40V 1A Schottky Barrier Diode Forward Voltage Vf 0.45V Reverse Voltage VRRM 40V")).unwrap();
     root.add_part(
         &Part {
             mpn: "B5819W".into(),
@@ -241,12 +228,7 @@ fn close_variant_matching_and_datasheet_plus_similar_generation_on_import() {
     )
     .unwrap();
     root.add_part(
-        &Part {
-            mpn: "GRM188R71H104KA93D".into(),
-            description: "100nF 50V X7R MLCC Capacitor".into(),
-            symbol_file: Some(cap_sym),
-            ..Default::default()
-        },
+        &Part { mpn: "GRM188R71H104KA93D".into(), description: "100nF 50V X7R MLCC Capacitor".into(), symbol_file: Some(cap_sym), ..Default::default() },
         "Capacitors",
         false,
     )

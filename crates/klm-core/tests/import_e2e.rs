@@ -148,19 +148,9 @@ fn import_to_global_and_project() {
     // KiCad itself must be able to load what we wrote.
     let cli = kicad_env::kicad_cli().unwrap();
     let out = fresh("svg");
-    let sym_ok = Command::new(&cli)
-        .args(["sym", "export", "svg", "-o"])
-        .arg(&out)
-        .arg(global.dir.join("symbols/ICs.kicad_sym"))
-        .output()
-        .unwrap();
+    let sym_ok = Command::new(&cli).args(["sym", "export", "svg", "-o"]).arg(&out).arg(global.dir.join("symbols/ICs.kicad_sym")).output().unwrap();
     assert!(sym_ok.status.success(), "{}", String::from_utf8_lossy(&sym_ok.stderr));
-    let fp_ok = Command::new(&cli)
-        .args(["fp", "export", "svg", "-o"])
-        .arg(&out)
-        .arg(global.dir.join("footprints/ICs.pretty"))
-        .output()
-        .unwrap();
+    let fp_ok = Command::new(&cli).args(["fp", "export", "svg", "-o"]).arg(&out).arg(global.dir.join("footprints/ICs.pretty")).output().unwrap();
     assert!(fp_ok.status.success(), "{}", String::from_utf8_lossy(&fp_ok.stderr));
     assert!(std::fs::read_dir(&out).unwrap().count() >= 2);
 }

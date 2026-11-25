@@ -20,6 +20,8 @@ try {
         'plugins/klm.exe'          = 'target/release/klm.exe'
         'resources/icon.png'       = 'kicad_plugin/icon-64.png'
     }
+    # The standard-library manifests go next to klm.exe, where KLM looks for them.
+    foreach ($f in (Get-ChildItem stdlib -File | Where-Object { $_.Extension -eq '.csv' -or $_.Name -eq 'README.md' })) { $files["plugins/stdlib/$($f.Name)"] = "stdlib/$($f.Name)" }
     $meta.versions[0] | Add-Member -NotePropertyName install_size -NotePropertyValue (($files.Values | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Sum).Sum)
 
     New-Item -ItemType Directory -Force dist | Out-Null

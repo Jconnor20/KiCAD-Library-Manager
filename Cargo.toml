@@ -3,9 +3,14 @@ members = ["crates/klm-core", "crates/klm-gui", "crates/klm-cli"]
 resolver = "2"
 
 [workspace.package]
-version = "0.10.0"
+version = "1.0.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
+description = "Find, import, check, price and maintain parts in KiCad libraries"
+repository = "https://github.com/Jconnor20/KiCAD-Library-Manager"
+readme = "README.md"
+keywords = ["kicad", "eda", "pcb", "electronics", "library"]
+categories = ["command-line-utilities", "science"]
 
 # Keep target/ small: line tables are enough for backtraces, and the incremental cache grew to 12 GB.
 [profile.dev]

@@ -3,8 +3,8 @@
 use super::page_kit;
 use super::search;
 use super::ui_kit::{self, Col, Level, Section, Sort};
-use crate::{AppCtx, Msg as AppMsg, Tab};
 use crate::theme;
+use crate::{AppCtx, Msg as AppMsg, Tab};
 use eframe::egui::{self, RichText};
 use klm_core::alternatives::LibPart;
 use klm_core::bom::{self, Lifecycle, Line, ProjectBom, Quote, Row, Status};
@@ -21,6 +21,8 @@ pub struct Loaded {
     project: std::path::PathBuf,
     lines: Vec<Line>,
     quotes: Vec<Vec<Quote>>,
+    /// Quotes for the lines' alternates, by MPN.
+    alt_quotes: Vec<(String, Vec<Quote>)>,
     lib: Vec<LibPart>,
     rates: Option<Rates>,
     notes: Vec<String>,
@@ -99,18 +101,21 @@ impl BomTab {
     pub fn seed(&mut self, cx: &AppCtx, project: std::path::PathBuf, lines: Vec<Line>, quotes: Vec<Vec<Quote>>, lib: Vec<LibPart>) {
         self.settings = ProjectBom::load(&project);
         self.project = Some(project.clone());
-        self.loaded = Some(Loaded { project, lines, quotes, lib, rates: None, notes: vec![] });
+        self.loaded = Some(Loaded { project, lines, quotes, alt_quotes: vec![], lib, rates: None, notes: vec![] });
         self.reprice(cx);
     }
 
-    /// Prices the alternate `alt` of line `i` in place of the line's own part. The quotes were for the old part, so the
-    /// line shows no price until the BOM is read again, which also puts the schematic's part back.
+    /// Prices the alternate `alt` of line `i` in place of the line's own part, from the alternates' quotes (none when
+    /// they weren't read). Reading the BOM again puts the schematic's part back.
     fn swap(&mut self, i: usize, alt: &klm_core::store::Alternative, cx: &mut AppCtx) {
         let Some(l) = &mut self.loaded else { return };
         let line = &mut l.lines[i];
         cx.log(Level::Info, format!("BOM: showing {} in place of {} for {}; the schematic is unchanged", alt.mpn, line.mpn, line.refs.join(" ")));
+        // Keep the old part's quotes so it can be swapped back.
+        let old = std::mem::take(&mut l.quotes[i]);
+        l.alt_quotes.push((line.mpn.clone(), old));
         (line.mpn, line.manufacturer, line.supplier_ids) = (alt.mpn.clone(), alt.manufacturer.clone(), alt.supplier_ids.clone());
-        l.quotes[i].clear();
+        l.quotes[i] = l.alt_quotes.iter().rev().find(|(m, _)| klm_core::matching::same_mpn(m, &alt.mpn)).map(|(_, q)| q.clone()).unwrap_or_default();
         self.reprice(cx);
     }
 
@@ -123,6 +128,7 @@ impl BomTab {
         let store = Store::default_path().and_then(|p| Store::open(&p).ok());
         self.priced_in = Self::target(cx);
         self.rows = bom::build_rows(l.lines.clone(), &l.lib, store.as_ref(), l.quotes.clone(), self.settings.boards, &self.priced_in, l.rates.as_ref());
+        bom::align(&mut self.rows, self.settings.assembler, &l.alt_quotes);
     }
 
     fn load(&mut self, cx: &mut AppCtx, project: std::path::PathBuf) {
@@ -136,12 +142,16 @@ impl BomTab {
                 let store = Store::default_path().and_then(|p| Store::open(&p).ok());
                 let (dist, mut notes) = bom::distributors(&settings, &region);
                 let ttl = settings.cache_ttl_minutes.unwrap_or(cache::DEFAULT_TTL_MINUTES) as i64 * 60;
-                let (quotes, problems) = bom::fetch_quotes(&lines, &dist, store.as_ref(), ttl);
+                // The alternates go through the same lookup in one pass, so an offline source times out once.
+                let alts = bom::alternate_lines(&lines, store.as_ref());
+                let all: Vec<Line> = lines.iter().chain(&alts).cloned().collect();
+                let (mut quotes, problems) = bom::fetch_quotes(&all, &dist, store.as_ref(), ttl);
+                let alt_quotes = alts.into_iter().map(|a| a.mpn).zip(quotes.split_off(lines.len())).collect();
                 notes.extend(problems);
                 if !region.is_empty() {
                     notes.push(format!("Shipping region {region}: used by DigiKey (site and currency). LCSC and Mouser prices do not change with it."));
                 }
-                Ok(Loaded { project: project.clone(), lines, quotes, lib: bom::lib_parts(&roots), rates: Rates::load().ok(), notes })
+                Ok(Loaded { project: project.clone(), lines, quotes, alt_quotes, lib: bom::lib_parts(&roots), rates: Rates::load().ok(), notes })
             })()
             .map_err(|e| format!("{e:#}"));
             let _ = tx.send(AppMsg::Bom(Msg::Loaded(res)));
@@ -191,32 +201,45 @@ impl BomTab {
                 .add(egui::TextEdit::singleline(&mut self.settings.region).hint_text(hint).desired_width(90.0))
                 .on_hover_text("Country code (US, DE, ...) for this project; empty uses the Settings default. Where you are, or where the board is made.")
                 .lost_focus();
-            if self.settings.region.is_empty() && cx.settings.shipping_region.is_empty() && ui.link("Set in Settings…").on_hover_text("No region anywhere: DigiKey prices use its default site").clicked() {
+            ui.label("Assembler");
+            let before = self.settings.assembler;
+            egui::ComboBox::from_id_salt("bom-assembler").selected_text(before.label()).show_ui(ui, |ui| {
+                for a in bom::Assembler::ALL {
+                    ui.selectable_value(&mut self.settings.assembler, a, a.label());
+                }
+            });
+            let changed = self.settings.assembler != before;
+            (reprice, save) = (reprice || changed, save || changed);
+            if self.settings.region.is_empty()
+                && cx.settings.shipping_region.is_empty()
+                && ui.link("Set in Settings…").on_hover_text("No region anywhere: DigiKey prices use its default site").clicked()
+            {
                 cx.open_settings(Section::Bom);
             }
             if self.running {
                 ui.spinner();
             }
-            if ui.add_enabled(!self.rows.is_empty(), egui::Button::new("Export CSV…")).clicked() {
-                if let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom.csv").save_file() {
-                    let csv = bom::to_csv(&self.rows, self.settings.boards, &self.priced_in);
-                    cx.log.push(match std::fs::write(&path, csv) {
-                        Ok(()) => format!("Wrote {}", path.display()),
-                        Err(e) => format!("Could not write {}: {e}", path.display()),
-                    });
-                }
+            if ui.add_enabled(!self.rows.is_empty(), egui::Button::new("Export CSV…")).clicked()
+                && let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom.csv").save_file()
+            {
+                let csv = bom::to_csv(&self.rows, self.settings.boards, &self.priced_in);
+                cx.log.push(match std::fs::write(&path, csv) {
+                    Ok(()) => format!("Wrote {}", path.display()),
+                    Err(e) => format!("Could not write {}: {e}", path.display()),
+                });
             }
-            if page_kit::primary(ui, !self.running, "Read BOM and prices").on_hover_text("Runs kicad-cli, then asks the enabled distributors (cached results are reused)").clicked() {
+            if page_kit::primary(ui, !self.running, "Read BOM and prices")
+                .on_hover_text("Runs kicad-cli, then asks the enabled distributors (cached results are reused)")
+                .clicked()
+            {
                 self.load(cx, project.clone());
             }
         });
         if reprice || (self.priced_in != Self::target(cx) && self.loaded.is_some()) {
             self.reprice(cx);
         }
-        if save {
-            if let Err(e) = self.settings.save(&project) {
-                cx.log.push(format!("BOM: {e:#}"));
-            }
+        if save && let Err(e) = self.settings.save(&project) {
+            cx.log.push(format!("BOM: {e:#}"));
         }
         ui.add_space(4.0);
         if self.rows.is_empty() {
@@ -240,22 +263,50 @@ impl BomTab {
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Filter refs, MPN, maker…").desired_width(200.0));
-            if ui.add(egui::Button::new("Shortfalls only").selected(self.shortfalls)).on_hover_text("Lines missing from the library, without a price, or with less stock than the boards need").clicked() {
+            if ui
+                .add(egui::Button::new("Shortfalls only").selected(self.shortfalls))
+                .on_hover_text("Lines missing from the library, without a price, or with less stock than the boards need")
+                .clicked()
+            {
                 self.shortfalls = !self.shortfalls;
             }
-            if ui.add(egui::Button::new(format!("Not in library {not_in_library}")).selected(self.not_in_library)).on_hover_text("Lines the library doesn't have yet").clicked() {
+            if ui
+                .add(egui::Button::new(format!("Not in library {not_in_library}")).selected(self.not_in_library))
+                .on_hover_text("Lines the library doesn't have yet")
+                .clicked()
+            {
                 self.not_in_library = !self.not_in_library;
+            }
+            let picks: Vec<(usize, klm_core::store::Alternative)> =
+                self.rows.iter().enumerate().filter_map(|(i, r)| Some((i, r.alternatives[r.pick?].clone()))).collect();
+            let hint = format!(
+                "Show the alternate that suits {} best on each line: {}",
+                self.settings.assembler.label(),
+                match self.settings.assembler {
+                    bom::Assembler::Jlc => "JLC basic, then preferred, then extended (in stock at JLC), then in stock anywhere",
+                    bom::Assembler::Distributor => "active and in stock at DigiKey, then at Mouser",
+                }
+            );
+            if !picks.is_empty() && ui.button(format!("Use best alternates ({})", picks.len())).on_hover_text(hint).clicked() {
+                for (i, alt) in picks {
+                    self.swap(i, &alt, cx);
+                }
             }
             let summary = bom::assembly_summary(&self.rows).text();
             if !summary.is_empty() {
-                ui.label(RichText::new(format!("JLCPCB: {summary}.")).color(pal.muted).size(12.0))
-                    .on_hover_text("Class and stock come from LCSC's listing, lifecycle from DigiKey and Mouser. \"?\" means no source said, not that the part is missing.");
+                ui.label(RichText::new(format!("JLCPCB: {summary}.")).color(pal.muted).size(12.0)).on_hover_text(
+                    "Class and stock come from LCSC's listing, lifecycle from DigiKey and Mouser. \"?\" means no source said, not that the part is missing.",
+                );
             }
         });
         ui.add_space(4.0);
         let needle = self.filter.trim().to_lowercase();
         let mut view: Vec<usize> = (0..self.rows.len())
-            .filter(|&i| (needle.is_empty() || matches(&self.rows[i], &needle)) && (!self.shortfalls || shortfall(&self.rows[i], boards)) && (!self.not_in_library || self.rows[i].status.missing_cad()))
+            .filter(|&i| {
+                (needle.is_empty() || matches(&self.rows[i], &needle))
+                    && (!self.shortfalls || shortfall(&self.rows[i], boards))
+                    && (!self.not_in_library || self.rows[i].status.missing_cad())
+            })
             .collect();
         let mut sort = self.sort.unwrap_or(Sort { col: usize::MAX, asc: true });
         if sort.col != usize::MAX {
@@ -285,97 +336,105 @@ impl BomTab {
         egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| {
             ui.set_min_width(940.0);
             ui_kit::table(ui, "bom", &cols, &mut sort, view.len(), |n, row| {
-            let i = view[n];
-            let r = &rows[i];
-            row.set_selected(selected == Some(i));
-            row.col(|ui| {
-                ui.label(RichText::new(r.line.refs.join(" ")).monospace()).on_hover_text(r.line.refs.join(" "));
-            });
-            row.col(|ui| {
-                ui.label((r.line.qty() * boards).to_string());
-            });
-            row.col(|ui| {
-                ui.label(RichText::new(mpn_of(r)).monospace());
-            });
-            row.col(|ui| {
-                ui.horizontal(|ui| {
-                    let ok = matches!(r.status, Status::Found { has_footprint: true, .. });
-                    ui_kit::badge(ui, &bom::library_label(&r.status), if ok { Level::Ok } else { Level::Warn });
-                    if r.status.missing_cad() && !mpn_of(r).is_empty() {
-                        if ui.small_button("Search").on_hover_text("Open Search with this MPN (copied to the clipboard)").clicked() {
-                            search = Some(mpn_of(r).to_string());
-                        }
-                        import |= ui.small_button("Import").on_hover_text("Open Import to add a downloaded ZIP or library for it").clicked();
-                    }
+                let i = view[n];
+                let r = &rows[i];
+                row.set_selected(selected == Some(i));
+                row.col(|ui| {
+                    ui.label(RichText::new(r.line.refs.join(" ")).monospace()).on_hover_text(r.line.refs.join(" "));
                 });
-            });
-            row.col(|ui| {
-                ui.horizontal(|ui| {
-                    let a = &r.assembly;
-                    if a.jlc.is_some() {
-                        ui_kit::badge(ui, bom::jlc_label(a), if a.jlc == Some(bom::JlcType::Basic) { Level::Ok } else { Level::Info });
-                    } else {
-                        ui.weak("?");
+                row.col(|ui| {
+                    ui.label((r.line.qty() * boards).to_string());
+                });
+                row.col(|ui| {
+                    ui.label(RichText::new(mpn_of(r)).monospace());
+                });
+                row.col(|ui| {
+                    ui.horizontal(|ui| {
+                        let ok = matches!(r.status, Status::Found { has_footprint: true, .. });
+                        ui_kit::badge(ui, &bom::library_label(&r.status), if ok { Level::Ok } else { Level::Warn });
+                        if r.status.missing_cad() && !mpn_of(r).is_empty() {
+                            if ui.small_button("Search").on_hover_text("Open Search with this MPN (copied to the clipboard)").clicked() {
+                                search = Some(mpn_of(r).to_string());
+                            }
+                            import |= ui.small_button("Import").on_hover_text("Open Import to add a downloaded ZIP or library for it").clicked();
+                        }
+                    });
+                });
+                row.col(|ui| {
+                    ui.horizontal(|ui| {
+                        let a = &r.assembly;
+                        if a.jlc.is_some() {
+                            ui_kit::badge(ui, bom::jlc_label(a), if a.jlc == Some(bom::JlcType::Basic) { Level::Ok } else { Level::Info });
+                        } else {
+                            ui.weak("?");
+                        }
+                        if a.out_of_stock() {
+                            ui_kit::badge(ui, "no stock", Level::Error);
+                        }
+                        if let Some(l) = a.lifecycle.filter(|l| *l != Lifecycle::Active) {
+                            ui_kit::badge(ui, bom::lifecycle_label(Some(l)), if l == Lifecycle::Nrnd { Level::Warn } else { Level::Error });
+                        }
+                        if a.flagged() {
+                            let found = if let Status::Found { symbol, .. } = &r.status { Some(symbol.clone()) } else { None };
+                            let btn = ui
+                                .add_enabled(found.is_some(), egui::Button::new("Swap").small())
+                                .on_hover_text("Find a part JLCPCB stocks in the same package")
+                                .on_disabled_hover_text("Needs the part in your library first");
+                            if btn.clicked() {
+                                swap_jlc = found;
+                            }
+                        }
+                    });
+                });
+                row.col(|ui| {
+                    let alts = r.alternatives.as_slice();
+                    if alts.is_empty() {
+                        return;
                     }
-                    if a.out_of_stock() {
-                        ui_kit::badge(ui, "no stock", Level::Error);
+                    let text = match r.pick {
+                        Some(k) => format!("better: {}", alts[k].mpn),
+                        None if alts.len() == 1 => alts[0].mpn.clone(),
+                        None => format!("{} alternates", alts.len()),
+                    };
+                    ui.menu_button(format!("{text} ▾"), |ui| {
+                        for (k, a) in alts.iter().enumerate() {
+                            let best = if r.pick == Some(k) { ", best for the assembler" } else { "" };
+                            if ui.button(format!("{} ({}{best})", a.mpn, a.role)).on_hover_text("Show this part in place of the line's own").clicked() {
+                                swap = Some((i, a.clone()));
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+                match &r.best {
+                    Some(b) => {
+                        let q = &r.quotes[b.quote];
+                        row.col(|ui| {
+                            ui.label(format!("{}{}", q.source, if q.stale { " (old)" } else { "" }));
+                        });
+                        row.col(|ui| {
+                            let text = RichText::new(q.stock.map_or("?".into(), |s| s.to_string()));
+                            ui.label(if q.stock.is_some_and(|s| s < r.line.qty() * boards) { text.color(Level::Warn.color(ui.visuals())) } else { text });
+                        });
+                        row.col(|ui| {
+                            ui.label(format!("{:.4} / {:.2}", b.priced.unit, b.priced.ext)).on_hover_text(format!("{} bought", b.priced.bought));
+                        });
+                        row.col(|ui| {
+                            ui.label(b.lead_days.map_or("?".into(), |d| if d == 0 { "in stock".into() } else { format!("{d} d") }));
+                        });
                     }
-                    if let Some(l) = a.lifecycle.filter(|l| *l != Lifecycle::Active) {
-                        ui_kit::badge(ui, bom::lifecycle_label(Some(l)), if l == Lifecycle::Nrnd { Level::Warn } else { Level::Error });
-                    }
-                    if a.flagged() {
-                        let found = if let Status::Found { symbol, .. } = &r.status { Some(symbol.clone()) } else { None };
-                        let btn = ui.add_enabled(found.is_some(), egui::Button::new("Swap").small()).on_hover_text("Find a part JLCPCB stocks in the same package").on_disabled_hover_text("Needs the part in your library first");
-                        if btn.clicked() {
-                            swap_jlc = found;
+                    None => {
+                        row.col(|ui| {
+                            ui.weak("no price");
+                        });
+                        for _ in 0..3 {
+                            row.col(|_| {});
                         }
                     }
-                });
-            });
-            row.col(|ui| {
-                let alts = r.alternatives.as_slice();
-                if alts.is_empty() {
-                    return;
                 }
-                let text = if let [a] = alts { a.mpn.clone() } else { format!("{} alternates", alts.len()) };
-                ui.menu_button(format!("{text} ▾"), |ui| {
-                    for a in alts {
-                        if ui.button(format!("{} ({})", a.mpn, a.role)).on_hover_text("Show this part in place of the line's own").clicked() {
-                            swap = Some((i, a.clone()));
-                            ui.close();
-                        }
-                    }
-                });
-            });
-            match &r.best {
-                Some(b) => {
-                    let q = &r.quotes[b.quote];
-                    row.col(|ui| {
-                        ui.label(format!("{}{}", q.source, if q.stale { " (old)" } else { "" }));
-                    });
-                    row.col(|ui| {
-                        let text = RichText::new(q.stock.map_or("?".into(), |s| s.to_string()));
-                        ui.label(if q.stock.is_some_and(|s| s < r.line.qty() * boards) { text.color(Level::Warn.color(ui.visuals())) } else { text });
-                    });
-                    row.col(|ui| {
-                        ui.label(format!("{:.4} / {:.2}", b.priced.unit, b.priced.ext)).on_hover_text(format!("{} bought", b.priced.bought));
-                    });
-                    row.col(|ui| {
-                        ui.label(b.lead_days.map_or("?".into(), |d| if d == 0 { "in stock".into() } else { format!("{d} d") }));
-                    });
+                if row.response().clicked() {
+                    pick = Some(i);
                 }
-                None => {
-                    row.col(|ui| {
-                        ui.weak("no price");
-                    });
-                    for _ in 0..3 {
-                        row.col(|_| {});
-                    }
-                }
-            }
-            if row.response().clicked() {
-                pick = Some(i);
-            }
             });
         });
         self.sort = (sort.col != usize::MAX).then_some(sort);
@@ -431,7 +490,9 @@ fn inspector(ui: &mut egui::Ui, r: &Row, boards: u64) -> Option<Insp> {
         let _ = ui.radio(true, RichText::new(mpn_of(r)).monospace());
         if let Some(b) = &r.best {
             let q = &r.quotes[b.quote];
-            ui.label(RichText::new(format!("{:.4} · {} · {}", b.priced.unit, q.source, q.stock.map_or("?".into(), |s| s.to_string()))).size(12.0).color(pal.muted));
+            ui.label(
+                RichText::new(format!("{:.4} · {} · {}", b.priced.unit, q.source, q.stock.map_or("?".into(), |s| s.to_string()))).size(12.0).color(pal.muted),
+            );
         }
     });
     for a in &r.alternatives {

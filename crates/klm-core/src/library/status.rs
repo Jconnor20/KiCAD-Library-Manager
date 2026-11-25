@@ -35,6 +35,23 @@ pub struct PartStatus {
     pub in_kicad: bool,
 }
 
+/// A network (UNC) path: `\\server\share`, `//server/share` or the `\\?\UNC\` form. Touching one makes Windows try to sign in to that server.
+pub fn is_unc(p: &Path) -> bool {
+    let s = p.to_string_lossy();
+    s.starts_with(r"\\") || s.starts_with("//")
+}
+
+/// Whether a datasheet target from a library file is safe to hand to the OS: a web link, or a local `.pdf` not on a network share.
+/// A foreign `.kicad_sym` could otherwise point it at a script, a shortcut or a share.
+pub fn safe_to_open(target: &str) -> bool {
+    let t = target.trim();
+    let lower = t.to_ascii_lowercase();
+    if lower.starts_with("https://") || lower.starts_with("http://") {
+        return true;
+    }
+    !t.contains("://") && !is_unc(Path::new(t)) && Path::new(t).extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+}
+
 impl LibraryRoot {
     /// Every part in this library with what it has and lacks, sorted by category then name.
     pub fn list_parts(&self) -> Vec<PartStatus> {
@@ -98,6 +115,8 @@ impl LibraryRoot {
         let path = self.resolve(value);
         if path.contains("${") {
             Check::Link // another KiCad path variable; can't resolve it here
+        } else if is_unc(Path::new(&path)) {
+            Check::Broken // never touched: probing a network path named by a library file would leak the user's login hash
         } else if Path::new(&path).is_file() {
             Check::Ok
         } else {
@@ -118,5 +137,22 @@ impl LibraryRoot {
             return (Check::Broken, Check::Missing);
         };
         (Check::Ok, fp.child("model").and_then(|m| m.arg(0)).map_or(Check::Missing, |m| self.check_file(m)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_links_and_local_pdfs_are_opened_and_network_paths_never() {
+        for ok in ["https://x.com/a.pdf", "HTTP://x.com/page", "C:/lib/datasheets/a.pdf", r"C:\lib\A.PDF"] {
+            assert!(safe_to_open(ok), "{ok}");
+        }
+        let scripts = ["C:/x/run.bat", "C:/x/a.lnk", "C:/x/a.pdf.exe", "ftp://x/a.pdf", ""];
+        for bad in scripts.into_iter().chain(["//srv/share/a.pdf", r"\\srv\share\a.pdf", r"\\?\UNC\srv\share\a.pdf", "file://srv/share/a.pdf"]) {
+            assert!(!safe_to_open(bad), "{bad}");
+        }
+        assert!(is_unc(Path::new("//srv/s")) && !is_unc(Path::new("C:/srv")));
     }
 }

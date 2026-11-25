@@ -1,7 +1,7 @@
 //! Manufacturer (fab) capabilities and the IPC tables, and the limits a profile's fab choice gives.
 //!
-//! The data lives in `fab_profiles.json`, embedded at build time. W10.1 (library footprint check) and
-//! W10.2 (whole-project check) read limits only through [`limits`], so they don't care where numbers come from.
+//! The data lives in `fab_profiles.json`, embedded at build time. the library footprint check and
+//! the whole-project check read limits only through [`limits`], so they don't care where numbers come from.
 
 use serde::{Deserialize, Serialize};
 

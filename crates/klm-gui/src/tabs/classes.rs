@@ -91,7 +91,11 @@ impl ClassesTab {
             ui.label(RichText::new("Classes").heading().strong());
             match (&self.counts, cx.global_root()) {
                 (_, None) => ui.weak("Set up a global library in Settings to see how its parts match."),
-                (Some((m, n)), _) => ui.weak(format!("{n} parts · {} without a class (no house style fits them){}", n - m.values().map(|c| c.0).sum::<usize>(), if loading { " · checking…" } else { "" })),
+                (Some((m, n)), _) => ui.weak(format!(
+                    "{n} parts · {} without a class (no house style fits them){}",
+                    n - m.values().map(|c| c.0).sum::<usize>(),
+                    if loading { " · checking…" } else { "" }
+                )),
                 (None, _) => ui.weak("checking…"),
             };
             if ui.add_enabled(!loading, egui::Button::new("Check again").frame(false)).clicked() {
@@ -104,31 +108,35 @@ impl ClassesTab {
         let counts = self.counts.as_ref().map(|c| &c.0);
         let mut pick = None;
         let pal = theme::palette(ui.visuals());
-        egui::Panel::left("classes_list").exact_size(280.0).resizable(false).frame(egui::Frame::new().fill(pal.panel).stroke(Stroke::new(1.0, pal.line))).show(ui, |ui| {
-            let cols = [Col::new("Class", 100.0).no_sort(), Col::new("Ref", 40.0).no_sort(), Col::new("Parts", 50.0).no_sort(), Col::rest("Match").no_sort()];
-            ui_kit::table(ui, "classes", &cols, &mut Sort { col: usize::MAX, asc: true }, Class::ALL.len(), |i, row| {
-                let c = Class::ALL[i];
-                row.set_selected(c == selected);
-                row.col(|ui| {
-                    ui.label(name(c));
+        egui::Panel::left("classes_list").exact_size(280.0).resizable(false).frame(egui::Frame::new().fill(pal.panel).stroke(Stroke::new(1.0, pal.line))).show(
+            ui,
+            |ui| {
+                let cols =
+                    [Col::new("Class", 100.0).no_sort(), Col::new("Ref", 40.0).no_sort(), Col::new("Parts", 50.0).no_sort(), Col::rest("Match").no_sort()];
+                ui_kit::table(ui, "classes", &cols, &mut Sort { col: usize::MAX, asc: true }, Class::ALL.len(), |i, row| {
+                    let c = Class::ALL[i];
+                    row.set_selected(c == selected);
+                    row.col(|ui| {
+                        ui.label(name(c));
+                    });
+                    row.col(|ui| {
+                        ui.label(RichText::new(c.prefix()).monospace());
+                    });
+                    let n = counts.map(|m| m.get(&c).copied().unwrap_or_default());
+                    row.col(|ui| {
+                        ui.label(n.map_or("–".to_string(), |n| n.0.to_string()));
+                    });
+                    row.col(|ui| match n {
+                        Some((0, _)) | None => drop(ui.weak("")),
+                        Some((_, 0)) => drop(ui_kit::badge(ui, "All", Level::Ok)),
+                        Some((_, d)) => drop(ui_kit::badge(ui, &format!("{d} differ"), Level::Warn)),
+                    });
+                    if row.response().clicked() {
+                        pick = Some(c);
+                    }
                 });
-                row.col(|ui| {
-                    ui.label(RichText::new(c.prefix()).monospace());
-                });
-                let n = counts.map(|m| m.get(&c).copied().unwrap_or_default());
-                row.col(|ui| {
-                    ui.label(n.map_or("–".to_string(), |n| n.0.to_string()));
-                });
-                row.col(|ui| match n {
-                    Some((0, _)) | None => drop(ui.weak("")),
-                    Some((_, 0)) => drop(ui_kit::badge(ui, "All", Level::Ok)),
-                    Some((_, d)) => drop(ui_kit::badge(ui, &format!("{d} differ"), Level::Warn)),
-                });
-                if row.response().clicked() {
-                    pick = Some(c);
-                }
-            });
-        });
+            },
+        );
         if let Some(c) = pick {
             self.selected = Some(c);
         }
@@ -156,7 +164,10 @@ impl ClassesTab {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 ui.label(RichText::new(format!("{} · {}", name(class), class.prefix())).size(16.0).strong());
-                ui.weak(format!("{parts} parts · {}", if differ == 0 { "all match this standard".to_string() } else { format!("{differ} don't match this standard") }));
+                ui.weak(format!(
+                    "{parts} parts · {}",
+                    if differ == 0 { "all match this standard".to_string() } else { format!("{differ} don't match this standard") }
+                ));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // The review dialog with Apply is on Library health; one place to change files from.
@@ -170,7 +181,15 @@ impl ClassesTab {
         let mut policy = |ui: &mut egui::Ui| {
             ui.label(RichText::new("When new parts come in").strong());
             let on = if cx.settings.house_symbols_on_import { 0 } else { 2 };
-            let hit = seg(ui, on, &[("Change to match", true, ""), ("Ask me", false, "Not available yet: an import either redraws the symbol or keeps the vendor's."), ("Leave as imported", true, "")]);
+            let hit = seg(
+                ui,
+                on,
+                &[
+                    ("Change to match", true, ""),
+                    ("Ask me", false, "Not available yet: an import either redraws the symbol or keeps the vendor's."),
+                    ("Leave as imported", true, ""),
+                ],
+            );
             if let Some(i) = hit.filter(|i| *i != 1) {
                 cx.settings.house_symbols_on_import = i == 0;
                 cx.save_settings();
@@ -200,10 +219,19 @@ impl ClassesTab {
                 let house = symbols::house_template(&cx.settings.standard, class).ok().flatten();
                 let t = house.clone().or_else(|| symbols::template_of(class).cloned()).unwrap_or_else(ic_box);
                 preview(ui, &t, Vec2::new(ui.available_width(), 130.0), cx.settings.standard.rules.symbol_field_positions, &format!("{}?", class.prefix()));
-                if symbols::template_of(class).is_some() && ui.button("Edit symbol…").on_hover_text("Draw the symbol: move its pins and shapes on the grid, place Reference and Value, set their text size").clicked() {
+                if symbols::template_of(class).is_some()
+                    && ui
+                        .button("Edit symbol…")
+                        .on_hover_text("Draw the symbol: move its pins and shapes on the grid, place Reference and Value, set their text size")
+                        .clicked()
+                {
                     open = Some(t.clone());
                 }
-                ui.weak(if house.is_some() { "Your house template, from a part you drew or set below." } else { "Built-in template: pins on the 2.54 mm grid, KLC style." });
+                ui.weak(if house.is_some() {
+                    "Your house template, from a part you drew or set below."
+                } else {
+                    "Built-in template: pins on the 2.54 mm grid, KLC style."
+                });
                 if cx.settings.standard.templates.contains_key(&key) || cx.settings.standard.footprint_styles.contains_key(&key) {
                     if ui.small_button("Use built-in").on_hover_text("Forget this house symbol and footprint style").clicked() {
                         cx.settings.standard.templates.remove(&key);

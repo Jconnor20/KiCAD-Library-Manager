@@ -164,7 +164,10 @@ fn rename_placeholder(info: &mut ClassInfo, was: &str, now: &str) {
 
 fn templates(ui: &mut Ui, info: &mut ClassInfo) {
     let names: Vec<String> = info.fields.iter().map(|f| f.name.clone()).collect();
-    ui.weak(format!("Placeholders: {}. An empty template leaves that property alone. The preview uses a sample part.", names.iter().map(|n| format!("{{{n}}}")).collect::<Vec<_>>().join(" ")));
+    ui.weak(format!(
+        "Placeholders: {}. An empty template leaves that property alone. The preview uses a sample part.",
+        names.iter().map(|n| format!("{{{n}}}")).collect::<Vec<_>>().join(" ")
+    ));
     let samples: Vec<(String, String)> = info.fields.iter().map(|f| (f.name.clone(), sample(f))).collect();
     let get = |n: &str| samples.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
     for (label, t) in [("Description", &mut info.description), ("Value", &mut info.value), ("Keywords", &mut info.keywords)] {
@@ -194,7 +197,11 @@ mod tests {
 
     #[test]
     fn renaming_a_field_follows_into_templates() {
-        let mut info = ClassInfo { description: "Cap {Voltage} {V}".into(), fields: vec![FieldDef { name: "Volts".into(), ..Default::default() }, FieldDef { name: "V".into(), ..Default::default() }], ..Default::default() };
+        let mut info = ClassInfo {
+            description: "Cap {Voltage} {V}".into(),
+            fields: vec![FieldDef { name: "Volts".into(), ..Default::default() }, FieldDef { name: "V".into(), ..Default::default() }],
+            ..Default::default()
+        };
         rename_placeholder(&mut info, "Voltage", "Volts");
         assert_eq!(info.description, "Cap {Volts} {V}");
         // "V" is still another field's name, so its placeholder stays.
@@ -204,7 +211,12 @@ mod tests {
 
     #[test]
     fn preview_samples_follow_unit_and_allowed() {
-        let f = |name: &str, unit: Option<&str>, allowed: &[&str]| FieldDef { name: name.into(), unit: unit.map(Into::into), allowed: allowed.iter().map(|s| s.to_string()).collect(), ..Default::default() };
+        let f = |name: &str, unit: Option<&str>, allowed: &[&str]| FieldDef {
+            name: name.into(),
+            unit: unit.map(Into::into),
+            allowed: allowed.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
         assert_eq!(sample(&f("Capacitance", Some("F"), &[])), "100nF");
         assert_eq!(sample(&f("Polarity", None, &["NPN", "PNP"])), "NPN");
         assert_eq!(sample(&f("Whatever", None, &[])), "Whatever");

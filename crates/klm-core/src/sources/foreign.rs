@@ -8,11 +8,11 @@
 //! [`Scan::unsupported`] rather than guessed. Nothing here writes to a library: feed the parts to
 //! `batch::plan` (dry run) and `batch::apply` (one snapshot for the lot).
 
-use crate::{categories, kicad_env};
 use crate::library::{property, sanitize};
 use crate::part::Part;
 use crate::rules::Rules;
 use crate::sexpr::{self, Sexpr};
+use crate::{categories, kicad_env};
 use anyhow::{Context, Result, bail};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -34,7 +34,9 @@ pub struct Scan {
 
 /// Files of another tool that `kicad-cli` may be able to convert.
 fn is_foreign(p: &Path) -> bool {
-    p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["lbr", "schlib", "pcblib", "intlib", "epro", "elib", "elibz", "elibz2"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+    p.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| ["lbr", "schlib", "pcblib", "intlib", "epro", "elib", "elibz", "elibz2"].iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 const SKIP_DIRS: &[&str] = &[crate::snapshot::DIR, ".git", "node_modules"];
@@ -73,7 +75,9 @@ fn walk(dir: &Path, f: &mut Files) {
         let pretty = p.parent().and_then(|d| d.extension()).is_some_and(|x| x.eq_ignore_ascii_case("pretty"));
         match ext.as_str() {
             "kicad_sym" => f.syms.push(p),
-            "lib" if std::fs::read(&p).is_ok_and(|b| String::from_utf8_lossy(&b[..b.len().min(64)]).to_lowercase().starts_with("eeschema-library")) => f.legacy_syms.push(p),
+            "lib" if std::fs::read(&p).is_ok_and(|b| String::from_utf8_lossy(&b[..b.len().min(64)]).to_lowercase().starts_with("eeschema-library")) => {
+                f.legacy_syms.push(p)
+            }
             "lib" if std::fs::read_to_string(&p).is_ok_and(|t| crate::spice::is_spice_text(&t)) => f.sims.push(p),
             "kicad_mod" if pretty => {
                 let lib = p.parent().and_then(|d| d.file_stem()).unwrap_or_default().to_string_lossy().to_lowercase();
@@ -98,19 +102,27 @@ pub fn scan(root: &Path, rules: &Rules, work: &Path) -> Result<Scan> {
     let mut files = Files::default();
     walk(root, &mut files);
     let mut out = Scan::default();
-    out.unsupported.extend(files.libpkgs.iter().map(|p| format!("{}: an Altium project, not a library; pick the .SchLib and .PcbLib files next to it instead", p.display())));
+    out.unsupported.extend(
+        files.libpkgs.iter().map(|p| format!("{}: an Altium project, not a library; pick the .SchLib and .PcbLib files next to it instead", p.display())),
+    );
     let mut footprints_only = false;
     // Other tools' libraries: convert into `work`, then treat the result like any KiCad library.
     for (i, p) in std::mem::take(&mut files.foreign).iter().enumerate() {
         let (dir, stem) = (work.join(format!("conv{i}")), lib_stem(p));
         let _ = std::fs::create_dir_all(&dir);
         let fixed = dir.join(p.file_name().unwrap_or_default());
-        let p = &if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lbr")) && std::fs::read_to_string(p).is_ok_and(|t| std::fs::write(&fixed, fix_eagle_numbers(&t)).is_ok()) { fixed } else { p.clone() };
+        let p = &if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lbr"))
+            && std::fs::read_to_string(p).is_ok_and(|t| std::fs::write(&fixed, fix_eagle_numbers(&t)).is_ok())
+        {
+            fixed
+        } else {
+            p.clone()
+        };
         let sym = kicad_env::upgrade_symbols(p, &dir.join(format!("{stem}.kicad_sym")));
         let fp = kicad_env::upgrade_footprints(p, &dir.join(format!("{stem}.pretty")));
         footprints_only |= sym.is_err() && fp.is_ok();
-        if sym.is_err() && fp.is_err() {
-            out.unsupported.push(format!("{}: kicad-cli could not convert it. kicad-cli said: {}; {}", p.display(), first_line(&sym.unwrap_err()), first_line(&fp.unwrap_err())));
+        if let (Err(se), Err(fe)) = (&sym, &fp) {
+            out.unsupported.push(format!("{}: kicad-cli could not convert it. kicad-cli said: {}; {}", p.display(), first_line(se), first_line(fe)));
         } else if sym.is_err() && !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pcblib")) {
             out.unsupported.push(format!("{}: footprints converted but it has no symbols kicad-cli can read", p.display()));
         }
@@ -235,7 +247,9 @@ fn part_from(sym: &Sexpr, lib: &str, files: &Files, root: &Path) -> Part {
     let fp = exact.first().copied().unwrap_or(&cands[0]).1.clone();
     match find_model(&fp, files, root) {
         Some(models) => part.model_files = models,
-        None if std::fs::read_to_string(&fp).is_ok_and(|t| t.contains("(model")) => part.warnings.push(format!("3D model of {fp_name} not found; imported without it")),
+        None if std::fs::read_to_string(&fp).is_ok_and(|t| t.contains("(model")) => {
+            part.warnings.push(format!("3D model of {fp_name} not found; imported without it"))
+        }
         None => {}
     }
     part.footprint_files = vec![fp];
@@ -273,15 +287,19 @@ fn find_model(fp: &Path, files: &Files, root: &Path) -> Option<Vec<PathBuf>> {
     };
     let abs = PathBuf::from(&uri);
     let direct = [root.join(&tail), fp.parent()?.join(&tail), abs];
-    let main = direct.into_iter().find(|p| p.is_file() && (p.is_absolute() || p.starts_with(root) || p.starts_with(fp.parent().unwrap_or(root)))).or_else(|| {
-        // Fall back to the file name, choosing the candidate whose path shares most of the URI's tail.
-        let cands = files.models.get(&Path::new(&tail).file_name()?.to_string_lossy().to_lowercase())?;
-        let want = tail.to_lowercase();
-        cands.iter().max_by_key(|c| {
-            let c = c.to_string_lossy().replace('\\', "/").to_lowercase();
-            want.rsplit('/').zip(c.rsplit('/')).take_while(|(a, b)| a == b).count()
-        }).cloned()
-    })?;
+    let main =
+        direct.into_iter().find(|p| p.is_file() && (p.is_absolute() || p.starts_with(root) || p.starts_with(fp.parent().unwrap_or(root)))).or_else(|| {
+            // Fall back to the file name, choosing the candidate whose path shares most of the URI's tail.
+            let cands = files.models.get(&Path::new(&tail).file_name()?.to_string_lossy().to_lowercase())?;
+            let want = tail.to_lowercase();
+            cands
+                .iter()
+                .max_by_key(|c| {
+                    let c = c.to_string_lossy().replace('\\', "/").to_lowercase();
+                    want.rsplit('/').zip(c.rsplit('/')).take_while(|(a, b)| a == b).count()
+                })
+                .cloned()
+        })?;
     let mut all = vec![main.clone()];
     for ext in ["step", "stp", "wrl"] {
         let sib = main.with_extension(ext);
@@ -316,9 +334,7 @@ fn find_sim_files(sym: &Sexpr, mpn: &str, files: &Files, root: &Path) -> Vec<Pat
             }
         }
         if let Some(fname) = Path::new(&tail).file_name().and_then(|f| f.to_str())
-            && let Some(found) = files.sims.iter().find(|p| {
-                p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case(fname))
-            })
+            && let Some(found) = files.sims.iter().find(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case(fname)))
         {
             return vec![found.clone()];
         }
@@ -336,9 +352,7 @@ fn find_sim_files(sym: &Sexpr, mpn: &str, files: &Files, root: &Path) -> Vec<Pat
         }
         if let Ok(text) = std::fs::read_to_string(sim_path) {
             let models = crate::spice::parse_models(&text);
-            if models.iter().any(|m| {
-                crate::matching::same_mpn(&m.name, mpn) || (!sim_name.is_empty() && m.name.eq_ignore_ascii_case(sim_name))
-            }) {
+            if models.iter().any(|m| crate::matching::same_mpn(&m.name, mpn) || (!sim_name.is_empty() && m.name.eq_ignore_ascii_case(sim_name))) {
                 return vec![sim_path.clone()];
             }
         }
@@ -367,7 +381,7 @@ mod tests {
 
     #[test]
     fn easyeda_pro_library_files_are_tried_not_ignored() {
-        // Found by the W6.2 corpus: an .elibz2 used to be skipped without a word.
+        // Found by the foreign-library corpus: an .elibz2 used to be skipped without a word.
         for f in ["a.elibz2", "a.ELIBZ", "a.epro", "a.IntLib"] {
             assert!(is_foreign(Path::new(f)), "{f}");
         }

@@ -9,8 +9,8 @@ use eframe::egui::{self, RichText};
 use klm_core::batch::{self, Op};
 use klm_core::checks::{self, Issue, Severity};
 use klm_core::compliance;
-use klm_core::kicad_edit::{self, Editor, FileWatch};
 use klm_core::health::{self, Finding};
+use klm_core::kicad_edit::{self, Editor, FileWatch};
 use klm_core::library::{ATTACH_EXTENSIONS, AttachKind, Check, LibraryRoot, PartEdit, PartStatus, RemovePlan, Scope};
 use klm_core::standardise;
 use klm_core::store::{Alternative, Store};
@@ -30,11 +30,27 @@ pub enum Msg {
     Show(String),
     /// Open Alternatives on this symbol, filtered to what JLCPCB stocks in the same package (the BOM's Swap).
     Swap(String),
+    /// The worker found the library that has this symbol: open Alternatives on it as for `Swap`.
+    SwapIn(LibraryRoot, String),
     /// Apply `edit` to each (category, name) in the `scope` library.
-    Edit { scope: Scope, targets: Vec<(String, String)>, edit: PartEdit },
+    Edit {
+        scope: Scope,
+        targets: Vec<(String, String)>,
+        edit: PartEdit,
+    },
     /// Copy a global part into the project library; `overwrite` replaces an existing copy.
-    CopyToProject { category: String, name: String, overwrite: bool },
-    Attach { from: LibraryRoot, targets: Vec<LibraryRoot>, category: String, name: String, path: PathBuf },
+    CopyToProject {
+        category: String,
+        name: String,
+        overwrite: bool,
+    },
+    Attach {
+        from: LibraryRoot,
+        targets: Vec<LibraryRoot>,
+        category: String,
+        name: String,
+        path: PathBuf,
+    },
     /// The datasheet finder has finished: (part, URL used or why not).
     DatasheetsDone(Vec<(String, Result<String, String>)>),
     /// SPICE close-match / synthesis finished: (part, summary or error).
@@ -50,21 +66,49 @@ enum Action {
     None,
     /// Open the edit dialog for these (category, name) parts.
     Edit(Vec<(String, String)>),
-    Attach { scope: Scope, category: String, name: String, path: PathBuf },
-    Preview { category: String, name: String },
+    Attach {
+        scope: Scope,
+        category: String,
+        name: String,
+        path: PathBuf,
+    },
+    Preview {
+        category: String,
+        name: String,
+    },
     /// Open the part's symbol library or footprint in KiCad's editor and re-check when it is saved.
-    EditInKicad { editor: Editor, category: String, name: String },
+    EditInKicad {
+        editor: Editor,
+        category: String,
+        name: String,
+    },
     /// Open the in-app symbol editor.
-    EditSymbol { category: String, name: String },
+    EditSymbol {
+        category: String,
+        name: String,
+    },
     /// Show what redrawing the symbol in the house style of its class would do.
-    Restyle { category: String, name: String },
+    Restyle {
+        category: String,
+        name: String,
+    },
     /// Make the part the active profile's house template for its class.
-    HouseTemplate { category: String, name: String },
+    HouseTemplate {
+        category: String,
+        name: String,
+    },
     /// Ask before fetching the part's files from the sources again.
     Reimport(Key),
-    CopyToProject { category: String, name: String, overwrite: bool },
+    CopyToProject {
+        category: String,
+        name: String,
+        overwrite: bool,
+    },
     FindDatasheets(LibraryRoot),
-    FindSims { root: LibraryRoot, targets: Option<Vec<Key>> },
+    FindSims {
+        root: LibraryRoot,
+        targets: Option<Vec<Key>>,
+    },
     /// Show the dry run of these operations.
     Batch(Vec<Op>),
     Alternatives(Option<Key>),
@@ -74,15 +118,29 @@ enum Action {
     /// Show what deleting these parts would remove and keep.
     Delete(LibraryRoot, Vec<Key>),
     Health,
+    /// Open a part's datasheet, if it is a web link or a local PDF (a library file can name anything).
+    OpenDatasheet(String),
 }
 
 /// A dry run waiting for the user's answer, or the worker that is producing it.
 enum Dry {
     Planning(mpsc::Receiver<standardise::Plan>),
     Standardise(standardise::Plan),
-    Restyle { root: LibraryRoot, category: String, name: String, result: Result<Restyled, String> },
-    Export { root: LibraryRoot, parts: Vec<Key>, path: String },
-    Delete { root: LibraryRoot, plans: Vec<(Key, Result<RemovePlan, String>)> },
+    Restyle {
+        root: LibraryRoot,
+        category: String,
+        name: String,
+        result: Result<Restyled, String>,
+    },
+    Export {
+        root: LibraryRoot,
+        parts: Vec<Key>,
+        path: String,
+    },
+    Delete {
+        root: LibraryRoot,
+        plans: Vec<(Key, Result<RemovePlan, String>)>,
+    },
     /// The worker planning a delete.
     PlanningDelete(LibraryRoot, mpsc::Receiver<Vec<(Key, Result<RemovePlan, String>)>>),
     Scanning(mpsc::Receiver<Vec<Finding>>),
@@ -204,7 +262,13 @@ enum Filter {
 }
 
 impl Filter {
-    const ALL: [(Filter, &'static str); 5] = [(Filter::All, "Any status"), (Filter::Incomplete, "Incomplete"), (Filter::NoDatasheet, "No datasheet"), (Filter::NoModel, "No 3D model"), (Filter::NonCompliant, "Non-compliant")];
+    const ALL: [(Filter, &'static str); 5] = [
+        (Filter::All, "Any status"),
+        (Filter::Incomplete, "Incomplete"),
+        (Filter::NoDatasheet, "No datasheet"),
+        (Filter::NoModel, "No 3D model"),
+        (Filter::NonCompliant, "Non-compliant"),
+    ];
 
     fn matches(self, p: &PartStatus) -> bool {
         let no = |c: Check| matches!(c, Check::Missing | Check::Broken);
@@ -323,16 +387,18 @@ fn file_chips(ui: &mut egui::Ui, p: &PartStatus, scope: Scope, downloading: bool
     let key = (p.category.clone(), p.name.clone());
     chip(ui, "SYM", "Symbol", Cell::Ok);
     let r = chip(ui, "FP", "Footprint", cell(p.footprint));
-    if fixable(p.footprint) && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-        if let Some(path) = pick_attachment() {
-            *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
-        }
+    if fixable(p.footprint)
+        && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+        && let Some(path) = pick_attachment()
+    {
+        *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
     }
     let r = chip(ui, "3D", "3D model", cell(p.model));
-    if fixable(p.model) && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-        if let Some(path) = pick_attachment() {
-            *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
-        }
+    if fixable(p.model)
+        && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+        && let Some(path) = pick_attachment()
+    {
+        *action = Action::Attach { scope, category: key.0.clone(), name: key.1.clone(), path };
     }
     let r = chip(ui, "DS", "Datasheet", cell(p.datasheet));
     if fixable(p.datasheet) && !downloading && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
@@ -388,7 +454,9 @@ static NO_ISSUES: Vec<Issue> = Vec::new();
 fn compliance_cell(ui: &mut egui::Ui, c: Option<&compliance::Compliance>) {
     let r = match c {
         None => ui.weak("…").on_hover_text("Working out whether the part follows the house standard"),
-        Some(c) if c.ok => ui.label(RichText::new("OK").color(ui.visuals().text_color())).on_hover_text("Standardise has nothing to change and the checks pass"),
+        Some(c) if c.ok => {
+            ui.label(RichText::new("OK").color(ui.visuals().text_color())).on_hover_text("Standardise has nothing to change and the checks pass")
+        }
         Some(c) => {
             let tip: Vec<_> = c.reasons.iter().map(|r| format!("• {r}")).collect();
             ui.label(RichText::new("No").color(ui.visuals().warn_fg_color)).on_hover_text(tip.join("\n"))
@@ -443,6 +511,13 @@ impl LibraryTab {
         }
         match self.show(ui, global.as_ref(), project.as_ref()) {
             Action::None => {}
+            Action::OpenDatasheet(target) => {
+                if klm_core::library::safe_to_open(&target) {
+                    let _ = open::that(&target);
+                } else {
+                    cx.log(Level::Warn, format!("Not opening the datasheet {target}: only web links and local PDF files are opened"));
+                }
+            }
             Action::EditInKicad { editor, category, name } => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
@@ -516,7 +591,8 @@ impl LibraryTab {
             Action::Restyle { category, name } => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
-                    let result = klm_core::symbols::restyle_part(root, &category, &name, &cx.settings.rules, &cx.settings.standard, false).map_err(|e| format!("{e:#}"));
+                    let result =
+                        klm_core::symbols::restyle_part(root, &category, &name, &cx.settings.rules, &cx.settings.standard, false).map_err(|e| format!("{e:#}"));
                     self.dry = Some(Dry::Restyle { root: root.clone(), category, name, result });
                 }
             }
@@ -524,7 +600,9 @@ impl LibraryTab {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
                     let naming = cx.settings.rules.clone();
-                    match klm_core::symbols::set_house_template(&mut cx.settings.standard, root, &category, &name, &naming).and_then(|r| cx.settings.save().map(|_| r)) {
+                    match klm_core::symbols::set_house_template(&mut cx.settings.standard, root, &category, &name, &naming)
+                        .and_then(|r| cx.settings.save().map(|_| r))
+                    {
                         Ok((class, footprint)) => {
                             klm_core::symbols::configure(&cx.settings);
                             let fp = if footprint { " and its footprint style" } else { " (no footprint style: its footprint isn't in this library)" };
@@ -564,12 +642,16 @@ impl LibraryTab {
             Msg::Refresh => self.stale = true,
             Msg::Swap(symbol) => {
                 // The BOM matches against both libraries, so open the one that has the symbol.
-                // shortcut: scans on the UI thread, one click; move to the panel's worker if large libraries stall it.
-                let has = |r: &LibraryRoot| klm_core::alternatives::scan(r).iter().any(|p| p.symbol == symbol);
-                if let Some(root) = [cx.project_root(), cx.global_root()].into_iter().flatten().find(has) {
-                    self.alternatives = Some(AlternativesPanel::new(&root, &cx.ctx, Some((String::new(), symbol))).for_swap());
-                }
+                let (roots, tx, ctx) = ([cx.project_root(), cx.global_root()], cx.tx.clone(), cx.ctx.clone());
+                std::thread::spawn(move || {
+                    let has = |r: &LibraryRoot| klm_core::alternatives::scan(r).iter().any(|p| p.symbol == symbol);
+                    if let Some(root) = roots.into_iter().flatten().find(has) {
+                        let _ = tx.send(AppMsg::Library(Msg::SwapIn(root, symbol)));
+                        ctx.request_repaint();
+                    }
+                });
             }
+            Msg::SwapIn(root, symbol) => self.alternatives = Some(AlternativesPanel::new(&root, &cx.ctx, Some((String::new(), symbol))).for_swap()),
             Msg::Show(mpn) => (self.filter, self.category, self.maker, self.status) = (mpn, String::new(), String::new(), Filter::All),
             Msg::DatasheetsDone(results) => {
                 self.downloading = false;
@@ -661,10 +743,10 @@ impl LibraryTab {
         if self.alternatives.as_mut().is_some_and(|a| !a.window(cx)) {
             self.alternatives = None;
         }
-        if let Some((title, panel)) = &mut self.preview {
-            if !panel.window(&cx.ctx, title) {
-                self.preview = None;
-            }
+        if let Some((title, panel)) = &mut self.preview
+            && !panel.window(&cx.ctx, title)
+        {
+            self.preview = None;
         }
         if let Some(editor) = &mut self.symbol_editor {
             match editor.show(&cx.ctx, &cx.settings.rules, &cx.settings.standard) {
@@ -765,8 +847,11 @@ impl LibraryTab {
             Some(Dry::Standardise(plan)) => {
                 let mut sections: Vec<_> = plan.files.iter().map(|f| (f.label.clone(), f.changes.clone())).collect();
                 sections.extend(plan.errors.iter().map(|e| ("Can't be read".to_string(), vec![e.clone()])));
-                let note = format!("{}
-The rules are in Settings → Standards. A snapshot is taken first, so History can roll it back.", plan.root.dir.display());
+                let note = format!(
+                    "{}
+The rules are in Settings → Standards. A snapshot is taken first, so History can roll it back.",
+                    plan.root.dir.display()
+                );
                 match batch_dialog::review(&ctx, "dry_standardise", "Apply", false, "Standardise", &sections, !plan.files.is_empty(), |ui| {
                     ui.weak(note);
                 }) {
@@ -798,7 +883,8 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                     Err(e) => (vec![format!("can't be restyled: {e}")], false),
                 };
                 let sections = vec![(format!("{category} / {name}"), lines)];
-                let note = "Keeps every field. A snapshot is taken first, so History can undo it. Wires on schematics that already use the symbol may need fixing.";
+                let note =
+                    "Keeps every field. A snapshot is taken first, so History can undo it. Wires on schematics that already use the symbol may need fixing.";
                 match batch_dialog::review(&ctx, "dry_restyle", "Apply", false, "Restyle symbol", &sections, can_apply, |ui| {
                     ui.weak(note);
                 }) {
@@ -829,10 +915,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                     ui.horizontal(|ui| {
                         ui.label("Save as");
                         ui.add(egui::TextEdit::singleline(path).desired_width(360.0));
-                        if ui.button("Browse…").clicked() {
-                            if let Some(p) = rfd::FileDialog::new().add_filter("ZIP", &["zip"]).set_file_name("klm_export.zip").save_file() {
-                                *path = p.display().to_string();
-                            }
+                        if ui.button("Browse…").clicked()
+                            && let Some(p) = rfd::FileDialog::new().add_filter("ZIP", &["zip"]).set_file_name("klm_export.zip").save_file()
+                        {
+                            *path = p.display().to_string();
                         }
                     });
                 });
@@ -981,12 +1067,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
         std::thread::spawn(move || {
             let todo: Vec<(String, String)> = match targets {
                 Some(t) => t,
-                None => root
-                    .list_parts()
-                    .into_iter()
-                    .filter(|p| p.sim != Check::Ok)
-                    .map(|p| (p.category, p.name))
-                    .collect(),
+                None => root.list_parts().into_iter().filter(|p| p.sim != Check::Ok).map(|p| (p.category, p.name)).collect(),
             };
             let mut results = Vec::with_capacity(todo.len());
             for (cat, name) in todo {
@@ -1109,7 +1190,14 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
 
     /// Re-filters and re-sorts when something that decides the rows changed, and drops ticks on rows that are gone.
     fn update_view(&mut self) {
-        let key = ViewKey { generation: self.generation, filter: self.filter.clone(), category: self.category.clone(), maker: self.maker.clone(), status: self.status, sort: self.sort };
+        let key = ViewKey {
+            generation: self.generation,
+            filter: self.filter.clone(),
+            category: self.category.clone(),
+            maker: self.maker.clone(),
+            status: self.status,
+            sort: self.sort,
+        };
         if self.view_key.as_ref() == Some(&key) {
             return;
         }
@@ -1120,7 +1208,8 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             .filter(|&i| {
                 let p = &parts[i];
                 self.status.matches(p)
-                    && (self.status != Filter::NonCompliant || self.compliance.as_ref().and_then(|c| c.get(&(p.category.clone(), p.name.clone()))).is_some_and(|c| !c.ok))
+                    && (self.status != Filter::NonCompliant
+                        || self.compliance.as_ref().and_then(|c| c.get(&(p.category.clone(), p.name.clone()))).is_some_and(|c| !c.ok))
                     && (self.category.is_empty() || p.category == self.category)
                     && (self.maker.is_empty() || p.manufacturer == self.maker)
                     && (needle.is_empty() || [&p.mpn, &p.manufacturer, &p.category, &p.description].iter().any(|f| f.to_lowercase().contains(&needle)))
@@ -1192,7 +1281,8 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
             return;
         }
         let fields = root.part_fields(&key.0, &key.1).unwrap_or_default();
-        let alternatives = Store::default_path().and_then(|p| Store::open(&p).ok()).and_then(|s| klm_core::alternatives::alternatives_of(&s, &mpn).ok()).unwrap_or_default();
+        let alternatives =
+            Store::default_path().and_then(|p| Store::open(&p).ok()).and_then(|s| klm_core::alternatives::alternatives_of(&s, &mpn).ok()).unwrap_or_default();
         self.inspect = Some(Inspect { preview: PreviewPanel::for_library(ctx, root, &key.0, &key.1), key, load: self.loads, fields, alternatives });
     }
 
@@ -1229,9 +1319,14 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
         if let Some(p) = self.current_part().cloned() {
             let pal = theme::palette(ui.visuals());
             let width = if ui.available_width() < 900.0 { 300.0 } else { 352.0 };
-            egui::Panel::right("library_inspector").resizable(true).default_size(width).size_range(260.0..=520.0).frame(egui::Frame::new().fill(pal.panel)).show(ui, |ui| {
-                self.inspector(ui, &p, root, project.is_some(), &mut action);
-            });
+            egui::Panel::right("library_inspector")
+                .resizable(true)
+                .default_size(width)
+                .size_range(260.0..=520.0)
+                .frame(egui::Frame::new().fill(pal.panel))
+                .show(ui, |ui| {
+                    self.inspector(ui, &p, root, project.is_some(), &mut action);
+                });
         }
         self.header(ui, global, project, Some(root), &mut action);
 
@@ -1329,9 +1424,11 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                             }
                             KICAD => {
                                 if p.in_kicad {
-                                    ui.label(RichText::new("✔").color(Level::Ok.color(ui.visuals()))).on_hover_text("This category's library is in KiCad's library list");
+                                    ui.label(RichText::new("✔").color(Level::Ok.color(ui.visuals())))
+                                        .on_hover_text("This category's library is in KiCad's library list");
                                 } else {
-                                    ui.label(RichText::new("no").color(Level::Warn.color(ui.visuals()))).on_hover_text("This category's library isn't in KiCad's library list yet. Relink libraries adds it.");
+                                    ui.label(RichText::new("no").color(Level::Warn.color(ui.visuals())))
+                                        .on_hover_text("This category's library isn't in KiCad's library list yet. Relink libraries adds it.");
                                 }
                             }
                             CHECKS => issues_cell(ui, checks.as_ref().map(|c| c.get(&key).unwrap_or(&NO_ISSUES))),
@@ -1347,10 +1444,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 },
             );
         });
-        if sort != before {
-            if let Some(&c) = shown.get(sort.col) {
-                self.sort = Sort { col: c, asc: sort.asc };
-            }
+        if sort != before
+            && let Some(&c) = shown.get(sort.col)
+        {
+            self.sort = Sort { col: c, asc: sort.asc };
         }
         if toggle_all {
             self.selected = if all_ticked { HashSet::new() } else { (0..self.view.len()).filter_map(|i| self.key_at(i)).collect() };
@@ -1428,7 +1525,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 }
             });
         }
-        if ui_kit::chip(ui, "Incomplete", Some(n_bad), self.status == Filter::Incomplete).on_hover_text("Parts missing a footprint, 3D model or datasheet, or not in KiCad").clicked() {
+        if ui_kit::chip(ui, "Incomplete", Some(n_bad), self.status == Filter::Incomplete)
+            .on_hover_text("Parts missing a footprint, 3D model or datasheet, or not in KiCad")
+            .clicked()
+        {
             self.status = if self.status == Filter::Incomplete { Filter::All } else { Filter::Incomplete };
         }
         let current = Filter::ALL.iter().find(|(s, _)| *s == self.status).map_or("", |(_, l)| l);
@@ -1445,9 +1545,15 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
         // Ticked parts narrow Standardise to them; the whole library stays one menu click away.
         let picked = sorted(&self.selected);
         let (label, hover) = if picked.is_empty() {
-            ("Standardise…".to_string(), "Fix symbols and footprints to the rules in Settings → Standards. Shows what changes first. Tick parts to standardise only those.")
+            (
+                "Standardise…".to_string(),
+                "Fix symbols and footprints to the rules in Settings → Standards. Shows what changes first. Tick parts to standardise only those.",
+            )
         } else {
-            (format!("Standardise {} selected…", picked.len()), "Fix only the ticked parts and the footprints they use to the rules in Settings → Standards. Shows what changes first. More → Standardise whole library does everything.")
+            (
+                format!("Standardise {} selected…", picked.len()),
+                "Fix only the ticked parts and the footprints they use to the rules in Settings → Standards. Shows what changes first. More → Standardise whole library does everything.",
+            )
         };
         let std = ui.add_enabled(root.is_some(), ui_kit::primary(&label, &style.visuals)).on_hover_text(hover);
         if let (true, Some(root)) = (std.clicked(), root) {
@@ -1498,7 +1604,12 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
         if narrow {
             return;
         }
-        if ui.add_enabled(project.is_some(), ui_kit::ghost("Health report…")).on_hover_text("Everything wrong or untidy in the project's library").on_disabled_hover_text("Choose a project first").clicked() {
+        if ui
+            .add_enabled(project.is_some(), ui_kit::ghost("Health report…"))
+            .on_hover_text("Everything wrong or untidy in the project's library")
+            .on_disabled_hover_text("Choose a project first")
+            .clicked()
+        {
             *action = Action::Health;
         }
         if ui.add(ui_kit::ghost("Alternatives…")).on_hover_text("Find duplicates and equivalent parts, and mark preferred ones").clicked() {
@@ -1525,19 +1636,30 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                 }
                 let can_copy = self.scope == Scope::Global && has_project;
                 let copy = ui.add_enabled(can_copy, small("Copy to project"));
-                if copy.on_hover_text("Copy the ticked parts into the project's library. Shift-click to replace copies already there.").on_disabled_hover_text("Needs the global library and a project").clicked() {
+                if copy
+                    .on_hover_text("Copy the ticked parts into the project's library. Shift-click to replace copies already there.")
+                    .on_disabled_hover_text("Needs the global library and a project")
+                    .clicked()
+                {
                     *action = Action::Batch(vec![Op::CopyToProject { parts: targets.clone(), overwrite: ui.input(|i| i.modifiers.shift) }]);
                 }
-                if ui.add(small("Attach…")).on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked() {
-                    if let Some(file) = pick_attachment() {
-                        *action = Action::Batch(vec![Op::Attach { scope: self.scope, file, parts: targets.clone() }]);
-                    }
+                if ui.add(small("Attach…")).on_hover_text("Add one datasheet (PDF), SPICE model or 3D model (STEP/WRL) to every ticked part").clicked()
+                    && let Some(file) = pick_attachment()
+                {
+                    *action = Action::Batch(vec![Op::Attach { scope: self.scope, file, parts: targets.clone() }]);
                 }
                 let fill = ui.add_enabled(!self.downloading, small("Fill missing files…"));
-                if fill.on_hover_text("For every part in this library with no working datasheet, try the existing link, then search the enabled sources by MPN").clicked() {
+                if fill
+                    .on_hover_text("For every part in this library with no working datasheet, try the existing link, then search the enabled sources by MPN")
+                    .clicked()
+                {
                     *action = Action::FindDatasheets(root.clone());
                 }
-                if ui.add_enabled(!self.downloading, small("Find SPICE…")).on_hover_text("Find close SPICE models or generate from datasheet & similar models for the ticked parts").clicked() {
+                if ui
+                    .add_enabled(!self.downloading, small("Find SPICE…"))
+                    .on_hover_text("Find close SPICE models or generate from datasheet & similar models for the ticked parts")
+                    .clicked()
+                {
                     *action = Action::FindSims { root: root.clone(), targets: Some(targets.clone()) };
                 }
                 if ui.add(small("Export…")).on_hover_text("Write the ticked parts, with their footprints and 3D models, to one ZIP").clicked() {
@@ -1560,29 +1682,36 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
         let pal = theme::palette(ui.visuals());
         let key = (p.category.clone(), p.name.clone());
         let style = ui.style().clone();
-        egui::Panel::bottom("library_inspector_footer").resizable(false).frame(egui::Frame::new().fill(pal.panel).inner_margin(egui::Margin::symmetric(16, 10))).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let target = p.datasheet_target.as_deref();
-                let open = ui.add_enabled(target.is_some(), egui::Button::new("Open datasheet"));
-                if open.on_hover_text("Open the datasheet in your PDF viewer or browser").on_disabled_hover_text("This part has no datasheet").clicked() {
-                    if let Some(t) = target {
-                        let _ = open::that(t);
+        egui::Panel::bottom("library_inspector_footer")
+            .resizable(false)
+            .frame(egui::Frame::new().fill(pal.panel).inner_margin(egui::Margin::symmetric(16, 10)))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let target = p.datasheet_target.as_deref();
+                    let open = ui.add_enabled(target.is_some(), egui::Button::new("Open datasheet"));
+                    if open.on_hover_text("Open the datasheet in your PDF viewer or browser").on_disabled_hover_text("This part has no datasheet").clicked()
+                        && let Some(t) = target
+                    {
+                        *action = Action::OpenDatasheet(t.to_string());
                     }
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (can, why) = match (self.scope, has_project) {
-                        (Scope::Project, _) => (false, "This part is already in the project library"),
-                        (_, false) => (false, "Choose a project first"),
-                        _ => (true, ""),
-                    };
-                    let copy = ui.add_enabled(can, ui_kit::primary("Copy to project", &style.visuals));
-                    if copy.on_hover_text("Copy this part into the project's library. Shift-click to replace a copy already there.").on_disabled_hover_text(why).clicked() {
-                        let overwrite = ui.input(|i| i.modifiers.shift);
-                        *action = Action::CopyToProject { category: key.0.clone(), name: key.1.clone(), overwrite };
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (can, why) = match (self.scope, has_project) {
+                            (Scope::Project, _) => (false, "This part is already in the project library"),
+                            (_, false) => (false, "Choose a project first"),
+                            _ => (true, ""),
+                        };
+                        let copy = ui.add_enabled(can, ui_kit::primary("Copy to project", &style.visuals));
+                        if copy
+                            .on_hover_text("Copy this part into the project's library. Shift-click to replace a copy already there.")
+                            .on_disabled_hover_text(why)
+                            .clicked()
+                        {
+                            let overwrite = ui.input(|i| i.modifiers.shift);
+                            *action = Action::CopyToProject { category: key.0.clone(), name: key.1.clone(), overwrite };
+                        }
+                    });
                 });
             });
-        });
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             // Identity: MPN, who makes it, which files it has.
             section(ui, |ui| {
@@ -1656,11 +1785,10 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                         if ui.add(ui_kit::ghost("Edit…")).on_hover_text("Edit MPN, maker, description, category, supplier numbers, datasheet and tags").clicked() {
                             *action = Action::Edit(vec![key.clone()]);
                         }
-                        if ui.add(ui_kit::ghost("Attach…")).on_hover_text("Add a datasheet (PDF), SPICE model, 3D model (STEP/WRL) or a footprint/3D ZIP without a symbol").clicked() {
-                            if let Some(path) = pick_attachment() {
+                        if ui.add(ui_kit::ghost("Attach…")).on_hover_text("Add a datasheet (PDF), SPICE model, 3D model (STEP/WRL) or a footprint/3D ZIP without a symbol").clicked()
+                            && let Some(path) = pick_attachment() {
                                 *action = Action::Attach { scope: self.scope, category: key.0.clone(), name: key.1.clone(), path };
                             }
-                        }
                     });
                 });
                 let rows: Vec<_> = self.inspect.iter().flat_map(|i| i.fields.iter()).filter(|(k, v)| !v.is_empty() && !matches!(*k, "MPN" | "Manufacturer")).collect();
@@ -1734,7 +1862,8 @@ impl AttachDialog {
     fn show(&mut self, ctx: &egui::Context, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>) -> AttachAction {
         let mut action = AttachAction::None;
         let file = format!("{} → {}", self.path.file_name().unwrap_or_default().to_string_lossy(), self.name);
-        let targets: Vec<LibraryRoot> = [(self.to_global, global), (self.to_project, project)].into_iter().filter_map(|(on, r)| if on { r.cloned() } else { None }).collect();
+        let targets: Vec<LibraryRoot> =
+            [(self.to_global, global), (self.to_project, project)].into_iter().filter_map(|(on, r)| if on { r.cloned() } else { None }).collect();
         let dismissed = batch_dialog::dialog(
             ctx,
             egui::Id::NULL.with("attach_dialog"),

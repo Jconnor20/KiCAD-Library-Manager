@@ -42,6 +42,13 @@ pub struct Settings {
     pub history: History,
     /// SPICE simulation library folders and automatic model resolution.
     pub sim: SimSettings,
+    /// Ask GitHub for the latest release at start-up (the GUI shows a notice when there is a newer one).
+    #[serde(default = "yes")]
+    pub check_updates: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// Settings for finding or generating SPICE simulation models during import.
@@ -58,11 +65,7 @@ pub struct SimSettings {
 
 impl Default for SimSettings {
     fn default() -> Self {
-        Self {
-            auto_sim: true,
-            auto_generate_from_datasheet: true,
-            spice_dirs: Vec::new(),
-        }
+        Self { auto_sim: true, auto_generate_from_datasheet: true, spice_dirs: Vec::new() }
     }
 }
 
@@ -125,7 +128,7 @@ impl Settings {
         let mut s = path()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|t| Self::parse(&t))
-            .unwrap_or_default();
+            .unwrap_or_else(|| Self { check_updates: true, ..Self::default() });
         match s.legacy_standards.take() {
             // Customised rules from before profiles become a profile of their own, once.
             Some(old) if s.profile.is_empty() && old != crate::standardise::Rules::default() => {
@@ -151,10 +154,10 @@ impl Settings {
     /// Parses a settings file, migrating the old `downloads_dir` into `watch_dirs`.
     fn parse(text: &str) -> Option<Self> {
         let mut s: Self = serde_json::from_str(text).ok()?;
-        if let Some(d) = s.downloads_dir.take() {
-            if !s.watch_dirs.contains(&d) {
-                s.watch_dirs.push(d);
-            }
+        if let Some(d) = s.downloads_dir.take()
+            && !s.watch_dirs.contains(&d)
+        {
+            s.watch_dirs.push(d);
         }
         Some(s)
     }

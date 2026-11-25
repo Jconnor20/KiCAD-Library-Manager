@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The GUI tests render offscreen with wgpu; egui_kittest prefers a CPU adapter (WARP) so no GPU is needed.
+      # Tests that need kicad-cli skip themselves, and live-API tests are #[ignore]d, so neither runs here.
+      - run: cargo test --workspace
+        env:
+          # Tests that don't make their own sandbox must still never touch a real profile.
+          # (runner.temp is only available at step level.)
+          KLM_CONFIG_DIR: ${{ runner.temp }}/klm-config
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources

@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn plan_limit_reply_is_reported_not_swallowed() {
-        // Recorded live (W6.1): the free plan's part quota ran out, so `data` is null.
+        // Recorded live: the free plan's part quota ran out, so `data` is null.
         let e = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/nexar_quota_exceeded.json")).unwrap()).unwrap_err();
         assert!(e.to_string().contains("part limit"), "{e}");
     }

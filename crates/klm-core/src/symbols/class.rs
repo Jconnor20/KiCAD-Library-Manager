@@ -59,17 +59,73 @@ pub fn detect(category: &str, sym: &Sexpr, pins: usize, rules: &Rules) -> Result
     let has = |list: &[&str]| w.iter().any(|x| list.iter().any(|l| x.starts_with(l)));
     let exact = |list: &[&str]| w.iter().any(|x| list.contains(&x.as_str()));
     let (class, count) = match coarse {
-        "Resistors" if has(&["potentiometer", "trimmer", "thermistor", "ntc", "ptc", "varistor", "array", "network", "fuse"]) => return Err("potentiometers, thermistors and arrays have no house style".into()),
+        "Resistors" if has(&["potentiometer", "trimmer", "thermistor", "ntc", "ptc", "varistor", "array", "network", "fuse"]) => {
+            return Err("potentiometers, thermistors and arrays have no house style".into());
+        }
         "Resistors" => (Class::Resistor, 2),
-        "Capacitors" if has(&["polarized", "polarised", "polar", "electrolytic", "tantalum", "polymer", "supercap", "supercapacitor", "array"]) => return Err("polarised capacitors have no house style".into()),
+        "Capacitors" if has(&["polarized", "polarised", "polar", "electrolytic", "tantalum", "polymer", "supercap", "supercapacitor", "array"]) => {
+            return Err("polarised capacitors have no house style".into());
+        }
         "Capacitors" => (Class::Capacitor, 2),
-        "Inductors" if has(&["ferrite", "bead", "transformer", "choke", "array", "emi", "filter"]) => return Err("ferrite beads, chokes and transformers have no house style".into()),
+        "Inductors" if has(&["ferrite", "bead", "transformer", "choke", "array", "emi", "filter"]) => {
+            return Err("ferrite beads, chokes and transformers have no house style".into());
+        }
         "Inductors" => (Class::Inductor, 2),
         // Vendor descriptions often say only "Diode <MPN>", so well-known TVS and Schottky families are told by part number.
-        "Diodes" if has(&["zener", "tvs", "schottky", "varactor", "bridge", "array", "dual", "photo", "esd", "bidirectional", "smaj", "smbj", "smcj", "smf", "p6ke", "sm6t", "ss1", "ss2", "ss3", "ss5", "1n58", "b5819", "bat4", "bat5", "rclamp"]) => return Err("only plain diodes have a house style".into()),
+        "Diodes"
+            if has(&[
+                "zener",
+                "tvs",
+                "schottky",
+                "varactor",
+                "bridge",
+                "array",
+                "dual",
+                "photo",
+                "esd",
+                "bidirectional",
+                "smaj",
+                "smbj",
+                "smcj",
+                "smf",
+                "p6ke",
+                "sm6t",
+                "ss1",
+                "ss2",
+                "ss3",
+                "ss5",
+                "1n58",
+                "b5819",
+                "bat4",
+                "bat5",
+                "rclamp",
+            ]) =>
+        {
+            return Err("only plain diodes have a house style".into());
+        }
         "Diodes" | "Optoelectronics" if exact(&["led", "leds"]) => (Class::Led, 2),
         "Diodes" => (Class::Diode, 2),
-        "Transistors" if has(&["mosfet", "fet", "jfet", "igbt", "nmos", "pmos", "darlington", "array", "digital", "brt", "biased", "prebiased", "phototransistor", "photo", "resistor"]) => return Err("only plain bipolar transistors have a house style".into()),
+        "Transistors"
+            if has(&[
+                "mosfet",
+                "fet",
+                "jfet",
+                "igbt",
+                "nmos",
+                "pmos",
+                "darlington",
+                "array",
+                "digital",
+                "brt",
+                "biased",
+                "prebiased",
+                "phototransistor",
+                "photo",
+                "resistor",
+            ]) =>
+        {
+            return Err("only plain bipolar transistors have a house style".into());
+        }
         "Transistors" if exact(&["npn"]) && !exact(&["pnp"]) => (Class::Npn, 3),
         "Transistors" if exact(&["pnp"]) && !exact(&["npn"]) => (Class::Pnp, 3),
         "Transistors" => return Err("can't tell NPN from PNP".into()),

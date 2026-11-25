@@ -43,7 +43,14 @@ pub struct ClassInfo {
 }
 
 fn f(name: &str, required: bool, unit: Option<&str>, aliases: &[&str]) -> FieldDef {
-    FieldDef { name: name.into(), required, visible: false, unit: unit.map(Into::into), allowed: vec![], aliases: aliases.iter().map(|a| a.to_string()).collect() }
+    FieldDef {
+        name: name.into(),
+        required,
+        visible: false,
+        unit: unit.map(Into::into),
+        allowed: vec![],
+        aliases: aliases.iter().map(|a| a.to_string()).collect(),
+    }
 }
 
 /// The built-in schema of a class (see the module docs for the keys); Generic for any other key.
@@ -285,7 +292,10 @@ fn carries_unit(t: &str, unit: &str) -> bool {
 /// should be a number in a unit and isn't ("Jumper") is skipped.
 pub fn autofill(info: &ClassInfo, part: &Part) -> Vec<(String, String)> {
     let param = |fd: &FieldDef| {
-        part.params.iter().find(|(n, _)| n.eq_ignore_ascii_case(&fd.name) || fd.aliases.iter().any(|a| a.eq_ignore_ascii_case(n))).map(|(_, v)| v.trim().to_string())
+        part.params
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(&fd.name) || fd.aliases.iter().any(|a| a.eq_ignore_ascii_case(n)))
+            .map(|(_, v)| v.trim().to_string())
     };
     info.fields
         .iter()
@@ -301,7 +311,13 @@ pub fn autofill(info: &ClassInfo, part: &Part) -> Vec<(String, String)> {
             };
             let raw = param(fd).filter(|v| v != "-" && !v.is_empty()).or(own)?;
             // "0.1W, 1/10W" and "0603 (1608 Metric)": the first form is the value.
-            let cut = if fd.unit.is_some() { raw.split([',', '(', '@']).next() } else if fd.name == "Package" { raw.split('(').next() } else { Some(raw.as_str()) };
+            let cut = if fd.unit.is_some() {
+                raw.split([',', '(', '@']).next()
+            } else if fd.name == "Package" {
+                raw.split('(').next()
+            } else {
+                Some(raw.as_str())
+            };
             let v = cut?.trim();
             let v = match &fd.unit {
                 Some(u) => normalise(u, v)?,
@@ -331,12 +347,13 @@ pub fn fix(sym: &mut Sexpr, category: &str, profile: &Profile, part: Option<&Par
         if field(sym, &fd.name).is_some() || info.fields.iter().filter(|o| o.unit.as_ref() == Some(unit)).count() != 1 {
             continue;
         }
-        let mut hits = desc.split(|c: char| c.is_whitespace() || c == ',' || c == ';').map(|t| t.trim_start_matches(['±', '+'])).filter(|t| carries_unit(t, unit));
-        if let (Some(tok), None) = (hits.next(), hits.next()) {
-            if let Some(v) = normalise(unit, tok) {
-                set_property(sym, &fd.name, &v);
-                changes.push(format!("{}: added {v} (from Description)", fd.name));
-            }
+        let mut hits =
+            desc.split(|c: char| c.is_whitespace() || c == ',' || c == ';').map(|t| t.trim_start_matches(['±', '+'])).filter(|t| carries_unit(t, unit));
+        if let (Some(tok), None) = (hits.next(), hits.next())
+            && let Some(v) = normalise(unit, tok)
+        {
+            set_property(sym, &fd.name, &v);
+            changes.push(format!("{}: added {v} (from Description)", fd.name));
         }
     }
     for fd in &info.fields {
@@ -380,7 +397,11 @@ fn hidden(sym: &Sexpr, name: &str) -> bool {
 /// Hides or shows the field, written the KiCad 9 way. A field shown for the first time sits at the
 /// origin, inside the body, so it goes below Value instead, `nth` rows down.
 fn set_hidden(sym: &mut Sexpr, name: &str, hide: bool, nth: usize) {
-    let value_at = sym.children("property").find(|p| p.arg(0) == Some("Value")).and_then(|p| p.child("at")).map(|a| (a.arg(0).and_then(|v| v.parse::<f64>().ok()), a.arg(1).and_then(|v| v.parse::<f64>().ok())));
+    let value_at = sym
+        .children("property")
+        .find(|p| p.arg(0) == Some("Value"))
+        .and_then(|p| p.child("at"))
+        .map(|a| (a.arg(0).and_then(|v| v.parse::<f64>().ok()), a.arg(1).and_then(|v| v.parse::<f64>().ok())));
     let Some(p) = prop_mut(sym, name) else { return };
     p.items_mut().retain(|c| !is_hide(c));
     if let Some(e) = p.items_mut().iter_mut().find(|c| c.head() == Some("effects")) {
@@ -392,11 +413,15 @@ fn set_hidden(sym: &mut Sexpr, name: &str, hide: bool, nth: usize) {
         return;
     }
     let at = p.items_mut().iter_mut().find(|c| c.head() == Some("at"));
-    if let (Some(at), Some((Some(x), Some(y)))) = (at, value_at) {
-        if at.arg(0).and_then(|v| v.parse::<f64>().ok()) == Some(0.0) && at.arg(1).and_then(|v| v.parse::<f64>().ok()) == Some(0.0) {
-            let y = y - 2.54 * nth as f64;
-            *at = Sexpr::list("at", vec![Sexpr::Atom(crate::convert::easyeda::geom::fmt(x)), Sexpr::Atom(crate::convert::easyeda::geom::fmt(y)), Sexpr::Atom("0".into())]);
-        }
+    if let (Some(at), Some((Some(x), Some(y)))) = (at, value_at)
+        && at.arg(0).and_then(|v| v.parse::<f64>().ok()) == Some(0.0)
+        && at.arg(1).and_then(|v| v.parse::<f64>().ok()) == Some(0.0)
+    {
+        let y = y - 2.54 * nth as f64;
+        *at = Sexpr::list(
+            "at",
+            vec![Sexpr::Atom(crate::convert::easyeda::geom::fmt(x)), Sexpr::Atom(crate::convert::easyeda::geom::fmt(y)), Sexpr::Atom("0".into())],
+        );
     }
 }
 
@@ -522,7 +547,8 @@ mod tests {
         assert_eq!(property(&sym, "Value"), Some("2.2uF"));
         assert!(changes.contains(&"Capacitance: added 2.2uF (from Description)".to_string()), "{changes:?}");
         // Resistor and inductor descriptions as the libraries have them; Inductor's two "A" fields stay empty.
-        let mut r = parse(r#"(symbol "R1" (property "Description" "-55℃~+155℃ 100mW 10kΩ 75V Thick Film Resistor ±1% ±100ppm/℃ 0603 Chip Resistor"))"#).unwrap();
+        let mut r =
+            parse(r#"(symbol "R1" (property "Description" "-55℃~+155℃ 100mW 10kΩ 75V Thick Film Resistor ±1% ±100ppm/℃ 0603 Chip Resistor"))"#).unwrap();
         fix(&mut r, "Resistors", &Profile::default(), None);
         assert_eq!((property(&r, "Resistance"), property(&r, "Power"), property(&r, "Tolerance")), (Some("10kΩ"), Some("100mW"), Some("1%")));
         let mut l = parse(r#"(symbol "L1" (property "Description" "1.2A 1.4A 22uH 363mΩ ±20% SMD,4.4x4.2mm Power Inductors ROHS"))"#).unwrap();

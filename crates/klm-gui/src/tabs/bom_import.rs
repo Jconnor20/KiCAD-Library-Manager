@@ -115,13 +115,16 @@ impl BomImportTab {
                 if g.stopped == bi::Stopped::Kept {
                     cx.log(Level::Warn, "BOM to library: stopped; the parts already imported are kept, the other lines were not imported. Generate again to continue (parts already in the library are skipped)");
                 }
-                cx.log(if failed > 0 { Level::Warn } else { Level::Ok }, format!(
-                    "BOM to library: {} part(s) in the library, {failed} failed; Standardise changed {} file(s); {} compliant, {} not",
-                    g.lines.iter().filter(|d| d.library_part.is_some()).count(),
-                    g.standardised,
-                    g.compliant,
-                    g.non_compliant
-                ));
+                cx.log(
+                    if failed > 0 { Level::Warn } else { Level::Ok },
+                    format!(
+                        "BOM to library: {} part(s) in the library, {failed} failed; Standardise changed {} file(s); {} compliant, {} not",
+                        g.lines.iter().filter(|d| d.library_part.is_some()).count(),
+                        g.standardised,
+                        g.compliant,
+                        g.non_compliant
+                    ),
+                );
                 self.generated = Some(g);
                 self.lib = klm_core::bom::lib_parts(&cx.roots());
                 self.in_lib = self.items.iter().map(|i| self.in_library(i)).collect();
@@ -199,7 +202,8 @@ impl BomImportTab {
         self.ctl = Arc::new(bi::Control::default());
         cx.busy = true;
         let ctl = self.ctl.clone();
-        let (lines, by, sources, tx, ctx) = (self.todo().into_iter().map(|n| (n, self.items[n].line.clone())).collect::<Vec<_>>(), self.by, cx.sources.clone(), cx.tx.clone(), cx.ctx.clone());
+        let (lines, by, sources, tx, ctx) =
+            (self.todo().into_iter().map(|n| (n, self.items[n].line.clone())).collect::<Vec<_>>(), self.by, cx.sources.clone(), cx.tx.clone(), cx.ctx.clone());
         std::thread::spawn(move || {
             klm_core::download::set_abort(false);
             let report = reporter(&tx, &ctx);
@@ -221,12 +225,19 @@ impl BomImportTab {
         self.ctl = Arc::new(bi::Control::default());
         cx.busy = true;
         let ctl = self.ctl.clone();
-        let unlooked: Vec<(usize, klm_core::bom::Line)> = (0..self.items.len()).filter(|&n| self.selected[n] && self.resolved[n].is_none()).map(|n| (n, self.items[n].line.clone())).collect();
+        let unlooked: Vec<(usize, klm_core::bom::Line)> =
+            (0..self.items.len()).filter(|&n| self.selected[n] && self.resolved[n].is_none()).map(|n| (n, self.items[n].line.clone())).collect();
         let (by, mut all, sel) = (self.by, self.resolved_all(), self.selected.clone());
         let (sources, settings, tx, ctx) = (cx.sources.clone(), cx.settings.clone(), cx.tx.clone(), cx.ctx.clone());
         let (global, project) = (cx.global_root(), cx.project_root());
         // Only the ticked alternatives of ticked lines are imported.
-        let alts: Vec<Vec<bi::Alt>> = self.items.iter().zip(&self.selected).zip(&self.alt_on).map(|((i, &on), t)| if on { i.alts.iter().zip(t).filter(|(_, k)| **k).map(|(a, _)| a.clone()).collect() } else { vec![] }).collect();
+        let alts: Vec<Vec<bi::Alt>> = self
+            .items
+            .iter()
+            .zip(&self.selected)
+            .zip(&self.alt_on)
+            .map(|((i, &on), t)| if on { i.alts.iter().zip(t).filter(|(_, k)| **k).map(|(a, _)| a.clone()).collect() } else { vec![] })
+            .collect();
         let opts = bi::Options {
             target: if self.project { Target::Project } else { Target::Global },
             category: Some(self.category.trim().to_string()).filter(|c| !c.is_empty()),
@@ -245,8 +256,10 @@ impl BomImportTab {
                 let _ = tx.send(AppMsg::BomImport(Msg::Resolved(found)));
             }
             // Deselected lines are passed as not found, which generate leaves out.
-            let resolved: Vec<Resolved> = all.into_iter().zip(&sel).map(|(r, &on)| if on { r } else { Resolved::NotFound(vec!["deselected".into()]) }).collect();
-            let res = bi::generate(&resolved, &alts, &prefetched, &sources, global.as_ref(), project.as_ref(), &opts, &settings, &work_dir(), &report, &ctl).map_err(|e| format!("{e:#}"));
+            let resolved: Vec<Resolved> =
+                all.into_iter().zip(&sel).map(|(r, &on)| if on { r } else { Resolved::NotFound(vec!["deselected".into()]) }).collect();
+            let res = bi::generate(&resolved, &alts, &prefetched, &sources, global.as_ref(), project.as_ref(), &opts, &settings, &work_dir(), &report, &ctl)
+                .map_err(|e| format!("{e:#}"));
             let _ = tx.send(AppMsg::BomImport(Msg::Generated(res)));
             ctx.request_repaint();
         });
@@ -255,11 +268,10 @@ impl BomImportTab {
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
         let pal = theme::palette(ui.visuals());
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!self.running, egui::Button::new("Open BOM…")).on_hover_text("A CSV or Excel/OpenDocument sheet with one row per line (KiCad, JLCPCB, DigiKey and similar exports). The sheet, header row and columns are detected; change them below if they are wrong.").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("BOM (CSV or spreadsheet)", &["csv", "xlsx", "xlsm", "xlsb", "xls", "ods"]).pick_file() {
+            if ui.add_enabled(!self.running, egui::Button::new("Open BOM…")).on_hover_text("A CSV or Excel/OpenDocument sheet with one row per line (KiCad, JLCPCB, DigiKey and similar exports). The sheet, header row and columns are detected; change them below if they are wrong.").clicked()
+                && let Some(p) = rfd::FileDialog::new().add_filter("BOM (CSV or spreadsheet)", &["csv", "xlsx", "xlsm", "xlsb", "xls", "ods"]).pick_file() {
                     self.open(p, cx);
                 }
-            }
             if let Some(p) = &self.path {
                 ui.label(p.display().to_string());
             }
@@ -317,7 +329,10 @@ impl BomImportTab {
                     });
                 }
                 ui.label("Header row");
-                moved |= ui.add(egui::DragValue::new(&mut header).range(1..=self.sheets[sheet].rows.len().max(1))).on_hover_text("The row (as numbered in the spreadsheet) holding the column titles. Rows above it are ignored.").changed();
+                moved |= ui
+                    .add(egui::DragValue::new(&mut header).range(1..=self.sheets[sheet].rows.len().max(1)))
+                    .on_hover_text("The row (as numbered in the spreadsheet) holding the column titles. Rows above it are ignored.")
+                    .changed();
                 ui.weak(self.rows[0].iter().filter(|c| !c.is_empty()).take(8).cloned().collect::<Vec<_>>().join(" | "));
             });
         });
@@ -378,24 +393,32 @@ impl BomImportTab {
             if let Some(w) = why {
                 ui.weak(format!("Generate: {w}"));
             }
-            if ui.add_enabled(self.generated.is_some(), egui::Button::new("Save BOM with library parts…")).clicked() {
-                if let (Some(g), Some(path)) = (&self.generated, rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom-library.csv").save_file()) {
+            if ui.add_enabled(self.generated.is_some(), egui::Button::new("Save BOM with library parts…")).clicked()
+                && let (Some(g), Some(path)) = (&self.generated, rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("bom-library.csv").save_file()) {
                     let csv = bi::write_back(&self.rows, &self.at, &self.resolved_all(), &g.lines);
                     cx.log.push(match std::fs::write(&path, csv) {
                         Ok(()) => format!("Wrote {}", path.display()),
                         Err(e) => format!("Could not write {}: {e}", path.display()),
                     });
                 }
-            }
         });
         if let Some(g) = &self.generated {
-            ui.label(format!("Standardise changed {} file(s); {} added part(s) compliant, {} not (see the Library tab).", g.standardised, g.compliant, g.non_compliant));
+            ui.label(format!(
+                "Standardise changed {} file(s); {} added part(s) compliant, {} not (see the Library tab).",
+                g.standardised, g.compliant, g.non_compliant
+            ));
         }
         if looked {
             let count = |l: &str| self.resolved.iter().flatten().filter(|r| r.label() == l).count();
             let waiting = self.selected.iter().zip(&self.resolved).filter(|(on, r)| **on && r.is_none()).count();
             let more = if waiting > 0 { format!(" {waiting} selected line(s) are not looked up yet and are left out.") } else { String::new() };
-            ui.label(format!("{} standard library, {} from sources, {} not found, {} ambiguous. Lines not found or ambiguous are left out.{more}", count("stdlib"), count("source"), count("not found"), count("ambiguous")));
+            ui.label(format!(
+                "{} standard library, {} from sources, {} not found, {} ambiguous. Lines not found or ambiguous are left out.{more}",
+                count("stdlib"),
+                count("source"),
+                count("not found"),
+                count("ambiguous")
+            ));
         }
         let have = self.in_lib.iter().flatten().count();
         if have > 0 {
@@ -412,7 +435,18 @@ impl BomImportTab {
                 ui.weak(format!("{} of {} selected", self.selected.iter().filter(|&&s| s).count(), self.items.len()));
             });
         }
-        let cols = [Col::new("", 28.0).no_sort(), Col::new("Refs", 150.0).no_sort(), Col::new("Qty", 48.0).no_sort(), Col::new("MPN (editable)", 190.0).no_sort(), Col::new("Alternatives", 190.0).no_sort(), Col::new("Check", 130.0).no_sort(), Col::new("Status", 90.0).no_sort(), Col::new("Symbol / footprint / 3D", 150.0).no_sort(), Col::new("", 64.0).no_sort(), Col::rest("Result").no_sort()];
+        let cols = [
+            Col::new("", 28.0).no_sort(),
+            Col::new("Refs", 150.0).no_sort(),
+            Col::new("Qty", 48.0).no_sort(),
+            Col::new("MPN (editable)", 190.0).no_sort(),
+            Col::new("Alternatives", 190.0).no_sort(),
+            Col::new("Check", 130.0).no_sort(),
+            Col::new("Status", 90.0).no_sort(),
+            Col::new("Symbol / footprint / 3D", 150.0).no_sort(),
+            Col::new("", 64.0).no_sort(),
+            Col::rest("Result").no_sort(),
+        ];
         let mut edited = None;
         let mut find = None;
         let mut sort = Sort { col: usize::MAX, asc: true };
@@ -423,7 +457,11 @@ impl BomImportTab {
             row.col(|ui| drop(ui.label(it.qty.to_string())));
             row.col(|ui| {
                 let hint = it.line.value.clone();
-                if ui.add(egui::TextEdit::singleline(&mut it.line.mpn).hint_text(hint).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY)).on_hover_text("Correct a wrong part number here, then look the lines up again").changed() {
+                if ui
+                    .add(egui::TextEdit::singleline(&mut it.line.mpn).hint_text(hint).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY))
+                    .on_hover_text("Correct a wrong part number here, then look the lines up again")
+                    .changed()
+                {
                     edited = Some(n);
                 }
             });
@@ -431,13 +469,20 @@ impl BomImportTab {
                 ui.horizontal(|ui| {
                     for (j, a) in it.alts.iter().enumerate() {
                         let what = if a.mpn.is_empty() { a.lcsc.clone() } else { format!("{} ({})", a.mpn, a.lcsc) };
-                        ui.checkbox(&mut self.alt_on[n][j], &a.lcsc).on_hover_text(format!("{what}\n{}\nTick to import this alternative too and record it as an alternative of the line's part.", a.text));
+                        ui.checkbox(&mut self.alt_on[n][j], &a.lcsc).on_hover_text(format!(
+                            "{what}\n{}\nTick to import this alternative too and record it as an alternative of the line's part.",
+                            a.text
+                        ));
                     }
                 });
             });
             row.col(|ui| match (&self.in_lib[n], bi::flag(&it.line)) {
-                (Some(sym), _) => drop(ui_kit::badge(ui, "In library", Level::Ok).on_hover_text(format!("Already in your library as {sym}. Tick the line to import it again."))),
-                (None, Some(f)) => drop(ui_kit::badge(ui, &format!("{}: {}", if matches!(f, bi::Flag::NonPart(_)) { "not a part" } else { "bad MPN" }, f.why()), Level::Warn)),
+                (Some(sym), _) => drop(
+                    ui_kit::badge(ui, "In library", Level::Ok).on_hover_text(format!("Already in your library as {sym}. Tick the line to import it again.")),
+                ),
+                (None, Some(f)) => {
+                    drop(ui_kit::badge(ui, &format!("{}: {}", if matches!(f, bi::Flag::NonPart(_)) { "not a part" } else { "bad MPN" }, f.why()), Level::Warn))
+                }
                 (None, None) => {}
             });
             match self.resolved.get(n).and_then(Option::as_ref) {
@@ -456,7 +501,13 @@ impl BomImportTab {
                             ui.spacing_mut().item_spacing.x = 4.0;
                             for (short, what, ok) in [("SYM", "Symbol", a.symbol), ("FP", "Footprint", a.footprint), ("3D", "3D model", a.model)] {
                                 let (status, state) = if ok { (ui_kit::Status::Ok, "present") } else { (ui_kit::Status::Missing, "missing") };
-                                ui_kit::file_chip(ui, short, status, &if ok { format!("{what} present") } else { format!("No {what} from the source. Click Find… to look for one.") }, &format!("{what}: {state}"));
+                                ui_kit::file_chip(
+                                    ui,
+                                    short,
+                                    status,
+                                    &if ok { format!("{what} present") } else { format!("No {what} from the source. Click Find… to look for one.") },
+                                    &format!("{what}: {state}"),
+                                );
                             }
                         }
                         (Resolved::Source(_), None) if self.running => drop(ui.weak("checking…")),
@@ -469,14 +520,24 @@ impl BomImportTab {
                         _ => true,
                     };
                     row.col(|ui| {
-                        if wanted && ui.add(ui_kit::ghost("Find…")).on_hover_text("Search every source for this part (symbol, footprint, 3D model), then import it and look the line up again").clicked() {
+                        if wanted
+                            && ui
+                                .add(ui_kit::ghost("Find…"))
+                                .on_hover_text("Search every source for this part (symbol, footprint, 3D model), then import it and look the line up again")
+                                .clicked()
+                        {
                             find = Some(n);
                         }
                     });
                     let done = self.generated.as_ref().and_then(|g| g.lines.get(n));
                     row.col(|ui| {
                         ui.label(match done {
-                            Some(d) => d.error.clone().or(d.library_part.clone()).map(|t| if d.alts.is_empty() { t } else { format!("{t}  | alternatives: {}", d.alts.join("; ")) }).unwrap_or_else(|| r.detail()),
+                            Some(d) => d
+                                .error
+                                .clone()
+                                .or(d.library_part.clone())
+                                .map(|t| if d.alts.is_empty() { t } else { format!("{t}  | alternatives: {}", d.alts.join("; ")) })
+                                .unwrap_or_else(|| r.detail()),
                             None => r.detail(),
                         });
                     });
@@ -490,7 +551,14 @@ impl BomImportTab {
         });
         if let Some(n) = find {
             let l = &self.items[n].line;
-            let query = l.supplier_ids.iter().map(|(_, id)| id.as_str()).chain([l.mpn.as_str(), l.value.as_str()]).find(|q| !q.is_empty()).unwrap_or_default().to_string();
+            let query = l
+                .supplier_ids
+                .iter()
+                .map(|(_, id)| id.as_str())
+                .chain([l.mpn.as_str(), l.value.as_str()])
+                .find(|q| !q.is_empty())
+                .unwrap_or_default()
+                .to_string();
             cx.send(AppMsg::Search(super::search::Msg::Query(query)));
             cx.tab = crate::Tab::Search;
         }

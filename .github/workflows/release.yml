@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the tag matches Cargo.toml
+        id: ver
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          if ($tag -ne $version) { throw "Tag $tag does not match Cargo.toml version $version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build the PCM package
+        run: ./scripts/package.ps1
+
+      - name: Build klm-cli and the portable zip
+        run: |
+          cargo build --release -p klm-cli
+          if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+          $v = '${{ steps.ver.outputs.version }}'
+          Compress-Archive -DestinationPath "dist/klm-$v-windows-x64.zip" -Path target/release/klm.exe, target/release/klm-cli.exe, LICENSE, README.md, stdlib
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/klm-pcm-${{ steps.ver.outputs.version }}.zip
+            dist/klm-${{ steps.ver.outputs.version }}-windows-x64.zip
+          generate_release_notes: true
+
+      # After the release exists, so the download URL in packages.json is already live.
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          path: master
+
+      - name: Update the PCM repository on master
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          ./scripts/update-pcm-repo.ps1 -Version $v -ZipPath "dist/klm-pcm-$v.zip" -PcmDir master/pcm
+          Set-Location master
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pcm
+          git commit -m "PCM repository: v$v"
+          git pull --rebase origin master
+          git push origin HEAD:master

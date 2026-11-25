@@ -22,24 +22,25 @@ pub mod health;
 pub mod kicad_edit;
 pub mod kicad_env;
 pub mod library;
-pub mod project_check;
 pub mod matching;
 pub(crate) mod model3d;
 pub mod model_links;
 pub mod part;
 pub mod preview;
+pub mod project_check;
 pub mod rules;
 pub mod search_filter;
 pub mod settings;
+pub mod sexpr;
 pub mod shadow;
 pub mod snapshot;
-pub mod standardise;
-pub mod stdlib;
-pub mod sexpr;
 pub mod sources;
 pub mod spice;
+pub mod standardise;
+pub mod stdlib;
 pub mod store;
 pub mod symbols;
+pub mod update;
 
 /// Fresh, empty temp folder for a test.
 #[cfg(test)]
