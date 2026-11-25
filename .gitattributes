@@ -1,0 +1,2 @@
+# The PCM repository hash covers these bytes exactly, so git must never rewrite their line endings.
+pcm/*.json text eol=lf
