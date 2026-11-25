@@ -1,11 +1,16 @@
 {
   "$schema": "https://go.kicad.org/pcm/schemas/v2#/definitions/Repository",
   "name": "KiCad Library Manager",
-  "maintainer": { "name": "Jconnor20", "contact": { "web": "https://github.com/Jconnor20/KiCAD-Library-Manager" } },
+  "maintainer": {
+    "name": "Jconnor20",
+    "contact": {
+      "web": "https://github.com/Jconnor20/KiCAD-Library-Manager"
+    }
+  },
   "packages": {
     "url": "https://raw.githubusercontent.com/Jconnor20/KiCAD-Library-Manager/master/pcm/packages.json",
-    "sha256": "3d54cd70dc4fdf9b8ba37665ae2794a73b8fa708a6c6be7ddce0dd04c3f2935c",
-    "update_time_utc": "2026-11-25 01:39:17",
-    "update_timestamp": 1795570757
+    "sha256": "f89f6ae0579adc056c1d84e53cff13822b8209f35d4fcf96ac1eccbf81e11922",
+    "update_time_utc": "2026-11-25 06:20:12",
+    "update_timestamp": 1795587612
   }
 }

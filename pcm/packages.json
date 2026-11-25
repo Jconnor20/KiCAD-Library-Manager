@@ -7,10 +7,31 @@
       "description_full": "Adds a Library Manager button to the PCB editor and schematic editor toolbars. It starts the bundled klm.exe on the open board's project, where you can import parts (symbol, footprint, 3D model, datasheet, sim model) into a global or project library. Needs KiCad's API enabled (Preferences > Plugins).",
       "identifier": "com.github.jconnor20.kicad-library-manager",
       "type": "plugin",
-      "author": { "name": "Jconnor20", "contact": { "web": "https://github.com/Jconnor20/KiCAD-Library-Manager" } },
+      "author": {
+        "name": "Jconnor20",
+        "contact": {
+          "web": "https://github.com/Jconnor20/KiCAD-Library-Manager"
+        }
+      },
       "license": "GPL-3.0-or-later",
-      "resources": { "homepage": "https://github.com/Jconnor20/KiCAD-Library-Manager" },
-      "versions": []
+      "resources": {
+        "homepage": "https://github.com/Jconnor20/KiCAD-Library-Manager"
+      },
+      "versions": [
+        {
+          "version": "1.0.0",
+          "status": "stable",
+          "kicad_version": "9.0",
+          "runtime": "ipc",
+          "platforms": [
+            "windows"
+          ],
+          "install_size": 34109484.0,
+          "download_url": "https://github.com/Jconnor20/KiCAD-Library-Manager/releases/download/v1.0.0/klm-pcm-1.0.0.zip",
+          "download_sha256": "d6dd80b21fe2a4a367ff927b4e66934f09503fd3cdb77b1f3913cefd79890695",
+          "download_size": 13912618
+        }
+      ]
     }
   ]
 }
