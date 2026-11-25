@@ -6,7 +6,7 @@ Please do not open a public issue for a security problem. Report it privately wi
 
 Include:
 
-- The KLM version (from the app's About or Settings page) and your Windows version
+- The KLM version (the release you downloaded, or the version in `Cargo.toml` if you built it; the app does not show it) and your Windows version
 - Steps to reproduce, and what an attacker could do with it
 - Relevant log output, with API keys and personal paths removed
 

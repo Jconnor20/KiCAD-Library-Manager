@@ -1,5 +1,7 @@
 # KLM standard library manifests
 
+`stdlib/` currently holds `Resistors.csv` only. The release zips do not include this folder yet: KLM looks for `stdlib/` next to the executable, then in the current folder, so run from a source checkout or pass `--manifest <dir>`.
+
 Each `<Category>.csv` here becomes the KiCad library `KLM_STD_<Category>` when someone runs `klm-cli stdlib build`. Only part data is shipped. Symbols come from the user's own KiCad stock libraries, and footprints are referenced from them, so no CAD is redistributed.
 
 ## Columns

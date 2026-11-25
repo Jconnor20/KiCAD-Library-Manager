@@ -11,7 +11,8 @@
 ```
 cargo build --release
 cargo run --release -p klm-gui      # the GUI (klm.exe)
-cargo run --release -p klm-cli -- --help
+cargo run --release -p klm-cli            # with no arguments, prints every command
+scripts\package.ps1                        # dist\klm-pcm-<version>.zip, the KiCad PCM package
 ```
 
 ## Test

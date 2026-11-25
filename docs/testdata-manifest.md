@@ -3,7 +3,7 @@
 `testdata/` is git-ignored: the files below are downloaded by hand (nothing in them is ever executed) and
 `crates/klm-core/tests/corpus_e2e.rs` skips any case whose file is missing. Renders land in `target/corpus-renders/`.
 
-## Corpus (W6.2)
+## Corpus
 
 | ID | File (in `testdata/`) | Format | Source | Licence | Size | SHA-256 |
 |----|------|--------|--------|---------|------|---------|
@@ -21,7 +21,7 @@
 | C08d | `ul_4515DO-DS3BK004DP.zip` | Ultra Librarian ZIP, KiCad + Altium + Fusion | same | same | 37 381 | `bd7f3fbfd301e92ef3d76fb93dea48755e0651fd5ad458991da8c0207f51ded9` |
 | C09 | built by the test from the `.stl` in C08a | STL-only ZIP | derived from the Ultra Librarian download | as C08 | ~0.5 MB | not stored |
 
-## Original wish list of vendor downloads
+## More vendor downloads worth trying
 
 | # | Part (suggested) | Site | Formats to download | Expected import result |
 |---|------------------|------|---------------------|------------------------|
