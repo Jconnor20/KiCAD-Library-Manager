@@ -17,6 +17,12 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
+      # Most import and GUI tests convert files with kicad-cli, as the app does, so CI needs a real KiCad.
+      - name: Install KiCad
+        run: |
+          choco install kicad -y --no-progress
+          $cli = Get-ChildItem 'C:\Program Files\KiCad\*\bin\kicad-cli.exe' | Select-Object -First 1
+          & $cli.FullName version
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The GUI tests render offscreen with wgpu; egui_kittest prefers a CPU adapter (WARP) so no GPU is needed.
       # Tests that need kicad-cli skip themselves, and live-API tests are #[ignore]d, so neither runs here.
