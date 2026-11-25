@@ -5,6 +5,7 @@ use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui::{self, RichText};
 use klm_core::library::Scope;
 use klm_core::snapshot::{self, Change, ChangeKind, Info, Kind};
+use std::sync::mpsc;
 
 pub enum Msg {
     /// Put the library back as it was when snapshot `id` was taken.
@@ -29,6 +30,12 @@ pub struct HistoryTab {
     selected: Option<String>,
     /// Files the `selected` snapshot changed; re-read with the snapshot list.
     changed: Option<(String, Result<Vec<Change>, String>)>,
+    /// The snapshot list being read on a worker, with the library it is for.
+    listing: Option<(std::path::PathBuf, mpsc::Receiver<Vec<Info>>)>,
+    /// The changed files of snapshot `id` being read on a worker.
+    reading: Option<(String, mpsc::Receiver<Result<Vec<Change>, String>>)>,
+    /// A rollback, version change or delete running on a worker; buttons that start another are disabled until it ends.
+    job: Option<mpsc::Receiver<()>>,
 }
 
 /// What a row's menu asked for.
@@ -72,6 +79,9 @@ impl Default for HistoryTab {
             versions_only: false,
             selected: None,
             changed: None,
+            listing: None,
+            reading: None,
+            job: None,
         }
     }
 }
@@ -99,12 +109,39 @@ impl HistoryTab {
         let Msg::Rollback { scope, id } = msg;
         let root = if scope == Scope::Global { cx.global_root() } else { cx.project_root() };
         let Some(root) = root else { return };
-        match snapshot::rollback(&root, &id) {
-            Ok(()) => cx.log.push("Rolled the library back; the state before the rollback is the newest snapshot, in case you want it back.".into()),
-            Err(e) => cx.log.push(format!("Could not roll back: {e:#}")),
+        if self.job.is_some() {
+            return cx.log.push("Could not roll back: another snapshot change is still running.".into());
         }
-        self.snapshots = None;
-        cx.send(AppMsg::Library(super::library::Msg::Refresh));
+        let (tx, ctx) = (cx.tx.clone(), cx.ctx.clone());
+        self.run(cx, move || {
+            let line = match snapshot::rollback(&root, &id) {
+                Ok(()) => "Rolled the library back; the state before the rollback is the newest snapshot, in case you want it back.".to_string(),
+                Err(e) => format!("Could not roll back: {e:#}"),
+            };
+            let _ = tx.send(AppMsg::Library(super::library::Msg::Refresh));
+            ctx.request_repaint();
+            Some(line)
+        });
+    }
+
+    /// Runs `work` on a worker and logs the line it returns. `job` is set until it ends.
+    fn run(&mut self, cx: &AppCtx, work: impl FnOnce() -> Option<String> + Send + 'static) {
+        let (done, rx) = mpsc::channel();
+        let (log, ctx) = (cx.tx.clone(), cx.ctx.clone());
+        std::thread::spawn(move || {
+            if let Some(line) = work() {
+                let _ = log.send(AppMsg::Log(line));
+            }
+            let _ = done.send(());
+            ctx.request_repaint();
+        });
+        self.job = Some(rx);
+        self.reload();
+    }
+
+    /// Forgets the listing, so the next frame reads it again.
+    fn reload(&mut self) {
+        (self.snapshots, self.listing) = (None, None);
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &mut AppCtx) {
@@ -115,11 +152,11 @@ impl HistoryTab {
             ui.add_space(8.0);
             for (scope, name) in [(Scope::Global, "Global"), (Scope::Project, "Project")] {
                 if ui.selectable_value(&mut self.scope, scope, name).clicked() {
-                    self.snapshots = None;
+                    self.reload();
                 }
             }
             if ui.button("Refresh").clicked() {
-                self.snapshots = None;
+                self.reload();
             }
         });
         ui.add_space(4.0);
@@ -128,23 +165,51 @@ impl HistoryTab {
             ui.weak("This library isn't set up.");
             return;
         };
+        // A finished job: the list is read again (the history folder changed anyway).
+        if self.job.as_ref().is_some_and(|rx| !matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty))) {
+            self.job = None;
+            self.reload();
+        }
+        let busy = self.job.is_some();
         // One stat per frame; the listing walks every snapshot, so it only reruns after a change.
         let stamp = std::fs::metadata(root.dir.join(snapshot::DIR)).and_then(|m| m.modified()).ok();
         if stamp != self.seen {
-            self.snapshots = None;
+            self.reload();
         }
         if self.snapshots.is_none() {
             self.seen = stamp;
-            self.changed = None;
+            (self.changed, self.reading) = (None, None);
+            if let Some((dir, rx)) = &self.listing {
+                match rx.try_recv() {
+                    Ok(list) if *dir == root.dir => self.snapshots = Some(list),
+                    Ok(_) | Err(mpsc::TryRecvError::Disconnected) => self.listing = None,
+                    Err(mpsc::TryRecvError::Empty) => {}
+                }
+            }
+            if self.snapshots.is_none() && self.listing.is_none() && !busy {
+                let (tx, rx) = mpsc::channel();
+                let (r, ctx) = (root.clone(), ui.ctx().clone());
+                std::thread::spawn(move || {
+                    let _ = tx.send(snapshot::list(&r));
+                    ctx.request_repaint();
+                });
+                self.listing = Some((root.dir.clone(), rx));
+            }
         }
-        let snapshots = self.snapshots.get_or_insert_with(|| snapshot::list(&root));
+        let Some(snapshots) = &self.snapshots else {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.weak("Reading snapshots…");
+            });
+            return;
+        };
         let last = snapshots.iter().find(|s| s.kind == Kind::Major);
         ui.horizontal_wrapped(|ui| {
             match last {
                 Some(v) => ui.label(RichText::new(format!("Last version: {}, {}", v.version.as_deref().unwrap_or(&v.label), ago(v.ts))).color(pal.muted)),
                 None => ui.colored_label(ui.visuals().warn_fg_color, "No version saved yet"),
             };
-            if ui.button("Snapshot now as version…").clicked() {
+            if ui.add_enabled(!busy, egui::Button::new("Snapshot now as version…")).clicked() {
                 self.naming = Some((None, String::new()));
             }
             if ui.add(egui::Button::new("Versions only").selected(self.versions_only)).clicked() {
@@ -163,10 +228,23 @@ impl HistoryTab {
         if self.selected.as_ref().is_some_and(|id| !shown.iter().any(|s| s.id == *id)) {
             self.selected = None;
         }
+        if let Some((id, rx)) = &self.reading
+            && let Ok(res) = rx.try_recv()
+        {
+            self.changed = Some((id.clone(), res));
+            self.reading = None;
+        }
         if let Some(id) = &self.selected
             && self.changed.as_ref().is_none_or(|(c, _)| c != id)
+            && self.reading.as_ref().is_none_or(|(c, _)| c != id)
         {
-            self.changed = Some((id.clone(), snapshot::changes(&root, id).map_err(|e| format!("{e:#}"))));
+            let (tx, rx) = mpsc::channel();
+            let (r, id, ctx) = (root.clone(), id.clone(), ui.ctx().clone());
+            self.reading = Some((id.clone(), rx));
+            std::thread::spawn(move || {
+                let _ = tx.send(snapshot::changes(&r, &id).map_err(|e| format!("{e:#}")));
+                ctx.request_repaint();
+            });
         }
         let selected = self.selected.clone();
         let (mut act, mut pick) = (None, None);
@@ -270,6 +348,9 @@ impl HistoryTab {
                     }
                 }
             }
+            None if self.reading.is_some() => {
+                ui.weak("Reading what changed…");
+            }
             None => {
                 ui.weak("Click a row to see which files that change touched.");
             }
@@ -281,25 +362,21 @@ impl HistoryTab {
             Some(Act::Roll(s)) => self.confirm = Some(s),
             Some(Act::Delete(s)) => self.confirm_delete = Some(s),
             Some(Act::Name(id)) => self.naming = Some((Some(id), String::new())),
-            Some(Act::Minor(id)) => {
-                let r = snapshot::set_kind(&root, &id, Kind::Minor, None);
-                self.done(r, cx);
-            }
+            Some(Act::Minor(id)) if !busy => self.change(cx, move || snapshot::set_kind(&root, &id, Kind::Minor, None)),
+            Some(Act::Minor(_)) => {}
             None => {}
         }
     }
 
-    /// Logs a failure and re-reads the list after any change to the snapshots.
-    fn done(&mut self, r: anyhow::Result<()>, cx: &mut AppCtx) {
-        if let Err(e) = r {
-            cx.log.push(format!("Could not change the snapshot: {e:#}"));
-        }
-        self.snapshots = None;
+    /// Runs a change to the snapshots on a worker, logs a failure, and re-reads the list when it ends.
+    fn change(&mut self, cx: &AppCtx, f: impl FnOnce() -> anyhow::Result<()> + Send + 'static) {
+        self.run(cx, move || f().err().map(|e| format!("Could not change the snapshot: {e:#}")));
     }
 
     pub fn dialogs(&mut self, cx: &mut AppCtx) {
         let ctx = cx.ctx.clone();
         let root = if self.scope == Scope::Global { cx.global_root() } else { cx.project_root() };
+        let busy = self.job.is_some();
         if let (Some((id, mut text)), Some(root)) = (self.naming.clone(), root.clone()) {
             let (mut yes, mut no) = (false, false);
             egui::Modal::new(egui::Id::unique("version")).show(&ctx, |ui| {
@@ -308,16 +385,16 @@ impl HistoryTab {
                 ui.label("A version is never removed automatically. Name it, e.g. \"Release 1\".");
                 ui.text_edit_singleline(&mut text);
                 ui.horizontal(|ui| {
-                    yes = ui.add_enabled(!text.trim().is_empty(), egui::Button::new("Save version")).clicked();
+                    yes = ui.add_enabled(!text.trim().is_empty() && !busy, egui::Button::new("Save version")).clicked();
                     no = ui.button("Cancel").clicked();
                 });
             });
             if yes {
-                let r = match &id {
-                    Some(id) => snapshot::set_kind(&root, id, Kind::Major, Some(text.trim().into())),
-                    None => snapshot::snapshot_as_version(&root, text.trim()),
-                };
-                self.done(r, cx);
+                let (id, name) = (id.clone(), text.trim().to_string());
+                self.change(cx, move || match &id {
+                    Some(id) => snapshot::set_kind(&root, id, Kind::Major, Some(name)),
+                    None => snapshot::snapshot_as_version(&root, &name),
+                });
             }
             self.naming = if yes || no { None } else { Some((id, text)) };
         }
@@ -333,13 +410,13 @@ impl HistoryTab {
                     if s.kind == Kind::Major { ", although it is a version" } else { "" }
                 ));
                 ui.horizontal(|ui| {
-                    yes = ui.button("Delete").clicked();
+                    yes = ui.add_enabled(!busy, egui::Button::new("Delete")).clicked();
                     no = ui.button("Cancel").clicked();
                 });
             });
             if yes {
-                let r = snapshot::delete(&root, &s.id);
-                self.done(r, cx);
+                let id = s.id.clone();
+                self.change(cx, move || snapshot::delete(&root, &id));
             }
             if yes || no {
                 self.confirm_delete = None;
@@ -358,7 +435,7 @@ impl HistoryTab {
             ui.label(RichText::new("The current state is snapshotted first, so you can undo the rollback.").weak());
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                yes = ui.button("Roll back").clicked();
+                yes = ui.add_enabled(!busy, egui::Button::new("Roll back")).clicked();
                 no = ui.button("Cancel").clicked();
             });
         });

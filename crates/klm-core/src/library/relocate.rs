@@ -9,6 +9,15 @@ use std::path::{Path, PathBuf};
 /// Prefix older KLM versions wrote for global paths; KiCad lost the variable whenever it saved its settings.
 const OLD_GLOBAL_VAR: &str = "${KLM_LIB}";
 
+/// What [`LibraryRoot::relink_all`] did, as lines for a log or terminal.
+#[derive(Clone, Debug, Default)]
+pub struct RelinkReport {
+    pub notes: Vec<String>,
+    pub errors: Vec<String>,
+    /// Something was rewritten, linked or copied (or failed); false when everything was already in place.
+    pub changed: bool,
+}
+
 impl LibraryRoot {
     /// KiCad files this root writes paths into: its libraries plus KiCad's tables.
     fn files_with_paths(&self) -> Vec<PathBuf> {
@@ -59,6 +68,31 @@ impl LibraryRoot {
             }
         }
         Ok(changed)
+    }
+
+    /// Brings every root back into KiCad's library list: rewrites old `${KLM_LIB}` paths, re-adds libraries KiCad dropped,
+    /// and copies footprints a project library hides. One failure doesn't stop the rest; it is listed in `errors`.
+    pub fn relink_all(roots: &[LibraryRoot]) -> RelinkReport {
+        let mut r = RelinkReport::default();
+        for root in roots {
+            match root.fix_old_paths() {
+                Ok(0) => {}
+                Ok(n) => r.notes.push(format!("Replaced ${{KLM_LIB}} with {} in {n} files", root.dir.display())),
+                Err(e) => r.errors.push(format!("Could not update old paths: {e:#}")),
+            }
+            for cat in root.unlinked() {
+                match root.link(&cat) {
+                    Ok(_) => r.notes.push(format!("Re-linked {} in KiCad", root.nickname(&cat))),
+                    Err(e) => r.errors.push(format!("Could not re-link {}: {e:#}", root.nickname(&cat))),
+                }
+            }
+            r.notes.extend(crate::shadow::sync_shadowing_projects(root, false).notes());
+        }
+        r.changed = !r.notes.is_empty() || !r.errors.is_empty();
+        if !r.changed {
+            r.notes.push("All KLM libraries are already in KiCad's library list.".into());
+        }
+        r
     }
 
     /// Points a global library at `new_dir` and rewrites every path to match. If `new_dir`

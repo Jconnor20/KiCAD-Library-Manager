@@ -115,13 +115,15 @@ pub fn add_pin(sym: &mut Sexpr, mut row: PinRow) -> Result<()> {
     ]);
     apply(&mut pin, &row);
     let name = sym.arg(0).context("symbol has no name")?.to_string();
-    let mut at = sym.items().iter().position(|u| u.head() == Some("symbol") && u.child("pin").is_some());
-    if at.is_none() {
-        let end = sym.items().iter().position(|c| matches!(c.head(), Some("embedded_fonts" | "embedded_files"))).unwrap_or(sym.items().len());
-        sym.items_mut().insert(end, Sexpr::list("symbol", vec![Sexpr::str(&format!("{name}_1_1"))]));
-        at = Some(end);
-    }
-    sym.items_mut()[at.unwrap()].items_mut().push(pin);
+    let at = match sym.items().iter().position(|u| u.head() == Some("symbol") && u.child("pin").is_some()) {
+        Some(at) => at,
+        None => {
+            let end = sym.items().iter().position(|c| matches!(c.head(), Some("embedded_fonts" | "embedded_files"))).unwrap_or(sym.items().len());
+            sym.items_mut().insert(end, Sexpr::list("symbol", vec![Sexpr::str(&format!("{name}_1_1"))]));
+            end
+        }
+    };
+    sym.items_mut()[at].items_mut().push(pin);
     Ok(())
 }
 

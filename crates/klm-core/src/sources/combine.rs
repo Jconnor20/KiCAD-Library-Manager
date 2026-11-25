@@ -120,10 +120,14 @@ impl Combined {
         if !self.mixed() {
             return;
         }
-        let (sym, fp) = (&self.sets[self.pick[0].unwrap()], &self.sets[self.pick[1].unwrap()]);
-        let issues = match readable_symbol(sym.symbol_file.as_ref().unwrap()) {
-            Ok(symbol) => check_pin_pad_files(&symbol, &fp.footprint_files[0]),
-            Err(e) => vec![Issue { severity: Severity::Error, message: format!("The symbol can't be checked: {e:#}") }],
+        let (Some(si), Some(fi)) = (self.pick[0], self.pick[1]) else { return };
+        let (sym, fp) = (&self.sets[si], &self.sets[fi]);
+        let issues = match (&sym.symbol_file, fp.footprint_files.first()) {
+            (Some(sf), Some(ff)) => match readable_symbol(sf) {
+                Ok(symbol) => check_pin_pad_files(&symbol, ff),
+                Err(e) => vec![Issue { severity: Severity::Error, message: format!("The symbol can't be checked: {e:#}") }],
+            },
+            _ => vec![Issue { severity: Severity::Error, message: "The symbol or footprint file is missing, so they can't be checked".into() }],
         };
         if !issues.is_empty() {
             let why: Vec<_> = issues.into_iter().map(|i| i.message).collect();

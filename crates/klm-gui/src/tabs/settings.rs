@@ -54,7 +54,6 @@ fn page_of(s: Section) -> Section {
     match s {
         Section::General => Section::Libraries,
         Section::Sources => Section::Lcsc,
-        Section::Standards => Section::Symbols,
         s => s,
     }
 }

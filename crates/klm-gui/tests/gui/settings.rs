@@ -296,7 +296,7 @@ fn s12_open_settings_at_a_section() {
         (Section::Sources, "LCSC needs no keys."),
         (Section::History, "Keep the last"),
         (Section::Bom, "Shipping region"),
-        (Section::Standards, "Text size"),
+        (Section::Symbols, "Text size"),
         (Section::Mouser, "API key"),
         (Section::General, "Global library"),
     ] {

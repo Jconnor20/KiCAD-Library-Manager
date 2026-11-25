@@ -71,9 +71,13 @@ fn pin_length(sym: &mut Sexpr, min: f64) -> Option<String> {
         }
         // Keep the body end where it is and move the connection point outwards.
         let grow = min - len;
-        move_to(child_mut(pin, "at").unwrap(), (x - dir.0 * grow, y - dir.1 * grow));
-        set_num(child_mut(pin, "length").unwrap(), 0, min);
-        n += 1;
+        if let Some(at) = child_mut(pin, "at") {
+            move_to(at, (x - dir.0 * grow, y - dir.1 * grow));
+        }
+        if let Some(length) = child_mut(pin, "length") {
+            set_num(length, 0, min);
+            n += 1;
+        }
     }
     (n > 0).then(|| format!("{n} pin(s) lengthened to {} mm", fmt(min)))
 }
@@ -227,6 +231,13 @@ mod tests {
         // Three visible pins (an IC) keep their labels; a hidden third pin does not make one.
         assert!(two_pin_labels(&mut parse(&SYM.replace("(hide yes) ", "")).unwrap()).is_none());
         assert!(two_pin_labels(&mut parse(SYM).unwrap()).is_some());
+    }
+
+    #[test]
+    fn malformed_pins_are_skipped() {
+        // Pins with no `at` or no `length` (a hand-edited or foreign file) must not panic the standardise pass.
+        let mut s = parse(r#"(symbol "M" (symbol "M_1_1" (pin input line (length 1) (name "A") (number "1")) (pin input line (at 0 0 0) (name "B") (number "2")) (pin input line (at 0 0 0) (length 1) (name "C") (number "3")) (pin input line (at 5 0 0) (length 1) (name "D") (number "4"))))"#).unwrap();
+        assert_eq!(pin_length(&mut s, 2.54).as_deref(), Some("2 pin(s) lengthened to 2.54 mm"));
     }
 
     const SYM: &str = r#"(symbol "U1"

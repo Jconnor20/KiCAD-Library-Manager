@@ -88,7 +88,9 @@ fn i3_watch_folder_link_opens_settings() {
 }
 
 fn history(size: (f32, f32)) -> Gui<'static> {
-    app(size, Tab::History)
+    let mut h = app(size, Tab::History);
+    settle(&mut h); // the snapshot list is read on a worker
+    h
 }
 
 fn menu_buttons<'a>(h: &'a Gui) -> Vec<egui_kittest::Node<'a>> {
@@ -133,6 +135,7 @@ fn h2_delete_is_confirmed() {
     h.run_ok();
     click(&mut h, "Delete…");
     click(&mut h, "Delete");
+    settle(&mut h);
     assert_eq!(snapshots(&h), before - 1);
 }
 
@@ -157,6 +160,7 @@ fn h4_what_changed() {
         let mut h = history(size);
         assert!(h.query_by_label("Click a row to see which files that change touched.").is_some());
         click(&mut h, "import RP2040");
+        settle(&mut h);
         assert!(h.query_all_by_label_contains("CHANGED SINCE THIS SNAPSHOT").next().is_some(), "{}", dump(&h));
         assert!(h.query_all_by_label("added").next().is_some(), "the files the import added are listed");
         assert!(snap(&mut h, "history-what-changed").is_empty());
@@ -271,6 +275,7 @@ fn c1_cleanup_issues() {
     for size in SIZES {
         let mut h = app(size, Tab::Cleanup);
         click(&mut h, "Scan KiCad's library tables");
+        settle(&mut h);
         assert!(h.query_all_by_label("Broken · 3").next().is_some(), "{}", dump(&h));
         assert!(snap(&mut h, "cleanup-scan").is_empty());
         click(&mut h, "Remove from table");

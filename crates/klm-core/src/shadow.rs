@@ -118,6 +118,7 @@ pub(crate) fn sync_after_import(global: &LibraryRoot) {
 }
 
 /// What the last import on this thread copied into projects (see [`sync_after_import`]), like `symbols::take_note`.
+/// Thread-local: call it on the same thread that ran the import (the worker), or it returns nothing.
 pub fn take_notes() -> Vec<String> {
     NOTES.with(|n| std::mem::take(&mut *n.borrow_mut()))
 }

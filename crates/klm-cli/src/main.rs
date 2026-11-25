@@ -661,28 +661,12 @@ fn check_project(dir: &Path, fabs: Vec<String>, all_fabs: bool, format: &str) ->
 }
 
 fn relink(project: Option<&Path>) -> Result<()> {
-    let roots = roots(&settings()?, project)?;
-    let mut any = false;
-    for root in roots {
-        let fixed = root.fix_old_paths()?;
-        if fixed > 0 {
-            println!("Replaced ${{KLM_LIB}} with {} in {fixed} files", root.dir.display());
-            any = true;
-        }
-        for cat in root.unlinked() {
-            root.link(&cat)?;
-            println!("Re-linked {} in KiCad", root.nickname(&cat));
-            any = true;
-        }
-        for note in klm_core::shadow::sync_shadowing_projects(&root, false).notes() {
-            println!("{note}");
-            any = true;
-        }
-    }
-    if !any {
-        println!("All KLM libraries are already in KiCad's library list.");
-    }
+    let report = LibraryRoot::relink_all(&roots(&settings()?, project)?);
+    report.notes.iter().for_each(|n| println!("{n}"));
     note_if_kicad_open();
+    if !report.errors.is_empty() {
+        bail!("{}", report.errors.join("; "));
+    }
     Ok(())
 }
 

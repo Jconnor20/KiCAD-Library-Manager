@@ -342,16 +342,17 @@ fn house_texts(fp: &mut Sexpr, texts: &BTreeMap<String, TextStyle>) -> Option<St
             if child_mut(node, "effects").is_none() {
                 node.items_mut().push(Sexpr::list("effects", vec![]));
             }
-            let effects = child_mut(node, "effects").unwrap();
-            match child_mut(effects, "font") {
-                Some(old) if *old == font => {}
-                Some(old) => {
-                    *old = font;
-                    changed = true;
-                }
-                None => {
-                    effects.items_mut().push(font);
-                    changed = true;
+            if let Some(effects) = child_mut(node, "effects") {
+                match child_mut(effects, "font") {
+                    Some(old) if *old == font => {}
+                    Some(old) => {
+                        *old = font;
+                        changed = true;
+                    }
+                    None => {
+                        effects.items_mut().push(font);
+                        changed = true;
+                    }
                 }
             }
         }

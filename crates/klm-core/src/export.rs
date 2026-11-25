@@ -58,7 +58,7 @@ fn build(root: &LibraryRoot, parts: &[(String, String)], stage: &Path, zip_path:
                     model.set_arg(0, Sexpr::str(&format!("${{KIPRJMOD}}/{rel}")));
                 }
             }
-            let stem = e.path().file_stem().unwrap().to_string_lossy().into_owned();
+            let Some(stem) = e.path().file_stem().map(|s| s.to_string_lossy().into_owned()) else { continue };
             let mut name = stem.clone();
             let mut n = 1;
             // Same name + same content is written once; same name + different content gets a suffix.

@@ -30,6 +30,8 @@ pub enum Msg {
     Show(String),
     /// Open Alternatives on this symbol, filtered to what JLCPCB stocks in the same package (the BOM's Swap).
     Swap(String),
+    /// The worker found the library that has this symbol: open Alternatives on it as for `Swap`.
+    SwapIn(LibraryRoot, String),
     /// Apply `edit` to each (category, name) in the `scope` library.
     Edit {
         scope: Scope,
@@ -640,12 +642,16 @@ impl LibraryTab {
             Msg::Refresh => self.stale = true,
             Msg::Swap(symbol) => {
                 // The BOM matches against both libraries, so open the one that has the symbol.
-                // shortcut: scans on the UI thread, one click; move to the panel's worker if large libraries stall it.
-                let has = |r: &LibraryRoot| klm_core::alternatives::scan(r).iter().any(|p| p.symbol == symbol);
-                if let Some(root) = [cx.project_root(), cx.global_root()].into_iter().flatten().find(has) {
-                    self.alternatives = Some(AlternativesPanel::new(&root, &cx.ctx, Some((String::new(), symbol))).for_swap());
-                }
+                let (roots, tx, ctx) = ([cx.project_root(), cx.global_root()], cx.tx.clone(), cx.ctx.clone());
+                std::thread::spawn(move || {
+                    let has = |r: &LibraryRoot| klm_core::alternatives::scan(r).iter().any(|p| p.symbol == symbol);
+                    if let Some(root) = roots.into_iter().flatten().find(has) {
+                        let _ = tx.send(AppMsg::Library(Msg::SwapIn(root, symbol)));
+                        ctx.request_repaint();
+                    }
+                });
             }
+            Msg::SwapIn(root, symbol) => self.alternatives = Some(AlternativesPanel::new(&root, &cx.ctx, Some((String::new(), symbol))).for_swap()),
             Msg::Show(mpn) => (self.filter, self.category, self.maker, self.status) = (mpn, String::new(), String::new(), Filter::All),
             Msg::DatasheetsDone(results) => {
                 self.downloading = false;

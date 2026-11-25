@@ -340,37 +340,23 @@ impl App {
         }
     }
 
+    /// Re-adds missing libraries on a worker (it can copy footprints into projects), logging what it did.
     fn relink(&mut self) {
-        let cx = &mut self.cx;
-        let mut any = false;
-        for root in cx.roots() {
-            match root.fix_old_paths() {
-                Ok(0) => {}
-                Ok(n) => {
-                    cx.log.push(format!("Replaced ${{KLM_LIB}} with {} in {n} files", root.dir.display()));
-                    any = true;
-                }
-                Err(e) => cx.log.push(format!("Could not update old paths: {e:#}")),
+        let (roots, tx, ctx) = (self.cx.roots(), self.cx.tx.clone(), self.cx.ctx.clone());
+        std::thread::spawn(move || {
+            let r = LibraryRoot::relink_all(&roots);
+            for n in r.notes {
+                let _ = tx.send(Msg::Log(n));
             }
-            for cat in root.unlinked() {
-                match root.link(&cat) {
-                    Ok(_) => cx.log.push(format!("Re-linked {} in KiCad", root.nickname(&cat))),
-                    Err(e) => cx.log.push(format!("Could not re-link {}: {e:#}", root.nickname(&cat))),
-                }
-                any = true;
+            for e in r.errors {
+                let _ = tx.send(Msg::LogAt(Level::Error, e));
             }
-            for note in klm_core::shadow::sync_shadowing_projects(&root, false).notes() {
-                cx.log.push(note);
-                any = true;
+            if r.changed && kicad_env::kicad_running() {
+                let _ = tx.send(Msg::Log("KiCad is open: the changes are queued and re-checked when it closes.".into()));
             }
-        }
-        if any && kicad_env::kicad_running() {
-            cx.log.push("KiCad is open: the changes are queued and re-checked when it closes.".into());
-        }
-        if !any {
-            cx.log.push("All KLM libraries are already in KiCad's library list.".into());
-        }
-        cx.send(Msg::Library(library::Msg::Refresh));
+            let _ = tx.send(Msg::Library(library::Msg::Refresh));
+            ctx.request_repaint();
+        });
     }
 
     /// Moves the global library (or adopts it where the user moved it) and fixes every path.

@@ -55,13 +55,25 @@ fn sandbox_kicad_dir(base: &Path) -> Result<PathBuf> {
 /// without every function that runs `kicad-cli` taking a parameter; set at startup and when it changes.
 static CLI_OVERRIDE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
+/// What `resolve_cli` found and when, so a UI that asks every frame does not stat files each time.
+static CLI_CACHE: Mutex<Option<(std::time::Instant, PathBuf)>> = Mutex::new(None);
+
 pub fn set_kicad_cli_override(path: Option<PathBuf>) {
     *CLI_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = path;
+    *CLI_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
+/// The resolved `kicad-cli`, remembered for 5 s (like `kicad_running`).
 pub fn kicad_cli() -> Result<PathBuf> {
+    if let Some((at, p)) = &*CLI_CACHE.lock().unwrap_or_else(|e| e.into_inner())
+        && at.elapsed() < std::time::Duration::from_secs(5)
+    {
+        return Ok(p.clone());
+    }
     let over = CLI_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    Ok(resolve_cli(over.as_deref()))
+    let p = resolve_cli(over.as_deref());
+    *CLI_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), p.clone()));
+    Ok(p)
 }
 
 /// `over` when it points at a file, else wherever KiCad is installed, else `kicad-cli` on PATH.

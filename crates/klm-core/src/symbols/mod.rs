@@ -269,8 +269,10 @@ fn ic_box(pins: &[Sexpr]) -> (Vec<Sexpr>, Vec<Sexpr>) {
         match twin_new {
             Some(t) => {
                 for c in moved.items_mut() {
-                    if matches!(c.head(), Some("at" | "length")) {
-                        *c = t.child(c.head().unwrap()).cloned().unwrap();
+                    if let Some(h) = c.head().filter(|h| matches!(*h, "at" | "length"))
+                        && let Some(n) = t.child(h)
+                    {
+                        *c = n.clone();
                     }
                 }
             }

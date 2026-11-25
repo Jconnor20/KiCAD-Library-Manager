@@ -23,7 +23,7 @@ pub fn title(s: Section) -> &'static str {
         Section::SnapMagic => "Sources › SnapMagic",
         Section::Search => "Workflow › Search",
         Section::Import => "Workflow › Import",
-        Section::Standards | Section::Symbols => "Standards › Symbols",
+        Section::Symbols => "Standards › Symbols",
         Section::Footprints => "Standards › Footprints",
         Section::PartInfo => "Standards › Part information",
         Section::Bom => "Workflow › BOM",
@@ -268,7 +268,7 @@ impl SettingsTab {
                     })
                 },
             ),
-            Section::Standards | Section::Symbols | Section::Footprints => {
+            Section::Symbols | Section::Footprints => {
                 if let Some(e) = group(ui, "Standard profile", |ui| standards::profile(ui, d)) {
                     cmd = Some(Cmd::Log(Level::Error, e));
                 }

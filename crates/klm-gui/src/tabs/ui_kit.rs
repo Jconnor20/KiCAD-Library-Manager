@@ -1,5 +1,3 @@
-#![allow(dead_code)] // the API for W7.1-W7.5; each item gets a caller as its tab adopts the kit
-
 //! The look every tab shares: severity colours, status cells, badges and one table.
 //!
 //! - `Level` is the one severity scale (also used by the log); `Level::color` gives its colour for the current theme.
@@ -34,7 +32,7 @@ impl Level {
     }
 }
 
-/// A settings page a tab can ask for with `cx.open_settings(Section)`. `General`, `Sources` and `Standards`
+/// A settings page a tab can ask for with `cx.open_settings(Section)`. `General` and `Sources`
 /// are the tree's groups: they open on the group's first page.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Section {
@@ -51,7 +49,6 @@ pub enum Section {
     SnapMagic,
     Search,
     Import,
-    Standards,
     Symbols,
     Footprints,
     PartInfo,
