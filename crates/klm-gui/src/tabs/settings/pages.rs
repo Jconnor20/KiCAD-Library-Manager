@@ -117,6 +117,10 @@ impl SettingsTab {
                         ui.ctx().set_theme(pref);
                     }
                 });
+                group(ui, "Updates", |ui| {
+                    ui.checkbox(&mut d.check_updates, "Check for updates at start-up");
+                    ui.weak("Asks GitHub for the latest release; nothing else is sent.");
+                });
             }
             Section::WatchFolders => group(ui, "Folders watched for vendor ZIPs", |ui| {
                 ui.weak("KLM watches these for downloads from SnapMagic, Ultra Librarian and SamacSys. With none added, the OS Downloads folder is used.");

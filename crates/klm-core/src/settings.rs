@@ -42,6 +42,13 @@ pub struct Settings {
     pub history: History,
     /// SPICE simulation library folders and automatic model resolution.
     pub sim: SimSettings,
+    /// Ask GitHub for the latest release at start-up (the GUI shows a notice when there is a newer one).
+    #[serde(default = "yes")]
+    pub check_updates: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// Settings for finding or generating SPICE simulation models during import.
@@ -118,7 +125,10 @@ fn path() -> Option<PathBuf> {
 
 impl Settings {
     pub fn load() -> Self {
-        let mut s = path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| Self::parse(&t)).unwrap_or_default();
+        let mut s = path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| Self::parse(&t))
+            .unwrap_or_else(|| Self { check_updates: true, ..Self::default() });
         match s.legacy_standards.take() {
             // Customised rules from before profiles become a profile of their own, once.
             Some(old) if s.profile.is_empty() && old != crate::standardise::Rules::default() => {

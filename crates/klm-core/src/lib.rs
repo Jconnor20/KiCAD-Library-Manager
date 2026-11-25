@@ -40,6 +40,7 @@ pub mod standardise;
 pub mod stdlib;
 pub mod store;
 pub mod symbols;
+pub mod update;
 
 /// Fresh, empty temp folder for a test.
 #[cfg(test)]

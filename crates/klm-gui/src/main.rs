@@ -47,6 +47,8 @@ enum Msg {
     /// Add queued libraries to KiCad's tables, after the close-KiCad prompt if it is open.
     ApplyPending,
     MoveGlobal(PathBuf),
+    /// A newer release exists: (version, release page).
+    Update(String, String),
     Search(search::Msg),
     Import(import::Msg),
     Library(library::Msg),
@@ -215,6 +217,8 @@ struct App {
     log_open: bool,
     checklist_hidden: bool,
     omni: shell::Omni,
+    /// A newer release, once the start-up check has found one.
+    update: Option<(String, String)>,
 }
 
 fn main() -> eframe::Result {
@@ -300,12 +304,30 @@ impl App {
             log_open: false,
             checklist_hidden: false,
             omni: shell::Omni::default(),
+            update: None,
             cx,
             rx,
         };
         app.apply_pending();
         app.check_links();
+        app.check_update();
         app
+    }
+
+    /// One worker asks GitHub for the latest release; failures (offline, no release yet) are silent. Never under a sandbox, i.e. tests.
+    fn check_update(&self) {
+        if !self.cx.settings.check_updates || klm_core::settings::sandbox_dir().is_some() {
+            return;
+        }
+        let (tx, ctx) = (self.cx.tx.clone(), self.cx.ctx.clone());
+        std::thread::spawn(move || {
+            if let Ok((version, url)) = klm_core::update::latest_release()
+                && klm_core::update::is_newer(&version, env!("CARGO_PKG_VERSION"))
+            {
+                let _ = tx.send(Msg::Update(version, url));
+                ctx.request_repaint();
+            }
+        });
     }
 
     /// Adds queued libraries to KiCad's tables if KiCad is closed.
@@ -389,6 +411,7 @@ impl App {
                 }
                 Msg::ApplyPending => self.apply_pending(),
                 Msg::MoveGlobal(dir) => self.move_global(&dir),
+                Msg::Update(version, url) => self.update = Some((version, url)),
                 Msg::Search(m) => self.search_tab.handle(m, &mut self.cx),
                 Msg::Import(m) => self.import_tab.handle(m, &mut self.cx),
                 Msg::Library(m) => self.library_tab.handle(m, &mut self.cx),

@@ -587,6 +587,12 @@ impl App {
                 if ui.add(egui::Button::new(RichText::new(toggle).size(12.0).color(pal.muted)).frame(false)).clicked() {
                     self.log_open = !self.log_open;
                 }
+                if let Some((version, url)) = self.update.as_ref().filter(|(_, u)| u.starts_with("https://")) {
+                    let r = ui_kit::badge(ui, &format!("Update {version}"), Level::Ok);
+                    if ui.interact(r.rect, ui.scope_id().with("update_badge"), Sense::click()).on_hover_text("Open the release page").clicked() {
+                        let _ = open::that(url);
+                    }
+                }
                 if errors > 0 {
                     let text = format!("{errors} error{}", if errors == 1 { "" } else { "s" });
                     let r = ui_kit::badge(ui, &text, Level::Error);
