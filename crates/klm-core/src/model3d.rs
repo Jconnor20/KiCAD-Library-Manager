@@ -182,6 +182,9 @@ fn resolve(root: &LibraryRoot, uri: &str) -> Option<PathBuf> {
 
 /// The model's box in mm, from the file's point data.
 fn read_box(path: &Path) -> Option<Box3> {
+    if crate::library::is_unc(path) {
+        return None; // a network path from a library file: reading it would send the user's login hash to that server
+    }
     if std::fs::metadata(path).ok()?.len() > MAX_BYTES {
         return None;
     }

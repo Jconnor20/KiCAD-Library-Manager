@@ -5,7 +5,7 @@ pub mod categories;
 pub mod combine;
 pub mod digikey;
 pub mod foreign;
-mod http;
+pub(crate) mod http;
 pub mod lcsc;
 pub mod mouser;
 pub mod nexar;

@@ -116,6 +116,8 @@ enum Action {
     /// Show what deleting these parts would remove and keep.
     Delete(LibraryRoot, Vec<Key>),
     Health,
+    /// Open a part's datasheet, if it is a web link or a local PDF (a library file can name anything).
+    OpenDatasheet(String),
 }
 
 /// A dry run waiting for the user's answer, or the worker that is producing it.
@@ -507,6 +509,13 @@ impl LibraryTab {
         }
         match self.show(ui, global.as_ref(), project.as_ref()) {
             Action::None => {}
+            Action::OpenDatasheet(target) => {
+                if klm_core::library::safe_to_open(&target) {
+                    let _ = open::that(&target);
+                } else {
+                    cx.log(Level::Warn, format!("Not opening the datasheet {target}: only web links and local PDF files are opened"));
+                }
+            }
             Action::EditInKicad { editor, category, name } => {
                 let root = if self.scope == Scope::Global { &global } else { &project };
                 if let Some(root) = root {
@@ -1677,7 +1686,7 @@ The rules are in Settings → Standards. A snapshot is taken first, so History c
                     if open.on_hover_text("Open the datasheet in your PDF viewer or browser").on_disabled_hover_text("This part has no datasheet").clicked()
                         && let Some(t) = target
                     {
-                        let _ = open::that(t);
+                        *action = Action::OpenDatasheet(t.to_string());
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (can, why) = match (self.scope, has_project) {

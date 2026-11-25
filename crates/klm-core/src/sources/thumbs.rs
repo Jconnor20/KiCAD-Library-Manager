@@ -3,6 +3,7 @@
 
 use super::http;
 use anyhow::{Result, bail};
+use std::io::{Read, Write};
 use std::path::PathBuf;
 
 const MAX_BYTES: usize = 2_000_000;
@@ -39,15 +40,16 @@ pub fn get(url: &str) -> Result<PathBuf> {
     if !resp.status().is_success() {
         bail!("HTTP {}", resp.status());
     }
-    let bytes = resp.bytes().map_err(reqwest::Error::without_url)?;
+    let mut bytes = vec![];
+    resp.take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|e| anyhow::anyhow!("reading the image: {e}"))?;
     if bytes.len() > MAX_BYTES {
         bail!("image too large");
     }
     std::fs::create_dir_all(&dir)?;
     // Written under a temp name so a half-written file is never mistaken for a cached image.
-    let tmp = path.with_extension("part");
-    std::fs::write(&tmp, &bytes)?;
-    std::fs::rename(&tmp, &path)?;
+    let mut tmp = tempfile::NamedTempFile::new_in(&dir)?;
+    tmp.write_all(&bytes)?;
+    tmp.persist(&path)?;
     Ok(path)
 }
 

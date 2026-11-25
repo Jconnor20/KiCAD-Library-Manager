@@ -390,9 +390,13 @@ impl ImportTab {
                     self.dialog = None;
                 }
                 DialogAction::FetchCad(url) => {
-                    let _ = open::that(&url);
-                    cx.log.push(format!("Opened {url}. Download the KiCad ZIP and it will be added to the import dialog."));
-                    self.awaiting_cad.push(dialog.part.clone());
+                    if url.starts_with("https://") || url.starts_with("http://") {
+                        let _ = open::that(&url);
+                        cx.log.push(format!("Opened {url}. Download the KiCad ZIP and it will be added to the import dialog."));
+                        self.awaiting_cad.push(dialog.part.clone());
+                    } else {
+                        cx.log.push(format!("Not opening {url}: only web links are opened"));
+                    }
                 }
                 DialogAction::Import { part, category, targets } => {
                     let mut id = dialog.id;

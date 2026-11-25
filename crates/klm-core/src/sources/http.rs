@@ -8,7 +8,23 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 pub fn client() -> Client {
-    Client::builder().timeout(Duration::from_secs(20)).user_agent("KiCAD-Library-Manager").build().expect("TLS backend")
+    client_with("KiCAD-Library-Manager", 20)
+}
+
+/// The one place HTTP clients are built; callers differ only in who they say they are and how long they wait.
+pub(crate) fn client_with(user_agent: &str, timeout_secs: u64) -> Client {
+    // An https link must not be redirected to plain http (or anything else); local test servers may stay on http.
+    let policy = reqwest::redirect::Policy::custom(|a| {
+        let local = matches!(a.url().host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+        if a.previous().len() >= 10 {
+            a.error("too many redirects")
+        } else if a.url().scheme() == "https" || local {
+            a.follow()
+        } else {
+            a.error("redirect away from https refused")
+        }
+    });
+    Client::builder().timeout(Duration::from_secs(timeout_secs)).user_agent(user_agent).redirect(policy).build().expect("TLS backend")
 }
 
 /// Sends `req` and parses the JSON reply. The URL is stripped from errors because Mouser's
@@ -47,7 +63,7 @@ impl TokenCache {
     }
 
     pub fn token(&self, http: &Client) -> Result<String> {
-        let mut cached = self.cached.lock().unwrap();
+        let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((t, expires)) = &*cached
             && Instant::now() < *expires
         {

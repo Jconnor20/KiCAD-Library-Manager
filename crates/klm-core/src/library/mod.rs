@@ -17,7 +17,7 @@ pub use edit::{EDIT_FIELDS, Edited, PartEdit};
 pub(crate) use fields::rename_symbol;
 pub use fields::{property, set_property};
 pub use remove::{Piece, RemovePlan};
-pub use status::{Check, PartStatus};
+pub use status::{Check, PartStatus, is_unc, safe_to_open};
 
 use crate::kicad_env;
 use crate::sexpr::{self, Sexpr};
@@ -40,9 +40,19 @@ pub struct LibraryRoot {
     pub table_dir: PathBuf,
 }
 
-/// Characters KiCad or Windows reject in library ids and file names.
+/// Characters KiCad or Windows reject in library ids and file names. Also control characters, leading/trailing dots, and Windows device
+/// names (`CON`, `NUL.txt`, `COM1`...), which get a `_` after the name. Blank or dots-only input (`..`) comes back empty, never as `.`/`..`:
+/// callers (`edit`, the standards profile loader) already read an empty result as "no usable name".
 pub fn sanitize(name: &str) -> String {
-    name.trim().chars().map(|c| if c.is_whitespace() || r#":/\{}"'<>|?*"#.contains(c) { '_' } else { c }).collect()
+    let s: String = name.trim().chars().map(|c| if c.is_whitespace() || c.is_control() || r#":/\{}"'<>|?*"#.contains(c) { '_' } else { c }).collect();
+    let s = s.trim_matches('.');
+    if s.is_empty() {
+        return String::new();
+    }
+    let stem = s.split('.').next().unwrap_or(s).to_ascii_uppercase();
+    let numbered = stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && matches!(stem.as_bytes()[3], b'1'..=b'9');
+    let device = numbered || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL");
+    if device { format!("{}_{}", &s[..stem.len()], &s[stem.len()..]) } else { s.to_string() }
 }
 
 impl LibraryRoot {
@@ -157,5 +167,16 @@ mod tests {
     fn sanitize_strips_bad_chars() {
         assert_eq!(sanitize(" LM1085IS-12/NOPB "), "LM1085IS-12_NOPB");
         assert_eq!(sanitize("A:B C"), "A_B_C");
+        assert_eq!(sanitize("  "), "");
+        assert_eq!((sanitize(".."), sanitize("..."), sanitize(" . ")), (String::new(), String::new(), String::new()));
+        assert_eq!(sanitize("..\\x.\u{1}y. "), "_x._y");
+    }
+
+    #[test]
+    fn sanitize_defuses_windows_device_names() {
+        let cases = [("CON", "CON_"), ("nul.txt", "nul_.txt"), ("Com1", "Com1_"), ("LPT9.kicad_mod", "LPT9_.kicad_mod")];
+        for (given, want) in cases.into_iter().chain([("COM0", "COM0"), ("CONSOLE", "CONSOLE"), ("COM10", "COM10")]) {
+            assert_eq!(sanitize(given), want);
+        }
     }
 }

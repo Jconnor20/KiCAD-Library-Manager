@@ -24,8 +24,7 @@ pub struct Lcsc {
 
 impl Lcsc {
     pub fn new() -> Self {
-        let http = reqwest::blocking::Client::builder().user_agent(USER_AGENT).timeout(Duration::from_secs(60)).build().expect("HTTP client");
-        Lcsc { http }
+        Lcsc { http: super::http::client_with(USER_AGENT, 60) }
     }
 
     fn get_bytes(&self, url: &str) -> Result<Vec<u8>> {

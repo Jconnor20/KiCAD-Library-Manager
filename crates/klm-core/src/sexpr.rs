@@ -72,12 +72,20 @@ impl Sexpr {
     }
 }
 
+/// Real KiCad files nest about 10 deep; the recursive writers and `Drop` would overflow the stack on a hostile file with a million.
+const MAX_DEPTH: usize = 512;
+
 pub fn parse(src: &str) -> Result<Sexpr> {
     let mut stack: Vec<Vec<Sexpr>> = vec![vec![]];
     let mut chars = src.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
-            '(' => stack.push(vec![]),
+            '(' => {
+                if stack.len() > MAX_DEPTH {
+                    bail!("nested more than {MAX_DEPTH} levels deep");
+                }
+                stack.push(vec![]);
+            }
             ')' => {
                 if stack.len() < 2 {
                     bail!("unbalanced ')'");
@@ -173,6 +181,14 @@ fn write(x: &Sexpr, depth: usize, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn absurdly_deep_nesting_is_an_error_not_a_stack_overflow() {
+        let deep = |n: usize| format!("{}{}", "(a ".repeat(n), ")".repeat(n));
+        assert!(parse(&deep(MAX_DEPTH)).is_ok());
+        assert!(parse(&deep(MAX_DEPTH + 1)).unwrap_err().to_string().contains("nested"));
+        assert!(parse(&"(".repeat(1_000_000)).is_err());
+    }
 
     #[test]
     fn round_trip_keeps_everything() {
