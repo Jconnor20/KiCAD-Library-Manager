@@ -6,8 +6,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Tests that don't make their own sandbox must still never touch a real profile.
-  KLM_CONFIG_DIR: ${{ runner.temp }}/klm-config
 
 jobs:
   check:
@@ -23,6 +21,10 @@ jobs:
       # The GUI tests render offscreen with wgpu; egui_kittest prefers a CPU adapter (WARP) so no GPU is needed.
       # Tests that need kicad-cli skip themselves, and live-API tests are #[ignore]d, so neither runs here.
       - run: cargo test --workspace
+        env:
+          # Tests that don't make their own sandbox must still never touch a real profile.
+          # (runner.temp is only available at step level.)
+          KLM_CONFIG_DIR: ${{ runner.temp }}/klm-config
 
   deny:
     runs-on: ubuntu-latest
