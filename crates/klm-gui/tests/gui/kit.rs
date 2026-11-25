@@ -1,5 +1,5 @@
 //! W7.0 shared look: glyph coverage, status colours, the table, the log levels and the settings hook.
-//! Test IDs (K1…) are the rows of docs/ui-review/W7.0.md.
+//! Test IDs (K1…) are the rows of the W7.0 test plan.
 
 use super::harness::*;
 use crate::tabs::ui_kit::{self, Col, Level, Section, Sort, Status};

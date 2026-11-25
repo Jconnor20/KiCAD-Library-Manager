@@ -1,4 +1,4 @@
-//! W7.1: the Settings page (it was a popup until the wireframe redesign). docs/ui-review/W7.1.md has the plan (S1-S17).
+//! W7.1: the Settings page (it was a popup until the wireframe redesign). The plan is S1-S17.
 
 use super::harness::*;
 use crate::tabs::settings::Msg as SettingsMsg;

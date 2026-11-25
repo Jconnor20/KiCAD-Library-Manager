@@ -1,4 +1,4 @@
-//! W7.5: Import, History, BOM and Clean up (see docs/ui-review/W7.5.md).
+//! W7.5: Import, History, BOM and Clean up.
 
 use super::harness::*;
 use crate::Tab;
