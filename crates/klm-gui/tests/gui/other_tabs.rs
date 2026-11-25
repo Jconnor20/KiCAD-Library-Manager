@@ -228,7 +228,8 @@ fn b4_swap_alternate() {
     click(&mut h, "LM358B (substitute)");
     assert!(h.query_by_label("LM358B").is_some() && h.query_by_label("LM358").is_none(), "{}", dump(&h));
     assert!(h.query_by_label("close to LM358").is_some(), "the swapped part is matched against the library again");
-    assert!(h.query_by_label("LM358 ▾").is_some(), "the old part is now the alternate");
+    // The old part kept its in-stock quotes and LM358B has none, so JLC mode marks the old one as better.
+    assert!(h.query_by_label("better: LM358 ▾").is_some(), "the old part is now the alternate");
     assert!(h.state().cx.log.lines.iter().any(|(_, s)| s.contains("LM358B in place of LM358")));
     snap(&mut h, "bom-swapped");
 }
