@@ -264,7 +264,7 @@ fn l15_delete_goes_through_a_review() {
     let before = files(&root.dir);
 
     click(&mut h, "Delete…");
-    assert!(h.query_by_label("Delete 1 part(s)?").is_some(), "no confirm dialog");
+    assert!(wait_for(&mut h, "Delete 1 part(s)?"), "no confirm dialog");
     assert!(h.query_by_label("ICs / RP2040").is_some() && h.query_by_label_contains("Remove symbol RP2040").is_some());
     assert!(missing_glyphs(&h).is_empty());
     snap(&mut h, "library-delete");
@@ -272,6 +272,7 @@ fn l15_delete_goes_through_a_review() {
     assert_eq!(files(&root.dir), before, "Cancel must change nothing");
 
     click(&mut h, "Delete…");
+    assert!(wait_for(&mut h, "Delete 1 part(s)?"), "no confirm dialog the second time");
     click(&mut h, "Delete 1 part(s)");
     settle(&mut h);
     assert!(log_has(&h, "Deleted RP2040"), "nothing logged: {:?}", h.state().cx.log.lines);

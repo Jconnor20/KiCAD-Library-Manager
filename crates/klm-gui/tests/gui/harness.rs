@@ -169,6 +169,18 @@ pub fn settle(h: &mut Gui) {
     h.run_ok();
 }
 
+/// Steps until `label` is on screen (work that finishes on a worker thread), up to about 10 s.
+pub fn wait_for(h: &mut Gui, label: &str) -> bool {
+    for _ in 0..60 {
+        if h.query_by_label(label).is_some() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        h.step();
+    }
+    h.query_by_label(label).is_some()
+}
+
 pub fn click(h: &mut Gui, label: &str) {
     h.get_all_by_label(label).next().unwrap().click();
     h.run_ok();
