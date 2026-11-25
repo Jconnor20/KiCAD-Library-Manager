@@ -2388,7 +2388,7 @@ dependencies = [
 
 [[package]]
 name = "klm-cli"
-version = "0.10.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "klm-core",
@@ -2398,7 +2398,7 @@ dependencies = [
 
 [[package]]
 name = "klm-core"
-version = "0.10.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "calamine",
@@ -2415,7 +2415,7 @@ dependencies = [
 
 [[package]]
 name = "klm-gui"
-version = "0.10.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "dirs",
