@@ -14,6 +14,7 @@ pub mod library;
 pub mod page_kit;
 pub mod part_info;
 pub mod preview;
+pub mod project_check;
 pub mod search;
 pub mod settings;
 pub mod standards;

@@ -23,6 +23,7 @@ fn every_tab_opens_and_is_saved() {
             (Tab::Bom, "bom"),
             (Tab::History, "history"),
             (Tab::Cleanup, "cleanup"),
+            (Tab::ProjectCheck, "project-check"),
         ] {
             let mut h = app(size, tab);
             let m = snap(&mut h, &format!("tab-{name}"));

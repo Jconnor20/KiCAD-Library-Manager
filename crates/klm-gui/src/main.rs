@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use tabs::ui_kit::{Level, Section};
-use tabs::{bom, bom_import, classes, cleanup, footprint_gen, health, history, import, library, search, settings};
+use tabs::{bom, bom_import, classes, cleanup, footprint_gen, health, history, import, library, project_check, search, settings};
 
 /// Results sent back from worker threads, and actions held behind the "close KiCad" prompt.
 enum Msg {
@@ -68,6 +68,7 @@ enum Tab {
     Cleanup,
     Classes,
     Health,
+    ProjectCheck,
     Footprint,
 }
 
@@ -206,6 +207,7 @@ struct App {
     cleanup_tab: cleanup::CleanupTab,
     classes_tab: classes::ClassesTab,
     health_tab: health::HealthTab,
+    project_check_tab: project_check::ProjectCheckTab,
     footprint_tab: footprint_gen::FootprintTab,
     bom_tab: bom::BomTab,
     bom_import_tab: bom_import::BomImportTab,
@@ -290,6 +292,7 @@ impl App {
             cleanup_tab: cleanup::CleanupTab::default(),
             classes_tab: Default::default(),
             health_tab: Default::default(),
+            project_check_tab: Default::default(),
             footprint_tab: footprint_gen::FootprintTab::default(),
             bom_tab: bom::BomTab::default(),
             bom_import_tab: bom_import::BomImportTab::default(),

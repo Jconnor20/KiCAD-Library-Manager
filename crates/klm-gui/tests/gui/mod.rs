@@ -8,6 +8,7 @@ mod harness;
 mod kit;
 mod library;
 mod other_tabs;
+mod project_check;
 mod screens;
 mod search;
 mod settings;

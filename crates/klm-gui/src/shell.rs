@@ -45,7 +45,7 @@ impl Page {
             Tab::Import | Tab::BomImport => Page::Import,
             Tab::Library => Page::Library,
             Tab::Bom => Page::Bom,
-            Tab::Classes | Tab::Health | Tab::Cleanup | Tab::Footprint => Page::Standards,
+            Tab::Classes | Tab::Health | Tab::ProjectCheck | Tab::Cleanup | Tab::Footprint => Page::Standards,
             Tab::History => Page::History,
             Tab::Settings => Page::Settings,
         }
@@ -67,9 +67,13 @@ impl Page {
     fn subs(self) -> &'static [(&'static str, fn() -> Tab)] {
         match self {
             Page::Import => &[("Parts", || Tab::Import), ("From a BOM", || Tab::BomImport)],
-            Page::Standards => {
-                &[("Classes", || Tab::Classes), ("Create", || Tab::Footprint), ("Library health", || Tab::Health), ("KiCad tables", || Tab::Cleanup)]
-            }
+            Page::Standards => &[
+                ("Classes", || Tab::Classes),
+                ("Create", || Tab::Footprint),
+                ("Library health", || Tab::Health),
+                ("Project check", || Tab::ProjectCheck),
+                ("KiCad tables", || Tab::Cleanup),
+            ],
             _ => &[],
         }
     }
@@ -551,6 +555,7 @@ impl App {
             Tab::Cleanup => self.cleanup_tab.ui(ui, &mut self.cx),
             Tab::Classes => self.classes_tab.ui(ui, &mut self.cx),
             Tab::Health => self.health_tab.ui(ui, &mut self.cx),
+            Tab::ProjectCheck => self.project_check_tab.ui(ui, &mut self.cx),
             Tab::Footprint => self.footprint_tab.ui(ui, &mut self.cx),
         }
     }
