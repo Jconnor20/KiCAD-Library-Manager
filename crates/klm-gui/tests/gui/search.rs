@@ -78,8 +78,12 @@ fn s3_in_library_badge_and_open_in_library() {
     h.run_ok();
     assert!(h.state().cx.tab == Tab::Library);
     settle(&mut h);
-    assert!(h.query_by_label("LM358").is_some() && h.query_by_label("RP2040").is_none(), "Library isn't filtered to LM358:
-{}", dump(&h));
+    assert!(
+        h.query_by_label("LM358").is_some() && h.query_by_label("RP2040").is_none(),
+        "Library isn't filtered to LM358:
+{}",
+        dump(&h)
+    );
     snap(&mut h, "library-opened-from-search");
 }
 

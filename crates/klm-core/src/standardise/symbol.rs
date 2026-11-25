@@ -61,7 +61,11 @@ fn pin_length(sym: &mut Sexpr, min: f64) -> Option<String> {
     let mut n = 0;
     for pin in units(sym).flat_map(|u| u.items_mut().iter_mut().filter(|c| c.head() == Some("pin"))) {
         let hidden = pin.child("hide").is_some_and(|h| h.arg(0) != Some("no")) || pin.items().contains(&Sexpr::Atom("hide".into()));
-        let (Some(len), Some(dir), Some((x, y))) = (pin.child("length").and_then(|l| num(l, 0)), direction(pin), pin.child("at").and_then(|a| Some((num(a, 0)?, num(a, 1)?)))) else { continue };
+        let (Some(len), Some(dir), Some((x, y))) =
+            (pin.child("length").and_then(|l| num(l, 0)), direction(pin), pin.child("at").and_then(|a| Some((num(a, 0)?, num(a, 1)?))))
+        else {
+            continue;
+        };
         if hidden || len >= min - 1e-4 {
             continue;
         }
@@ -89,7 +93,11 @@ fn line_width(sym: &mut Sexpr, width: f64) -> Option<String> {
 /// Device library. Hidden pins don't count: two visible terminals make a two-pin part. Not for
 /// connectors, whose pin numbers matter: the caller picks by category.
 pub(crate) fn two_pin_labels(sym: &mut Sexpr) -> Option<String> {
-    let pins = sym.children("symbol").flat_map(|u| u.children("pin")).filter(|p| !p.child("hide").is_some_and(|h| h.arg(0) != Some("no")) && !p.items().contains(&Sexpr::Atom("hide".into()))).count();
+    let pins = sym
+        .children("symbol")
+        .flat_map(|u| u.children("pin"))
+        .filter(|p| !p.child("hide").is_some_and(|h| h.arg(0) != Some("no")) && !p.items().contains(&Sexpr::Atom("hide".into())))
+        .count();
     if sym.child("power").is_some() || pins != 2 {
         return None;
     }
@@ -251,7 +259,8 @@ mod tests {
         assert_eq!(to_string(pin.child("at").unwrap()).trim(), "(at -7.54 2.54 0)", "body end stays at x = -5");
         assert_eq!(pin.child("length").unwrap().arg(0), Some("2.54"));
         // Two-pin symbols (resistors) keep their short pins.
-        let mut r = parse(r#"(symbol "R" (symbol "R_1_1" (pin passive line (at 0 3.81 270) (length 1.27)) (pin passive line (at 0 -3.81 90) (length 1.27))))"#).unwrap();
+        let mut r = parse(r#"(symbol "R" (symbol "R_1_1" (pin passive line (at 0 3.81 270) (length 1.27)) (pin passive line (at 0 -3.81 90) (length 1.27))))"#)
+            .unwrap();
         assert!(fix(&mut r, &Rules { pin_length_min: Some(2.54), ..only(Rules::default()) }).is_empty());
     }
 

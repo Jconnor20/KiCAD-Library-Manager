@@ -116,8 +116,17 @@ impl Store {
                 let scope = if root.scope == Scope::Global { "global" } else { "project" };
                 for p in root.list_parts() {
                     insert.execute(params![
-                        scope, root.dir.to_string_lossy(), p.category, p.name, p.mpn, p.manufacturer, p.description,
-                        format!("{:?}", p.footprint), format!("{:?}", p.model), format!("{:?}", p.datasheet), format!("{:?}", p.sim),
+                        scope,
+                        root.dir.to_string_lossy(),
+                        p.category,
+                        p.name,
+                        p.mpn,
+                        p.manufacturer,
+                        p.description,
+                        format!("{:?}", p.footprint),
+                        format!("{:?}", p.model),
+                        format!("{:?}", p.datasheet),
+                        format!("{:?}", p.sim),
                         p.in_kicad,
                     ])?;
                     n += 1;
@@ -182,10 +191,7 @@ impl Store {
     }
 
     pub fn cache_put(&self, source: &str, query: &str, result: &str) -> Result<()> {
-        self.db.execute(
-            "INSERT OR REPLACE INTO search_cache (source, query, result, fetched_at) VALUES (?1, ?2, ?3, unixepoch())",
-            [source, query, result],
-        )?;
+        self.db.execute("INSERT OR REPLACE INTO search_cache (source, query, result, fetched_at) VALUES (?1, ?2, ?3, unixepoch())", [source, query, result])?;
         Ok(())
     }
 
@@ -201,9 +207,7 @@ impl Store {
 
     /// Newest first, each query once.
     pub fn recent_searches(&self, limit: usize) -> Result<Vec<String>> {
-        let mut q = self.db.prepare(
-            "SELECT details FROM history WHERE action = 'search' GROUP BY details ORDER BY MAX(id) DESC LIMIT ?1",
-        )?;
+        let mut q = self.db.prepare("SELECT details FROM history WHERE action = 'search' GROUP BY details ORDER BY MAX(id) DESC LIMIT ?1")?;
         Ok(q.query_map(params![limit as i64], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -237,9 +241,7 @@ impl Store {
 
     /// MPNs logged with `log("import", mpn)`, newest first, each once.
     pub fn recent_imports(&self, limit: usize) -> Result<Vec<String>> {
-        let mut q = self.db.prepare(
-            "SELECT details FROM history WHERE action = 'import' GROUP BY details ORDER BY MAX(id) DESC LIMIT ?1",
-        )?;
+        let mut q = self.db.prepare("SELECT details FROM history WHERE action = 'import' GROUP BY details ORDER BY MAX(id) DESC LIMIT ?1")?;
         Ok(q.query_map(params![limit as i64], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
     }
 

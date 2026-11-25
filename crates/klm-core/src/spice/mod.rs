@@ -31,10 +31,7 @@ pub fn is_spice_text(text: &str) -> bool {
 
 /// Safe SPICE identifier derived from an MPN or symbol name (starts with a letter, alphanumeric + `_`).
 pub fn sanitize_spice_name(name: &str) -> String {
-    let mut out: String = name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-        .collect();
+    let mut out: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect();
     if out.is_empty() || !out.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_') {
         out.insert_str(0, "M_");
     }
@@ -80,9 +77,7 @@ impl SimOrigin {
             Self::GeneratedFromDatasheet { based_on: Some(base), .. } => {
                 format!("generated from datasheet + similar model {base}")
             }
-            Self::GeneratedFromDatasheet { based_on: None, .. } => {
-                "generated from datasheet / part specs".into()
-            }
+            Self::GeneratedFromDatasheet { based_on: None, .. } => "generated from datasheet / part specs".into(),
         }
     }
 }
@@ -148,15 +143,7 @@ pub fn parse_models(text: &str) -> Vec<SpiceModel> {
                     && let Some((name, ports, params, block_start)) = active_subckt.take()
                 {
                     let raw_block = raw_lines[block_start..=*end_idx].join("\n");
-                    out.push(SpiceModel {
-                        kind: SpiceKind::Subckt,
-                        name,
-                        device: "SUBCKT".into(),
-                        sub_type: None,
-                        ports,
-                        params,
-                        raw_block,
-                    });
+                    out.push(SpiceModel { kind: SpiceKind::Subckt, name, device: "SUBCKT".into(), sub_type: None, ports, params, raw_block });
                 }
             }
             continue;
@@ -172,15 +159,7 @@ pub fn parse_models(text: &str) -> Vec<SpiceModel> {
     // Also include unclosed subckt gracefully if `.ends` was omitted at EOF.
     if let Some((name, ports, params, block_start)) = active_subckt.take() {
         let raw_block = raw_lines[block_start..].join("\n");
-        out.push(SpiceModel {
-            kind: SpiceKind::Subckt,
-            name,
-            device: "SUBCKT".into(),
-            sub_type: None,
-            ports,
-            params,
-            raw_block,
-        });
+        out.push(SpiceModel { kind: SpiceKind::Subckt, name, device: "SUBCKT".into(), sub_type: None, ports, params, raw_block });
     }
 
     out
@@ -232,9 +211,7 @@ fn parse_model_card(logical_line: &str, raw_block: &str) -> Option<SpiceModel> {
     let after_kw = logical_line.trim().get(6..)?.trim();
     let mut parts = after_kw.splitn(3, char::is_whitespace);
     let name = parts.next()?.trim().to_string();
-    let rest = parts.next().unwrap_or("").to_string()
-        + " "
-        + parts.next().unwrap_or("");
+    let rest = parts.next().unwrap_or("").to_string() + " " + parts.next().unwrap_or("");
     let rest = rest.trim();
     if name.is_empty() || rest.is_empty() {
         return None;
@@ -283,15 +260,7 @@ fn parse_model_card(logical_line: &str, raw_block: &str) -> Option<SpiceModel> {
         _ => ("SPICE".into(), None),
     };
 
-    Some(SpiceModel {
-        kind: SpiceKind::Model(model_type),
-        name,
-        device,
-        sub_type,
-        ports: Vec::new(),
-        params,
-        raw_block: raw_block.to_string(),
-    })
+    Some(SpiceModel { kind: SpiceKind::Model(model_type), name, device, sub_type, ports: Vec::new(), params, raw_block: raw_block.to_string() })
 }
 
 /// Chooses the best model inside a SPICE file for `mpn` (preferring exact `hint`, then `same_mpn`, then first).
@@ -306,22 +275,20 @@ pub fn pick_model<'a>(models: &'a [SpiceModel], mpn: &str, hint: Option<&str>) -
     }
     let target = matching::key(mpn);
     let fam = matcher::normalize_family_mpn(mpn);
-    models
-        .iter()
-        .max_by_key(|m| {
-            let mk = matching::key(&m.name);
-            let mf = matcher::normalize_family_mpn(&m.name);
-            let exact = if !target.is_empty() && mk == target {
-                100
-            } else if fam.len() >= 4 && mf == fam {
-                80
-            } else if matches!(m.kind, SpiceKind::Subckt) {
-                20
-            } else {
-                10
-            };
-            exact
-        })
+    models.iter().max_by_key(|m| {
+        let mk = matching::key(&m.name);
+        let mf = matcher::normalize_family_mpn(&m.name);
+        let exact = if !target.is_empty() && mk == target {
+            100
+        } else if fam.len() >= 4 && mf == fam {
+            80
+        } else if matches!(m.kind, SpiceKind::Subckt) {
+            20
+        } else {
+            10
+        };
+        exact
+    })
 }
 
 /// Resolves an existing/close SPICE model or generates one from datasheet + similar models for a component.
@@ -374,25 +341,12 @@ pub fn resolve_or_generate(
         let mat_path = matcher::materialize_matched_model(&cand, &part.mpn, &tier, work_dir)?;
         let (sim_pins, device) = pins::map_sim_pins(&pins, &cand.model, sym_ref, category);
         let origin = match tier {
-            matcher::MatchTier::Exact => SimOrigin::ExactMatch {
-                source: cand.source_label,
-                model: cand.model.name.clone(),
-            },
-            matcher::MatchTier::CloseVariant { matched_part, reason }
-            | matcher::MatchTier::SimilarComponent { matched_part, reason } => SimOrigin::CloseMatch {
-                source: cand.source_label,
-                matched_part,
-                reason,
-            },
+            matcher::MatchTier::Exact => SimOrigin::ExactMatch { source: cand.source_label, model: cand.model.name.clone() },
+            matcher::MatchTier::CloseVariant { matched_part, reason } | matcher::MatchTier::SimilarComponent { matched_part, reason } => {
+                SimOrigin::CloseMatch { source: cand.source_label, matched_part, reason }
+            }
         };
-        return Ok(Some(SimResolution {
-            file: mat_path,
-            model_name: cand.model.name,
-            device,
-            sub_type: cand.model.sub_type,
-            pins: sim_pins,
-            origin,
-        }));
+        return Ok(Some(SimResolution { file: mat_path, model_name: cand.model.name, device, sub_type: cand.model.sub_type, pins: sim_pins, origin }));
     }
 
     if !allow_generate {
@@ -408,23 +362,13 @@ pub fn resolve_or_generate(
             library.and_then(|lib| matcher::resolve_sim_library_path(raw, lib)).filter(|p| p.is_file())
         }
     });
-    let pdf_text = ds_path
-        .as_deref()
-        .filter(|p| p.is_file())
-        .and_then(|p| synth::extract_pdf_text(p).ok())
-        .unwrap_or_default();
+    let pdf_text = ds_path.as_deref().filter(|p| p.is_file()).and_then(|p| synth::extract_pdf_text(p).ok()).unwrap_or_default();
 
     let specs = synth::extract_specs(part, symbol, &pins, &pdf_text);
     let target_dev = specs.archetype.as_ref().map(|a| a.spice_device()).unwrap_or("");
     let rules = crate::rules::Rules::default();
-    let class_hint = symbol
-        .and_then(|s| crate::symbols::detect(category, s, pins.len(), &rules).ok())
-        .map(|c| format!("{c:?}"));
-    let similar = if !target_dev.is_empty() {
-        matcher::find_similar_for_adaptation(target_dev, pins.len(), class_hint.as_deref(), &candidates)
-    } else {
-        None
-    };
+    let class_hint = symbol.and_then(|s| crate::symbols::detect(category, s, pins.len(), &rules).ok()).map(|c| format!("{c:?}"));
+    let similar = if !target_dev.is_empty() { matcher::find_similar_for_adaptation(target_dev, pins.len(), class_hint.as_deref(), &candidates) } else { None };
 
     if let Some((gen_path, notes)) = synth::generate_sim(part, &pins, &specs, similar.as_ref(), work_dir)? {
         let text = std::fs::read_to_string(&gen_path).unwrap_or_default();
@@ -437,10 +381,7 @@ pub fn resolve_or_generate(
                 device,
                 sub_type: model.sub_type.clone(),
                 pins: sim_pins,
-                origin: SimOrigin::GeneratedFromDatasheet {
-                    based_on: similar.map(|s| s.model.name),
-                    notes,
-                },
+                origin: SimOrigin::GeneratedFromDatasheet { based_on: similar.map(|s| s.model.name), notes },
             }));
         }
     }
@@ -540,11 +481,7 @@ R1 in+ in- 1Meg
         let dir = temp_dir("close-match");
         let spice_dir = dir.join("models");
         std::fs::create_dir_all(&spice_dir).unwrap();
-        std::fs::write(
-            spice_dir.join("opamps.lib"),
-            ".subckt LM358 IN+ IN- VCC VEE OUT\nRin IN+ IN- 1Meg\n.ends LM358\n",
-        )
-        .unwrap();
+        std::fs::write(spice_dir.join("opamps.lib"), ".subckt LM358 IN+ IN- VCC VEE OUT\nRin IN+ IN- 1Meg\n.ends LM358\n").unwrap();
         let sym = sexpr::parse(
             r#"(symbol "LM358DR"
               (property "Reference" "U" (at 0 0 0))
@@ -556,23 +493,10 @@ R1 in+ in- 1Meg
                 (pin power_in line (at 0 0 0) (name "VCC") (number "8"))))"#,
         )
         .unwrap();
-        let part = Part {
-            mpn: "LM358DR".into(),
-            description: "Dual operational amplifier".into(),
-            ..Default::default()
-        };
-        let res = resolve_or_generate(
-            &part,
-            Some(&sym),
-            None,
-            "Amplifiers",
-            None,
-            &[spice_dir],
-            false,
-            &dir.join("work"),
-        )
-        .unwrap()
-        .expect("should match LM358 for LM358DR");
+        let part = Part { mpn: "LM358DR".into(), description: "Dual operational amplifier".into(), ..Default::default() };
+        let res = resolve_or_generate(&part, Some(&sym), None, "Amplifiers", None, &[spice_dir], false, &dir.join("work"))
+            .unwrap()
+            .expect("should match LM358 for LM358DR");
         assert_eq!(res.model_name, "LM358");
         assert_eq!(res.device, "SUBCKT");
         assert_eq!(res.pins.as_deref(), Some("1=OUT 2=IN- 3=IN+ 4=VEE 8=VCC"));
@@ -587,11 +511,7 @@ R1 in+ in- 1Meg
         let dir = temp_dir("pdf-synth");
         let spice_dir = dir.join("ref");
         std::fs::create_dir_all(&spice_dir).unwrap();
-        std::fs::write(
-            spice_dir.join("ref_fet.lib"),
-            ".model REF_NMOS VDMOS(VTO=2.5 KP=40 RD=0.04 RS=0.02 CGS=1n CGDMAX=200p CGDMIN=20p CJO=300p)\n",
-        )
-        .unwrap();
+        std::fs::write(spice_dir.join("ref_fet.lib"), ".model REF_NMOS VDMOS(VTO=2.5 KP=40 RD=0.04 RS=0.02 CGS=1n CGDMAX=200p CGDMIN=20p CJO=300p)\n").unwrap();
 
         // Build a valid minimal PDF with a FlateDecode compressed page stream containing datasheet metrics.
         let content = b"BT /F1 12 Tf 72 720 Td (DMN3024L 30V N-Channel MOSFET) Tj T* (Drain-Source Voltage VDSS 30V) Tj T* (Gate Threshold Voltage Vgs\\(th\\) 1.4V) Tj T* (Static Drain-Source On-Resistance RDS\\(on\\) 24mOhm) Tj T* (Input Capacitance Ciss 620pF) Tj ET";
@@ -627,18 +547,9 @@ R1 in+ in- 1Meg
             ..Default::default()
         };
 
-        let res = resolve_or_generate(
-            &part,
-            Some(&sym),
-            None,
-            "Transistors",
-            None,
-            &[spice_dir],
-            true,
-            &dir.join("work"),
-        )
-        .unwrap()
-        .expect("should synthesize model from datasheet PDF + similar MOSFET");
+        let res = resolve_or_generate(&part, Some(&sym), None, "Transistors", None, &[spice_dir], true, &dir.join("work"))
+            .unwrap()
+            .expect("should synthesize model from datasheet PDF + similar MOSFET");
         assert_eq!(res.model_name, "DMN3024L");
         assert_eq!(res.device, "NMOS");
         assert_eq!(res.pins.as_deref(), Some("1=G 2=S 3=D"));

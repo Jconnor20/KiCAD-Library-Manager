@@ -1,7 +1,7 @@
-use crate::{AppCtx, Msg as AppMsg};
 use super::page_kit;
 use super::ui_kit::{self, Col, Level, Section, Sort};
 use crate::theme;
+use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui::{self, RichText};
 use klm_core::library::Scope;
 use klm_core::snapshot::{self, Change, ChangeKind, Info, Kind};
@@ -62,7 +62,17 @@ fn row_menu(ui: &mut egui::Ui, s: &Info, act: &mut Option<Act>) {
 
 impl Default for HistoryTab {
     fn default() -> Self {
-        Self { scope: Scope::Global, snapshots: None, seen: None, confirm: None, confirm_delete: None, naming: None, versions_only: false, selected: None, changed: None }
+        Self {
+            scope: Scope::Global,
+            snapshots: None,
+            seen: None,
+            confirm: None,
+            confirm_delete: None,
+            naming: None,
+            versions_only: false,
+            selected: None,
+            changed: None,
+        }
     }
 }
 
@@ -161,39 +171,48 @@ impl HistoryTab {
         let selected = self.selected.clone();
         let (mut act, mut pick) = (None, None);
         let (width, max) = ((ui.available_width() * 0.5).clamp(320.0, 460.0), ui.available_width());
-        let list = egui::Panel::left("history_list").resizable(true).default_size(width).size_range(280.0..=(max - 260.0).max(280.0)).frame(egui::Frame::new().inner_margin(egui::Margin { right: 10, ..Default::default() })).show(ui, |ui| {
-            ui.style_mut().interaction.selectable_labels = false; // so a click on any cell selects the row
-            let cols = [Col::new("When", 80.0).no_sort(), Col::rest("Change").no_sort(), Col::new("", 62.0).no_sort(), Col::new("", 34.0).no_sort()];
-            ui_kit::table(ui, "history", &cols, &mut Sort { col: usize::MAX, asc: false }, shown.len(), |i, row| {
-                let s = shown[i];
-                row.set_selected(selected.as_deref() == Some(s.id.as_str()));
-                row.col(|ui| {
-                    ui.label(RichText::new(ago(s.ts)).color(pal.muted));
-                });
-                row.col(|ui| {
-                    if s.kind == Kind::Major {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("Version: {}", s.version.as_deref().unwrap_or("(unnamed)"))).strong().color(ui.visuals().selection.stroke.color));
+        let list = egui::Panel::left("history_list")
+            .resizable(true)
+            .default_size(width)
+            .size_range(280.0..=(max - 260.0).max(280.0))
+            .frame(egui::Frame::new().inner_margin(egui::Margin { right: 10, ..Default::default() }))
+            .show(ui, |ui| {
+                ui.style_mut().interaction.selectable_labels = false; // so a click on any cell selects the row
+                let cols = [Col::new("When", 80.0).no_sort(), Col::rest("Change").no_sort(), Col::new("", 62.0).no_sort(), Col::new("", 34.0).no_sort()];
+                ui_kit::table(ui, "history", &cols, &mut Sort { col: usize::MAX, asc: false }, shown.len(), |i, row| {
+                    let s = shown[i];
+                    row.set_selected(selected.as_deref() == Some(s.id.as_str()));
+                    row.col(|ui| {
+                        ui.label(RichText::new(ago(s.ts)).color(pal.muted));
+                    });
+                    row.col(|ui| {
+                        if s.kind == Kind::Major {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!("Version: {}", s.version.as_deref().unwrap_or("(unnamed)")))
+                                        .strong()
+                                        .color(ui.visuals().selection.stroke.color),
+                                );
+                                ui.label(&s.label);
+                            });
+                        } else {
                             ui.label(&s.label);
-                        });
-                    } else {
-                        ui.label(&s.label);
+                        }
+                    });
+                    row.col(|ui| {
+                        let (text, level) = if s.kind == Kind::Major { ("Version", Level::Ok) } else { ("Auto", Level::Info) };
+                        ui_kit::badge(ui, text, level);
+                    });
+                    row.col(|ui| {
+                        ui.menu_button("⋯", |ui| row_menu(ui, s, &mut act)).response.on_hover_text("Actions for this snapshot");
+                    });
+                    let r = row.response();
+                    if r.clicked() {
+                        pick = Some(s.id.clone());
                     }
+                    r.context_menu(|ui| row_menu(ui, s, &mut act));
                 });
-                row.col(|ui| {
-                    let (text, level) = if s.kind == Kind::Major { ("Version", Level::Ok) } else { ("Auto", Level::Info) };
-                    ui_kit::badge(ui, text, level);
-                });
-                row.col(|ui| {
-                    ui.menu_button("⋯", |ui| row_menu(ui, s, &mut act)).response.on_hover_text("Actions for this snapshot");
-                });
-                let r = row.response();
-                if r.clicked() {
-                    pick = Some(s.id.clone());
-                }
-                r.context_menu(|ui| row_menu(ui, s, &mut act));
             });
-        });
         ui.painter().line_segment([list.response.rect.right_top(), list.response.rect.right_bottom()], egui::Stroke::new(1.0, pal.line));
         ui.add_space(2.0);
         let current = selected.as_deref().and_then(|id| shown.iter().find(|s| s.id == id)).zip(self.changed.as_ref());
@@ -307,7 +326,12 @@ impl HistoryTab {
             egui::Modal::new(egui::Id::unique("delete_snapshot")).show(&ctx, |ui| {
                 ui.set_width(420.0);
                 ui.heading("Delete this snapshot?");
-                ui.label(format!("\"{}\" ({}) is removed for good{}.", s.label, ago(s.ts), if s.kind == Kind::Major { ", although it is a version" } else { "" }));
+                ui.label(format!(
+                    "\"{}\" ({}) is removed for good{}.",
+                    s.label,
+                    ago(s.ts),
+                    if s.kind == Kind::Major { ", although it is a version" } else { "" }
+                ));
                 ui.horizontal(|ui| {
                     yes = ui.button("Delete").clicked();
                     no = ui.button("Cancel").clicked();
@@ -326,7 +350,11 @@ impl HistoryTab {
         egui::Modal::new(egui::Id::unique("rollback")).show(&ctx, |ui| {
             ui.set_width(420.0);
             ui.heading("Roll back?");
-            ui.label(format!("This puts the library and KiCad's library list back as they were before \"{}\" ({}), undoing it and every change after it.", s.label, ago(s.ts)));
+            ui.label(format!(
+                "This puts the library and KiCad's library list back as they were before \"{}\" ({}), undoing it and every change after it.",
+                s.label,
+                ago(s.ts)
+            ));
             ui.label(RichText::new("The current state is snapshotted first, so you can undo the rollback.").weak());
             ui.add_space(8.0);
             ui.horizontal(|ui| {

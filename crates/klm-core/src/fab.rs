@@ -272,12 +272,19 @@ pub fn check_footprint(fp: &Sexpr, limits: &FabLimits) -> Vec<Issue> {
         let small: Vec<f64> = fp
             .items()
             .iter()
-            .filter(|t| matches!(t.head(), Some("fp_text" | "property")) && matches!(t.child("layer").and_then(|l| l.arg(0)), Some("F.SilkS" | "B.SilkS")) && !hidden(t))
+            .filter(|t| {
+                matches!(t.head(), Some("fp_text" | "property")) && matches!(t.child("layer").and_then(|l| l.arg(0)), Some("F.SilkS" | "B.SilkS")) && !hidden(t)
+            })
             .filter_map(|t| t.child("effects")?.child("font")?.child("size")?.arg(0)?.parse::<f64>().ok())
             .filter(|h| h + EPS < min)
             .collect();
         if !small.is_empty() {
-            warn(format!("{} silkscreen text(s) as small as {} high < {} minimum", small.len(), mm(small.iter().copied().fold(f64::INFINITY, f64::min)), mm(min)));
+            warn(format!(
+                "{} silkscreen text(s) as small as {} high < {} minimum",
+                small.len(),
+                mm(small.iter().copied().fold(f64::INFINITY, f64::min)),
+                mm(min)
+            ));
         }
     }
     if let Some(e) = limits.courtyard_excess {
@@ -369,7 +376,11 @@ mod tests {
 
     #[test]
     fn silk_problems() {
-        let m = messages(&CLEAN.replace("(start -0.3 -1) (end 0.3 -1) (stroke (width 0.2)", "(start -1.5 -0.5) (end 1.5 -0.5) (stroke (width 0.1)").replace("(size 1 1) (thickness", "(size 0.8 0.8) (thickness"));
+        let m = messages(
+            &CLEAN
+                .replace("(start -0.3 -1) (end 0.3 -1) (stroke (width 0.2)", "(start -1.5 -0.5) (end 1.5 -0.5) (stroke (width 0.1)")
+                .replace("(size 1 1) (thickness", "(size 0.8 0.8) (thickness"),
+        );
         assert!(m.contains(&"1 silkscreen line(s) as thin as 0.1 mm < 0.153 mm minimum".to_string()), "{m:?}");
         assert!(m.contains(&"Silkscreen runs over pad(s) 1, 2 (keep it 0.1 mm clear of copper)".to_string()), "{m:?}");
         assert!(m.contains(&"1 silkscreen text(s) as small as 0.8 mm high < 1 mm minimum".to_string()), "{m:?}");

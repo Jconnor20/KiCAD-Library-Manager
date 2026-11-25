@@ -3,8 +3,8 @@
 
 use crate::library::{AttachKind, Check, LibraryRoot, Scope, sanitize};
 use crate::part::Part;
-use crate::sources::zip_import::read_zip;
 use crate::rules::Rules;
+use crate::sources::zip_import::read_zip;
 use anyhow::{Result, bail};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -56,9 +56,27 @@ impl fmt::Display for Change {
 enum Work {
     /// Nothing to do; the item failed while planning.
     Nothing,
-    Import { part: Part, category: String, name: String, targets: Vec<LibraryRoot>, overwrite: bool },
-    Attach { root: LibraryRoot, category: String, name: String, kind: AttachKind, file: PathBuf },
-    Copy { from: LibraryRoot, to: LibraryRoot, category: String, name: String, overwrite: bool },
+    Import {
+        part: Part,
+        category: String,
+        name: String,
+        targets: Vec<LibraryRoot>,
+        overwrite: bool,
+    },
+    Attach {
+        root: LibraryRoot,
+        category: String,
+        name: String,
+        kind: AttachKind,
+        file: PathBuf,
+    },
+    Copy {
+        from: LibraryRoot,
+        to: LibraryRoot,
+        category: String,
+        name: String,
+        overwrite: bool,
+    },
     FixPaths(LibraryRoot),
     Link(LibraryRoot, String),
     SyncShadows(LibraryRoot),
@@ -219,13 +237,15 @@ pub fn plan_with(ops: Vec<Op>, global: Option<&LibraryRoot>, project: Option<&Li
             Op::CopyToProject { parts, overwrite } => plan.items.extend(copy_items(global, project, parts, overwrite)),
             Op::RelinkAll => plan.items.extend(relink_items(global.into_iter().chain(project))),
             Op::RepairModels => match crate::model_links::plan(&plan.roots, project.map(|p| p.table_dir.as_path())) {
-                Ok(fixes) => for fix in fixes {
-                    let mut item = Item::new(fix.path.display().to_string());
-                    item.changes = fix.changes.iter().cloned().map(Change::Field).collect();
-                    item.warnings = fix.warnings.clone();
-                    item.work = Work::RepairModels(fix);
-                    plan.items.push(item);
-                },
+                Ok(fixes) => {
+                    for fix in fixes {
+                        let mut item = Item::new(fix.path.display().to_string());
+                        item.changes = fix.changes.iter().cloned().map(Change::Field).collect();
+                        item.warnings = fix.warnings.clone();
+                        item.work = Work::RepairModels(fix);
+                        plan.items.push(item);
+                    }
+                }
                 Err(e) => plan.items.push(Item::new("Repair 3D links").fail(format!("{e:#}"))),
             },
         }
@@ -233,7 +253,15 @@ pub fn plan_with(ops: Vec<Op>, global: Option<&LibraryRoot>, project: Option<&Li
     plan
 }
 
-fn import_item(mut part: Part, category: Option<String>, target: Target, overwrite: bool, global: Option<&LibraryRoot>, project: Option<&LibraryRoot>, rules: &Rules) -> Item {
+fn import_item(
+    mut part: Part,
+    category: Option<String>,
+    target: Target,
+    overwrite: bool,
+    global: Option<&LibraryRoot>,
+    project: Option<&LibraryRoot>,
+    rules: &Rules,
+) -> Item {
     part.mpn = rules.normalise_mpn(&part.mpn);
     let category = category.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).unwrap_or_else(|| rules.category_for(&part));
     let cat = sanitize(&category);
@@ -538,7 +566,8 @@ mod tests {
             name_template: "X_{MPN}".into(),
             mpn_case: MpnCase::Lower,
         };
-        let op = |category: Option<&str>| vec![Op::ImportZip { zip: zip.clone(), category: category.map(String::from), target: Target::Global, overwrite: false }];
+        let op =
+            |category: Option<&str>| vec![Op::ImportZip { zip: zip.clone(), category: category.map(String::from), target: Target::Global, overwrite: false }];
         let p = plan_with(op(None), Some(&global), Some(&project), &rules);
         assert!(p.items[0].changes.contains(&Change::Add("symbol X_zipped in KLM_Special".into())), "{p}");
         let Work::Import { part, category, name, .. } = &p.items[0].work else { panic!("not an import") };

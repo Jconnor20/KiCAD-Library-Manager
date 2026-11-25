@@ -6,11 +6,11 @@
 
 use klm_core::batch::{self, Op, Target};
 use klm_core::convert::easyeda;
+use klm_core::kicad_env;
 use klm_core::library::LibraryRoot;
 use klm_core::part::Part;
 use klm_core::rules::Rules;
 use klm_core::sources::{foreign, zip_import};
-use klm_core::kicad_env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -78,7 +78,9 @@ fn app_zip(zip: &Path, work: &Path) -> Result<Vec<Part>, String> {
         }
         Some(part) => Ok(vec![part]),
         None => match zip_import::extract_foreign(zip, &work.join("foreign")) {
-            Ok((n, _)) if n > 0 => foreign::scan(&work.join("foreign"), &rules, &work.join("conv")).map(|s| s.parts.into_iter().map(|f| f.part).collect()).map_err(|e| format!("{e:#}")),
+            Ok((n, _)) if n > 0 => foreign::scan(&work.join("foreign"), &rules, &work.join("conv"))
+                .map(|s| s.parts.into_iter().map(|f| f.part).collect())
+                .map_err(|e| format!("{e:#}")),
             Ok((_, true)) => Err("an Altium project (.LibPkg) with no library files; pick the .SchLib and .PcbLib files with Import library…".into()),
             _ => Err("no KiCad, Altium or Eagle library files inside, ignored".into()),
         },
@@ -193,7 +195,12 @@ fn c07_legacy_lib_symbols() {
 fn c08_ultra_librarian_zips() {
     let Some(cli) = cli() else { return };
     // (file, what it holds, expected parts, has footprint)
-    for (id, file) in [("C08a", "ul_4515DO-DS3BK004DP (1).zip"), ("C08b", "ul_4515DO-DS3BK004DP (2).zip"), ("C08c", "ul_4515DO-DS3BK004DP (3).zip"), ("C08d", "ul_4515DO-DS3BK004DP.zip")] {
+    for (id, file) in [
+        ("C08a", "ul_4515DO-DS3BK004DP (1).zip"),
+        ("C08b", "ul_4515DO-DS3BK004DP (2).zip"),
+        ("C08c", "ul_4515DO-DS3BK004DP (3).zip"),
+        ("C08d", "ul_4515DO-DS3BK004DP.zip"),
+    ] {
         let Some(zip) = corpus(file) else { return };
         let parts = app_zip(&zip, &fresh(&format!("{id}-zip"))).unwrap_or_else(|e| panic!("{id} {file}: {e}"));
         assert!(!parts.is_empty(), "{id}");

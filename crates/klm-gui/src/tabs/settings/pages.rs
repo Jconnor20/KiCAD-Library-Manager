@@ -94,18 +94,22 @@ impl SettingsTab {
         match self.section {
             Section::General | Section::Libraries => {
                 group(ui, "Global library", |ui| {
-                ui.label(live.global_root.as_ref().map_or("Not set up yet: import a part to choose one.".into(), |g| g.display().to_string()));
-                ui.weak("Where KLM keeps the parts that every project shares.");
-                if live.global_root.is_some() && ui.button("Change location…").on_hover_text("Move the library, or point KLM at where you moved it").clicked() {
-                    if let Some(dir) = rfd::FileDialog::new().set_title("New location for the global library").pick_folder() {
-                        cmd = Some(Cmd::MoveLibrary(dir));
+                    ui.label(live.global_root.as_ref().map_or("Not set up yet: import a part to choose one.".into(), |g| g.display().to_string()));
+                    ui.weak("Where KLM keeps the parts that every project shares.");
+                    if live.global_root.is_some()
+                        && ui.button("Change location…").on_hover_text("Move the library, or point KLM at where you moved it").clicked()
+                    {
+                        if let Some(dir) = rfd::FileDialog::new().set_title("New location for the global library").pick_folder() {
+                            cmd = Some(Cmd::MoveLibrary(dir));
+                        }
                     }
-                }
                 });
                 group(ui, "Appearance", |ui| {
                     let (mut pref, before) = (ui.ctx().options(|o| o.theme_preference), ui.ctx().options(|o| o.theme_preference));
                     ui.horizontal(|ui| {
-                        for (p, label) in [(egui::ThemePreference::System, "System"), (egui::ThemePreference::Light, "Light"), (egui::ThemePreference::Dark, "Dark")] {
+                        for (p, label) in
+                            [(egui::ThemePreference::System, "System"), (egui::ThemePreference::Light, "Light"), (egui::ThemePreference::Dark, "Dark")]
+                        {
                             ui.selectable_value(&mut pref, p, label);
                         }
                     });
@@ -220,7 +224,10 @@ impl SettingsTab {
                             ui.label("Name template");
                             ui.add(egui::TextEdit::singleline(&mut rules.name_template).hint_text("{Manufacturer}_{MPN}").desired_width(f32::INFINITY));
                         });
-                        ui.weak(format!("Placeholders: {}. Empty means just the MPN.", TEMPLATE_FIELDS.iter().map(|f| format!("{{{f}}}")).collect::<Vec<_>>().join(" ")));
+                        ui.weak(format!(
+                            "Placeholders: {}. Empty means just the MPN.",
+                            TEMPLATE_FIELDS.iter().map(|f| format!("{{{f}}}")).collect::<Vec<_>>().join(" ")
+                        ));
                         ui.horizontal(|ui| {
                             ui.label("MPN case");
                             for (case, label) in [(MpnCase::Keep, "Keep"), (MpnCase::Upper, "UPPER"), (MpnCase::Lower, "lower")] {
@@ -294,7 +301,15 @@ impl SettingsTab {
                         let mm = |v: Option<f64>| v.map_or("-".into(), |v| format!("{v:.3}"));
                         ui.weak(format!(
                             "Track {} · gap {} · drill {} · ring {} · via {}/{} · mask web {} · edge {} · courtyard +{} (mm)",
-                            mm(l.min_track), mm(l.min_clearance), mm(l.min_drill), mm(l.min_annular_ring), mm(l.min_via_drill), mm(l.min_via_diameter), mm(l.min_mask_web), mm(l.min_edge_clearance), mm(l.courtyard_excess)
+                            mm(l.min_track),
+                            mm(l.min_clearance),
+                            mm(l.min_drill),
+                            mm(l.min_annular_ring),
+                            mm(l.min_via_drill),
+                            mm(l.min_via_diameter),
+                            mm(l.min_mask_web),
+                            mm(l.min_edge_clearance),
+                            mm(l.courtyard_excess)
                         ));
                     });
                 }
@@ -314,7 +329,13 @@ impl SettingsTab {
                 group(ui, "Field names", |ui| {
                     ui.weak("The schematic fields that hold each part number, if your symbols name them differently. A project can override them in its .klm-bom.json.");
                     let f = &mut d.bom_fields;
-                    for (label, v) in [("MPN", &mut f.mpn), ("Manufacturer", &mut f.manufacturer), ("LCSC", &mut f.lcsc), ("DigiKey", &mut f.digikey), ("Mouser", &mut f.mouser)] {
+                    for (label, v) in [
+                        ("MPN", &mut f.mpn),
+                        ("Manufacturer", &mut f.manufacturer),
+                        ("LCSC", &mut f.lcsc),
+                        ("DigiKey", &mut f.digikey),
+                        ("Mouser", &mut f.mouser),
+                    ] {
                         ui.horizontal(|ui| {
                             ui.add_sized([100.0, 20.0], egui::Label::new(label));
                             ui.add(egui::TextEdit::singleline(v).desired_width(200.0));
@@ -322,37 +343,35 @@ impl SettingsTab {
                     }
                 });
             }
-            Section::History => {
-                two(
-                    ui,
-                    &mut d.history,
-                    |ui, h| {
-                        group(ui, "Automatic snapshots", |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("Keep the last");
-                                ui.add(egui::DragValue::new(&mut h.keep_minors).range(1..=500));
-                                ui.label("per library");
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Size cap");
-                                let mut cap = h.max_minor_mb.unwrap_or(0);
-                                ui.add(egui::DragValue::new(&mut cap).range(0..=100_000).suffix(" MB"));
-                                h.max_minor_mb = (cap > 0).then_some(cap);
-                            });
-                            ui.weak("0 means no cap. Versions are never removed.");
-                        })
-                    },
-                    |ui, h| {
-                        group(ui, "Versions", |ui| {
-                            egui::ComboBox::from_label("Make a version automatically").selected_text(format!("{:?}", h.auto_version)).show_ui(ui, |ui| {
-                                for v in [AutoVersion::Off, AutoVersion::Daily, AutoVersion::Weekly, AutoVersion::Monthly] {
-                                    ui.selectable_value(&mut h.auto_version, v, format!("{v:?}"));
-                                }
-                            });
-                        })
-                    },
-                )
-            }
+            Section::History => two(
+                ui,
+                &mut d.history,
+                |ui, h| {
+                    group(ui, "Automatic snapshots", |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Keep the last");
+                            ui.add(egui::DragValue::new(&mut h.keep_minors).range(1..=500));
+                            ui.label("per library");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Size cap");
+                            let mut cap = h.max_minor_mb.unwrap_or(0);
+                            ui.add(egui::DragValue::new(&mut cap).range(0..=100_000).suffix(" MB"));
+                            h.max_minor_mb = (cap > 0).then_some(cap);
+                        });
+                        ui.weak("0 means no cap. Versions are never removed.");
+                    })
+                },
+                |ui, h| {
+                    group(ui, "Versions", |ui| {
+                        egui::ComboBox::from_label("Make a version automatically").selected_text(format!("{:?}", h.auto_version)).show_ui(ui, |ui| {
+                            for v in [AutoVersion::Off, AutoVersion::Daily, AutoVersion::Weekly, AutoVersion::Monthly] {
+                                ui.selectable_value(&mut h.auto_version, v, format!("{v:?}"));
+                            }
+                        });
+                    })
+                },
+            ),
         }
         cmd
     }

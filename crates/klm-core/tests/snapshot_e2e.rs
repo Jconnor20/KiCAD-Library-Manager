@@ -85,5 +85,8 @@ fn import_then_rollback_restores_everything() {
     assert_ne!(tree(&root.dir), files);
     snapshot::rollback(&root, &latest.id).unwrap();
     assert_eq!(tree(&root.dir), files);
-    assert_eq!(tree(&config).into_iter().filter(|(k, _)| !k.ends_with(".bak")).collect::<BTreeMap<_, _>>(), tables.into_iter().filter(|(k, _)| !k.ends_with(".bak")).collect::<BTreeMap<_, _>>());
+    assert_eq!(
+        tree(&config).into_iter().filter(|(k, _)| !k.ends_with(".bak")).collect::<BTreeMap<_, _>>(),
+        tables.into_iter().filter(|(k, _)| !k.ends_with(".bak")).collect::<BTreeMap<_, _>>()
+    );
 }

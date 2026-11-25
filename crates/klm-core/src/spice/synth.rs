@@ -152,11 +152,7 @@ pub fn extract_pdf_bytes(bytes: &[u8]) -> String {
         }
 
         let raw_stream = &bytes[data_start..data_end];
-        let decoded = if dict_str.contains("/FlateDecode") || dict_str.contains("/Fl ") {
-            decompress_flate(raw_stream)
-        } else {
-            Some(raw_stream.to_vec())
-        };
+        let decoded = if dict_str.contains("/FlateDecode") || dict_str.contains("/Fl ") { decompress_flate(raw_stream) } else { Some(raw_stream.to_vec()) };
 
         if let Some(stream_bytes) = decoded {
             let text = extract_text_operators(&stream_bytes);
@@ -347,22 +343,14 @@ fn read_pdf_hex_string(b: &[u8], mut i: usize) -> Option<(String, usize)> {
 }
 
 /// Extracts electrical specifications and archetype from a part, symbol, and optional datasheet text.
-pub fn extract_specs(
-    part: &Part,
-    symbol: Option<&Sexpr>,
-    pins: &[SymPin],
-    pdf_text: &str,
-) -> ExtractedSpecs {
+pub fn extract_specs(part: &Part, symbol: Option<&Sexpr>, pins: &[SymPin], pdf_text: &str) -> ExtractedSpecs {
     let mut specs = ExtractedSpecs::default();
     let sym_prop = |k: &str| symbol.and_then(|s| crate::library::property(s, k)).unwrap_or("");
     let sym_ref = sym_prop("Reference");
     let sym_val = sym_prop("Value");
     let sym_desc = sym_prop("Description");
 
-    let combined_desc = format!(
-        "{} {} {} {}",
-        part.mpn, part.category_hint, part.description, sym_desc
-    );
+    let combined_desc = format!("{} {} {} {}", part.mpn, part.category_hint, part.description, sym_desc);
 
     specs.archetype = detect_archetype(&combined_desc, sym_ref, pins, &part.params, pdf_text);
 
@@ -381,11 +369,8 @@ pub fn extract_specs(
     }
 
     // 2. Parse Value/Description for primary passive values or regulator output voltage.
-    let val_or_desc = if !sym_val.is_empty() && !sym_val.eq_ignore_ascii_case(&part.mpn) {
-        format!("{sym_val} {combined_desc}")
-    } else {
-        combined_desc.clone()
-    };
+    let val_or_desc =
+        if !sym_val.is_empty() && !sym_val.eq_ignore_ascii_case(&part.mpn) { format!("{sym_val} {combined_desc}") } else { combined_desc.clone() };
 
     match specs.archetype {
         Some(Archetype::Resistor) if specs.resistance_ohm.is_none() => {
@@ -424,12 +409,8 @@ pub fn extract_specs(
 }
 
 fn detect_archetype(desc: &str, sym_ref: &str, pins: &[SymPin], params: &[(String, String)], pdf: &str) -> Option<Archetype> {
-    let d = format!(
-        "{desc} {} {}",
-        params.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join(" "),
-        &pdf[..pdf.len().min(4096)]
-    )
-    .to_ascii_lowercase();
+    let d =
+        format!("{desc} {} {}", params.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join(" "), &pdf[..pdf.len().min(4096)]).to_ascii_lowercase();
     let ref_up = sym_ref.trim().to_ascii_uppercase();
     let pin_names: Vec<String> = pins.iter().map(|p| p.name.to_ascii_lowercase()).collect();
 
@@ -441,7 +422,12 @@ fn detect_archetype(desc: &str, sym_ref: &str, pins: &[SymPin], params: &[(Strin
         let p_ch = d.contains("p-channel") || d.contains("pjfet");
         return Some(Archetype::Jfet { n_ch: !p_ch });
     }
-    if d.contains("bjt") || d.contains("bipolar transistor") || d.contains("hfe") || d.contains("vceo") || (pins.len() == 3 && pin_names.iter().any(|p| p == "b" || p == "base")) {
+    if d.contains("bjt")
+        || d.contains("bipolar transistor")
+        || d.contains("hfe")
+        || d.contains("vceo")
+        || (pins.len() == 3 && pin_names.iter().any(|p| p == "b" || p == "base"))
+    {
         let pnp = d.contains("pnp");
         return Some(Archetype::Bjt { npn: !pnp });
     }
@@ -481,10 +467,7 @@ fn detect_archetype(desc: &str, sym_ref: &str, pins: &[SymPin], params: &[(Strin
     if pins.len() == 3 && pin_names.iter().any(|p| p == "g" || p == "gate") {
         return Some(Archetype::Mosfet { n_ch: !d.contains("pnp") && !d.contains("p-ch") });
     }
-    if (pins.len() == 5 || pins.len() == 8)
-        && pin_names.iter().any(|p| p.contains("in+"))
-        && pin_names.iter().any(|p| p.contains("in-"))
-    {
+    if (pins.len() == 5 || pins.len() == 8) && pin_names.iter().any(|p| p.contains("in+")) && pin_names.iter().any(|p| p.contains("in-")) {
         return Some(Archetype::OpAmp);
     }
     None
@@ -717,7 +700,16 @@ pub fn parse_leading_si(raw: &str) -> Option<f64> {
         1e3
     } else if rest.starts_with('G') {
         1e9
-    } else if rest.starts_with("mOhm") || rest.starts_with("mΩ") || rest.starts_with("mV") || rest.starts_with("mA") || rest.starts_with("mH") || rest.starts_with("mF") || rest.starts_with("ms") || rest.starts_with("mW") || rest == "m" {
+    } else if rest.starts_with("mOhm")
+        || rest.starts_with("mΩ")
+        || rest.starts_with("mV")
+        || rest.starts_with("mA")
+        || rest.starts_with("mH")
+        || rest.starts_with("mF")
+        || rest.starts_with("ms")
+        || rest.starts_with("mW")
+        || rest == "m"
+    {
         1e-3
     } else if rest.starts_with('u') {
         1e-6
@@ -779,11 +771,7 @@ pub fn generate_sim(
         "* Generated SPICE model for {} ({})\n* Strategy: {}\n",
         part.mpn,
         if part.manufacturer.is_empty() { "unknown maker" } else { &part.manufacturer },
-        if similar.is_some() {
-            "datasheet/parametric specs + similar component model"
-        } else {
-            "datasheet PDF / parametric specs"
-        }
+        if similar.is_some() { "datasheet/parametric specs + similar component model" } else { "datasheet PDF / parametric specs" }
     );
     for n in &notes {
         header.push_str(&format!("*   - {n}\n"));
@@ -876,11 +864,7 @@ fn adapt_similar_primitive(target_name: &str, arch: &Archetype, specs: &Extracte
         SpiceKind::Model(t) => t.clone(),
         SpiceKind::Subckt => return None,
     };
-    let pchan = if matches!(arch, Archetype::Mosfet { n_ch: false }) && kind_kw.eq_ignore_ascii_case("VDMOS") {
-        " pchan"
-    } else {
-        ""
-    };
+    let pchan = if matches!(arch, Archetype::Mosfet { n_ch: false }) && kind_kw.eq_ignore_ascii_case("VDMOS") { " pchan" } else { "" };
     let params_str = kvs.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ");
     Some(format!(".model {target_name} {kind_kw}{pchan} ({params_str})"))
 }
@@ -891,27 +875,21 @@ fn synthesize_archetype(name: &str, arch: &Archetype, specs: &ExtractedSpecs, pi
             let r = fmt_num(specs.resistance_ohm?);
             let p1 = pins.first().map_or("1", |p| p.number.as_str());
             let p2 = pins.get(1).map_or("2", |p| p.number.as_str());
-            Some(format!(
-                ".subckt {name} {p1} {p2}\nR_main {p1} {p2} {r}\n.ends {name}"
-            ))
+            Some(format!(".subckt {name} {p1} {p2}\nR_main {p1} {p2} {r}\n.ends {name}"))
         }
         Archetype::Capacitor => {
             let c = fmt_num(specs.capacitance_f?);
             let esr = fmt_num(specs.esr_ohm.unwrap_or(0.02));
             let p1 = pins.first().map_or("1", |p| p.number.as_str());
             let p2 = pins.get(1).map_or("2", |p| p.number.as_str());
-            Some(format!(
-                ".subckt {name} {p1} {p2}\nR_esr {p1} n_mid {esr}\nC_main n_mid {p2} {c}\nR_leak n_mid {p2} 1G\n.ends {name}"
-            ))
+            Some(format!(".subckt {name} {p1} {p2}\nR_esr {p1} n_mid {esr}\nC_main n_mid {p2} {c}\nR_leak n_mid {p2} 1G\n.ends {name}"))
         }
         Archetype::Inductor => {
             let l = fmt_num(specs.inductance_h?);
             let dcr = fmt_num(specs.dcr_ohm.unwrap_or(0.05));
             let p1 = pins.first().map_or("1", |p| p.number.as_str());
             let p2 = pins.get(1).map_or("2", |p| p.number.as_str());
-            Some(format!(
-                ".subckt {name} {p1} {p2}\nR_dcr {p1} n_mid {dcr}\nL_main n_mid {p2} {l}\n.ends {name}"
-            ))
+            Some(format!(".subckt {name} {p1} {p2}\nR_dcr {p1} n_mid {dcr}\nL_main n_mid {p2} {l}\n.ends {name}"))
         }
         Archetype::Diode(kind) => {
             let (def_vf, n, def_trr, def_cjo) = match kind {
@@ -929,10 +907,7 @@ fn synthesize_archetype(name: &str, arch: &Archetype, specs: &ExtractedSpecs, pi
             let bv = fmt_num(specs.vz_v.or(specs.vr_v).unwrap_or(if *kind == DiodeKind::Zener { 5.1 } else { 75.0 }));
             let cjo = specs.cjo_f.unwrap_or(def_cjo);
             let tt = specs.trr_s.unwrap_or(def_trr) * 0.6;
-            Some(format!(
-                ".model {name} D(IS={is:.3e} N={n:.2} RS={} CJO={cjo:.3e} TT={tt:.3e} BV={bv} IBV=5m)",
-                fmt_num(rs)
-            ))
+            Some(format!(".model {name} D(IS={is:.3e} N={n:.2} RS={} CJO={cjo:.3e} TT={tt:.3e} BV={bv} IBV=5m)", fmt_num(rs)))
         }
         Archetype::Bjt { npn } => {
             let kind = if *npn { "NPN" } else { "PNP" };
@@ -940,9 +915,7 @@ fn synthesize_archetype(name: &str, arch: &Archetype, specs: &ExtractedSpecs, pi
             let vaf = specs.vceo_v.map_or(80.0, |v| (v * 1.5).max(15.0));
             let ikf = fmt_num(specs.ic_max_a.unwrap_or(0.2).max(1e-3));
             let tf = specs.ft_hz.map_or(0.5e-9, |f| (1.0 / (2.0 * std::f64::consts::PI * f)).clamp(1e-12, 1e-6));
-            Some(format!(
-                ".model {name} {kind}(IS=1e-14 BF={bf:.1} VAF={vaf:.1} IKF={ikf} RC=0.5 RE=0.1 RB=10 CJE=15p CJC=8p TF={tf:.3e} TR=10n)"
-            ))
+            Some(format!(".model {name} {kind}(IS=1e-14 BF={bf:.1} VAF={vaf:.1} IKF={ikf} RC=0.5 RE=0.1 RB=10 CJE=15p CJC=8p TF={tf:.3e} TR=10n)"))
         }
         Archetype::Mosfet { n_ch } => {
             let vth_mag = specs.vgs_th_v.unwrap_or(1.8).abs().clamp(0.3, 8.0);

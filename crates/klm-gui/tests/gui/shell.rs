@@ -9,7 +9,12 @@ use egui_kittest::kittest::Queryable;
 
 /// The app as `main` starts it: no tab forced.
 fn fresh<'a>(size: (f32, f32)) -> Gui<'a> {
-    let mut h = Harness::builder().with_size(egui::vec2(size.0, size.1)).allow_missing_glyphs().with_accessibility_check(false).wgpu().build_eframe(|cc| App::new(&cc.egui_ctx, None));
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(size.0, size.1))
+        .allow_missing_glyphs()
+        .with_accessibility_check(false)
+        .wgpu()
+        .build_eframe(|cc| App::new(&cc.egui_ctx, None));
     h.run_ok();
     h
 }
@@ -142,8 +147,12 @@ fn s11_omnibox_finds_library_parts() {
         h.run_ok();
         h.event(egui::Event::Text("lm3".into()));
         h.run_ok();
-        assert!(h.query_by_label("LM358").is_some(), "no library hit:
-{}", dump(&h));
+        assert!(
+            h.query_by_label("LM358").is_some(),
+            "no library hit:
+{}",
+            dump(&h)
+        );
         assert!(h.query_by_label_contains("Search Probe for").is_some(), "no supplier hit");
         let m = snap(&mut h, "omnibox");
         assert!(m.is_empty(), "missing glyphs {m:?}");

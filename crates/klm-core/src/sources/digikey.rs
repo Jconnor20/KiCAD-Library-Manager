@@ -1,7 +1,7 @@
 //! DigiKey Product Information API v4 (keyword search), OAuth2 client credentials.
 
-use super::{Source, categories};
 use super::http::{self, TokenCache};
+use super::{Source, categories};
 use crate::credentials;
 use crate::part::Part;
 use anyhow::Result;
@@ -62,7 +62,11 @@ impl Source for DigiKey {
     }
 
     fn categories(&self) -> Result<Vec<categories::Category>> {
-        let req = self.http.get("https://api.digikey.com/products/v4/search/categories").bearer_auth(self.token.token(&self.http)?).header("X-DIGIKEY-Client-Id", &self.client_id);
+        let req = self
+            .http
+            .get("https://api.digikey.com/products/v4/search/categories")
+            .bearer_auth(self.token.token(&self.http)?)
+            .header("X-DIGIKEY-Client-Id", &self.client_id);
         Ok(categories::parse_digikey(&http::send(req)?))
     }
 
@@ -128,9 +132,7 @@ pub(crate) fn parse(v: &Value) -> Vec<Part> {
     products
         .iter()
         .map(|p| {
-            let param = |name: &str| {
-                p["Parameters"].as_array().into_iter().flatten().find(|x| x["ParameterText"] == name).map(|x| http::text(x, "/ValueText"))
-            };
+            let param = |name: &str| p["Parameters"].as_array().into_iter().flatten().find(|x| x["ParameterText"] == name).map(|x| http::text(x, "/ValueText"));
             let params = p["Parameters"].as_array().into_iter().flatten().map(|x| (http::text(x, "/ParameterText"), http::text(x, "/ValueText"))).collect();
             let base = Part {
                 params,
@@ -163,7 +165,8 @@ fn one_variation(p: &Value, variation: &Value, mut part: Part) -> Part {
     if !id.is_empty() {
         part.supplier_ids.push(("DigiKey".into(), id));
     }
-    part.price_breaks = variation["StandardPricing"].as_array().into_iter().flatten().filter_map(|b| Some((b["BreakQuantity"].as_u64()?, b["UnitPrice"].as_f64()?))).collect();
+    part.price_breaks =
+        variation["StandardPricing"].as_array().into_iter().flatten().filter_map(|b| Some((b["BreakQuantity"].as_u64()?, b["UnitPrice"].as_f64()?))).collect();
     part.moq = variation["MinimumOrderQuantity"].as_u64();
     part.packaging = http::text(variation, "/PackageType/Name");
     part.pack_qty = variation["StandardPackage"].as_u64();
@@ -238,7 +241,10 @@ mod tests {
     fn live_keyword_reply_maps_every_field() {
         let parts = parse(&serde_json::from_str(include_str!("../../tests/fixtures/live/digikey_search_LM358.json")).unwrap());
         let p = parts.iter().find(|p| p.mpn == "LM358DT").unwrap();
-        assert_eq!((p.manufacturer.as_str(), p.package.as_str(), p.packaging.as_str()), ("STMicroelectronics", "8-SOIC (0.154\", 3.90mm Width)", "Tape & Reel (TR)"));
+        assert_eq!(
+            (p.manufacturer.as_str(), p.package.as_str(), p.packaging.as_str()),
+            ("STMicroelectronics", "8-SOIC (0.154\", 3.90mm Width)", "Tape & Reel (TR)")
+        );
         assert_eq!((p.stock, p.moq, p.pack_qty, p.lead_time_days), (Some(75000), Some(2500), Some(2500), Some(30 * 7)));
         assert_eq!(p.price_breaks[..2], [(2500, 0.08508), (5000, 0.08225)]);
         assert_eq!(p.supplier_ids, [("DigiKey".to_string(), "497-1591-2-ND".to_string())]);

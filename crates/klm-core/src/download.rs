@@ -95,7 +95,14 @@ pub(crate) fn send_retrying(blocks_with_403: bool, build: impl Fn() -> reqwest::
             went_fine();
             return Ok(resp);
         }
-        let wait = Duration::from_secs(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or((if code == 403 { 10 } else { 3 }) << attempt).min(60));
+        let wait = Duration::from_secs(
+            resp.headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .unwrap_or((if code == 403 { 10 } else { 3 }) << attempt)
+                .min(60),
+        );
         backed_off(wait);
         note_wait("the server", wait, true);
         if sleep_unless_aborted(wait) {
@@ -112,7 +119,11 @@ pub fn download_pdf(url: &str, dest: &Path) -> Result<()> {
     let http = reqwest::blocking::Client::builder().user_agent(BROWSER_USER_AGENT).timeout(Duration::from_secs(60)).build().expect("HTTP client");
     let resp = send_retrying(false, || http.get(url)).with_context(|| format!("requesting {url}"))?;
     if !resp.status().is_success() {
-        let hint = if matches!(resp.status().as_u16(), 403 | 429) { " (the server is refusing requests, likely rate limiting; try again in a few minutes)" } else { "" };
+        let hint = if matches!(resp.status().as_u16(), 403 | 429) {
+            " (the server is refusing requests, likely rate limiting; try again in a few minutes)"
+        } else {
+            ""
+        };
         bail!("{url}: HTTP {}{hint}", resp.status());
     }
     let body = resp.bytes().with_context(|| format!("reading {url}"))?;
@@ -130,7 +141,11 @@ impl LibraryRoot {
     pub fn download_missing_datasheets(&self) -> Vec<(String, Result<()>)> {
         let tmp = std::env::temp_dir().join(format!("klm-datasheet-{}.pdf", std::process::id()));
         let mut out = vec![];
-        let todo: Vec<_> = self.list_parts().into_iter().filter(|p| p.datasheet == Check::Link && p.datasheet_target.as_ref().is_some_and(|u| u.starts_with("http"))).collect();
+        let todo: Vec<_> = self
+            .list_parts()
+            .into_iter()
+            .filter(|p| p.datasheet == Check::Link && p.datasheet_target.as_ref().is_some_and(|u| u.starts_with("http")))
+            .collect();
         if todo.is_empty() {
             return out;
         }
@@ -151,7 +166,13 @@ impl LibraryRoot {
 /// Finds a real PDF for `mpn`: the part's existing link first, then every `datasheet_url` the
 /// `sources` return for the MPN. `fetch` saves a URL to `dest` (it is `download_pdf` outside tests).
 /// Returns the URL that worked, or why each attempt failed.
-pub fn find_datasheet(mpn: &str, existing: Option<&str>, sources: &[Box<dyn Source>], dest: &Path, fetch: &dyn Fn(&str, &Path) -> Result<()>) -> Result<String> {
+pub fn find_datasheet(
+    mpn: &str,
+    existing: Option<&str>,
+    sources: &[Box<dyn Source>],
+    dest: &Path,
+    fetch: &dyn Fn(&str, &Path) -> Result<()>,
+) -> Result<String> {
     let mut why = vec![];
     let mut tried = vec![];
     let mut try_url = |url: &str, from: &str, why: &mut Vec<String>| {
@@ -226,7 +247,6 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
-
     struct Stub(&'static str, Vec<&'static str>);
     impl Source for Stub {
         fn name(&self) -> &'static str {
@@ -297,7 +317,9 @@ mod tests {
     fn link_only_parts_get_a_local_pdf_and_failures_keep_their_link() {
         let base = serve();
         let sym = |mpn: &str, ds: &str| {
-            format!(r#"(symbol "{mpn}" (property "Reference" "U" (at 0 0 0)) (property "MPN" "{mpn}" (at 0 0 0)) (property "Manufacturer" "ACME" (at 0 0 0)) (property "Footprint" "" (at 0 0 0)) (property "Datasheet" "{ds}" (at 0 0 0)))"#)
+            format!(
+                r#"(symbol "{mpn}" (property "Reference" "U" (at 0 0 0)) (property "MPN" "{mpn}" (at 0 0 0)) (property "Manufacturer" "ACME" (at 0 0 0)) (property "Footprint" "" (at 0 0 0)) (property "Datasheet" "{ds}" (at 0 0 0)))"#
+            )
         };
         let lib = format!(
             "(kicad_symbol_lib (version 20241209)\n{}\n{}\n{}\n{}\n)",

@@ -20,25 +20,25 @@ impl Watcher {
     pub fn poll(&mut self) -> Vec<PathBuf> {
         let mut found = vec![];
         for dir in &self.dirs {
-        let Ok(rd) = std::fs::read_dir(dir) else { continue };
-        for e in rd.flatten() {
-            let p = e.path();
-            if !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip")) || self.seen.contains(&p) {
-                continue;
+            let Ok(rd) = std::fs::read_dir(dir) else { continue };
+            for e in rd.flatten() {
+                let p = e.path();
+                if !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip")) || self.seen.contains(&p) {
+                    continue;
+                }
+                let Ok(meta) = e.metadata() else { continue };
+                if meta.modified().map_or(true, |m| m < self.since) {
+                    continue;
+                }
+                // Firefox creates an empty placeholder and writes to `<name>.part` until done.
+                let mut part = p.as_os_str().to_owned();
+                part.push(".part");
+                if meta.len() == 0 || Path::new(&part).exists() {
+                    continue;
+                }
+                self.seen.insert(p.clone());
+                found.push(p);
             }
-            let Ok(meta) = e.metadata() else { continue };
-            if meta.modified().map_or(true, |m| m < self.since) {
-                continue;
-            }
-            // Firefox creates an empty placeholder and writes to `<name>.part` until done.
-            let mut part = p.as_os_str().to_owned();
-            part.push(".part");
-            if meta.len() == 0 || Path::new(&part).exists() {
-                continue;
-            }
-            self.seen.insert(p.clone());
-            found.push(p);
-        }
         }
         found
     }

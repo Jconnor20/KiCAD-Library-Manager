@@ -42,10 +42,7 @@ pub fn set_property(symbol: &mut Sexpr, key: &str, value: &str) {
             Sexpr::str(value),
             Sexpr::list("at", vec![Sexpr::Atom("0".into()), Sexpr::Atom("0".into()), Sexpr::Atom("0".into())]),
             Sexpr::list("hide", vec![Sexpr::Atom("yes".into())]),
-            Sexpr::list(
-                "effects",
-                vec![Sexpr::list("font", vec![Sexpr::list("size", vec![Sexpr::Atom("1.27".into()), Sexpr::Atom("1.27".into())])])],
-            ),
+            Sexpr::list("effects", vec![Sexpr::list("font", vec![Sexpr::list("size", vec![Sexpr::Atom("1.27".into()), Sexpr::Atom("1.27".into())])])]),
         ],
     );
     let after_last_prop = items.iter().rposition(|p| p.head() == Some("property")).map_or(items.len(), |i| i + 1);
@@ -81,12 +78,7 @@ pub(super) fn set_footprint(fp: &mut Sexpr, name: &str, model_uri: Option<&str>)
             let xyz = |v: &str| Sexpr::list("xyz", vec![Sexpr::Atom(v.into()), Sexpr::Atom(v.into()), Sexpr::Atom(v.into())]);
             items.push(Sexpr::list(
                 "model",
-                vec![
-                    Sexpr::str(uri),
-                    Sexpr::list("offset", vec![xyz("0")]),
-                    Sexpr::list("scale", vec![xyz("1")]),
-                    Sexpr::list("rotate", vec![xyz("0")]),
-                ],
+                vec![Sexpr::str(uri), Sexpr::list("offset", vec![xyz("0")]), Sexpr::list("scale", vec![xyz("1")]), Sexpr::list("rotate", vec![xyz("0")])],
             ));
         }
     }
@@ -139,5 +131,4 @@ mod tests {
         assert!(sexpr::to_string(models[0]).contains("xyz 0 0 1"));
         assert_eq!(fp.arg(0), Some("Y"));
     }
-
 }

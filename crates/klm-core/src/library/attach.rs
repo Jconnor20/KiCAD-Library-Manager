@@ -98,17 +98,7 @@ impl LibraryRoot {
             ..Default::default()
         };
         let work = std::env::temp_dir().join("klm-sim");
-        let Some(res) = crate::spice::resolve_or_generate(
-            &part,
-            Some(&sym_snap),
-            Some(&lib),
-            &cat,
-            Some(self),
-            spice_dirs,
-            allow_generate,
-            &work,
-        )?
-        else {
+        let Some(res) = crate::spice::resolve_or_generate(&part, Some(&sym_snap), Some(&lib), &cat, Some(self), spice_dirs, allow_generate, &work)? else {
             return Ok(None);
         };
 
@@ -121,7 +111,6 @@ impl LibraryRoot {
         write_atomic(&self.symbol_lib(&cat), &sexpr::to_string(&lib))?;
         Ok(Some(res))
     }
-
 
     /// Attaches a ZIP with a footprint and/or 3D model but no symbol (see `sources::read_zip`) to a part already in
     /// the library: the footprint is filed in the category's `.pretty` and linked from the symbol, and the model is

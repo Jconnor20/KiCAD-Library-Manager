@@ -52,7 +52,9 @@ fn import_writes_only_inside_the_sandbox() {
     use klm_core::kicad_env;
     let sb = fresh("import");
     // Even `kicad-cli version` rewrites kicad_common.json, so point it at the sandbox as well.
-    if !kicad_env::kicad_cli().is_ok_and(|c| Command::new(c).env("KICAD_CONFIG_HOME", sb.join("kicad")).arg("version").output().is_ok_and(|o| o.status.success())) {
+    if !kicad_env::kicad_cli()
+        .is_ok_and(|c| Command::new(c).env("KICAD_CONFIG_HOME", sb.join("kicad")).arg("version").output().is_ok_and(|o| o.status.success()))
+    {
         eprintln!("kicad-cli not found; skipping");
         return;
     }

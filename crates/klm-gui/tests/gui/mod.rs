@@ -3,12 +3,12 @@
 //! all distributor sources off, so no test touches the real library, keys or network.
 //! PNGs go to `target/ui-snapshots/`.
 
-mod harness;
-mod screens;
 mod bugs;
+mod harness;
 mod kit;
+mod library;
+mod other_tabs;
+mod screens;
+mod search;
 mod settings;
 mod shell;
-mod search;
-mod other_tabs;
-mod library;

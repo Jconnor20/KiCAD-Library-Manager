@@ -176,7 +176,8 @@ mod tests {
 
     #[test]
     fn round_trip_keeps_everything() {
-        let src = r#"(kicad_symbol_lib (version 20251024) (symbol "A\"B" (pin_names (offset 1.016)) (unknown_thing yes) (property "Value" "line1\nline2\\x")))"#;
+        let src =
+            r#"(kicad_symbol_lib (version 20251024) (symbol "A\"B" (pin_names (offset 1.016)) (unknown_thing yes) (property "Value" "line1\nline2\\x")))"#;
         let a = parse(src).unwrap();
         let b = parse(&to_string(&a)).unwrap();
         assert_eq!(a, b);

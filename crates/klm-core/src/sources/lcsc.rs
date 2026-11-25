@@ -33,12 +33,15 @@ impl Lcsc {
         std::thread::sleep(Duration::from_millis(800));
         let resp = crate::download::send_retrying(true, || self.http.get(url)).with_context(|| format!("requesting {url}"))?;
         if !resp.status().is_success() {
-            let hint = if matches!(resp.status().as_u16(), 403 | 429) { " (the server is refusing requests, likely rate limiting; try again in a few minutes)" } else { "" };
+            let hint = if matches!(resp.status().as_u16(), 403 | 429) {
+                " (the server is refusing requests, likely rate limiting; try again in a few minutes)"
+            } else {
+                ""
+            };
             bail!("{url}: HTTP {}{hint}", resp.status());
         }
         Ok(resp.bytes()?.to_vec())
     }
-
 }
 
 /// Saves the first candidate that really is a PDF (some "datasheet" links are HTML viewer pages);
@@ -72,9 +75,13 @@ pub(crate) fn parse_search(body: &Value, query: &str) -> Vec<Part> {
         .iter()
         .filter(|c| c["componentCode"].is_string())
         .map(|c| {
-            let price = c["componentPrices"].as_array().and_then(|p| p.first()).and_then(|p| Some(format!("${} @{}", p["productPrice"].as_f64()?, p["startNumber"].as_u64()?)));
+            let price = c["componentPrices"]
+                .as_array()
+                .and_then(|p| p.first())
+                .and_then(|p| Some(format!("${} @{}", p["productPrice"].as_f64()?, p["startNumber"].as_u64()?)));
             let datasheet = [s(c, "dataManualUrl"), s(c, "dataManualOfficialLink")].into_iter().find(|u| !u.is_empty());
-            let breaks = c["componentPrices"].as_array().into_iter().flatten().filter_map(|p| Some((p["startNumber"].as_u64()?, p["productPrice"].as_f64()?))).collect();
+            let breaks =
+                c["componentPrices"].as_array().into_iter().flatten().filter_map(|p| Some((p["startNumber"].as_u64()?, p["productPrice"].as_f64()?))).collect();
             Part {
                 price_breaks: breaks,
                 price_currency: "USD".into(),
@@ -141,7 +148,9 @@ impl Source for Lcsc {
         let mut footprint = c.footprint;
         let step = match c.model_uuid.as_deref() {
             None => Err(anyhow!("EasyEDA has no 3D model for this part")),
-            Some(u) => self.get_bytes(&STEP_URL.replace("{uuid}", u)).and_then(|b| if b.starts_with(b"ISO-10303") { Ok(b) } else { bail!("response is not a STEP file") }),
+            Some(u) => self
+                .get_bytes(&STEP_URL.replace("{uuid}", u))
+                .and_then(|b| if b.starts_with(b"ISO-10303") { Ok(b) } else { bail!("response is not a STEP file") }),
         };
         match step {
             Ok(step) => {
@@ -212,7 +221,10 @@ mod tests {
         let p = parts.iter().find(|p| p.supplier_ids[0].1 == "C5213").unwrap();
         let fills = crate::fields::autofill(&crate::fields::default_class("Ic"), p);
         let get = |n: &str| fills.iter().find(|(f, _)| f == n).map(|(_, v)| v.as_str());
-        assert_eq!((get("Temp range"), get("Manufacturer"), get("Supplier"), get("Supplier PN")), (Some("0℃~+70℃"), Some("Texas Instruments"), Some("LCSC"), Some("C5213")));
+        assert_eq!(
+            (get("Temp range"), get("Manufacturer"), get("Supplier"), get("Supplier PN")),
+            (Some("0℃~+70℃"), Some("Texas Instruments"), Some("LCSC"), Some("C5213"))
+        );
     }
 
     #[test]

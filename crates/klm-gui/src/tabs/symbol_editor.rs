@@ -142,7 +142,10 @@ impl SymbolEditor {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui.button("Add pin").clicked() {
                                     let n = (1..).map(|n| n.to_string()).find(|n| self.pins.iter().all(|(_, p)| p.number != *n)).unwrap_or_default();
-                                    self.pins.push((String::new(), PinRow { number: n, name: "~".into(), etype: "passive".into(), x: 0.0, y: 0.0, rot: 0.0, length: 2.54 }));
+                                    self.pins.push((
+                                        String::new(),
+                                        PinRow { number: n, name: "~".into(), etype: "passive".into(), x: 0.0, y: 0.0, rot: 0.0, length: 2.54 },
+                                    ));
                                 }
                             });
                         });
@@ -255,7 +258,11 @@ impl SymbolEditor {
         ui_kit::section_label(ui, "House style");
         ui.add_space(2.0);
         ui.weak(format!("Positions snap to the {GRID} mm (50 mil) grid when you save. For anything graphical, use Edit in KiCad."));
-        if ui.button("Apply house style").on_hover_text("Redraw in the house style of its kind of part, like Restyle symbol. Keeps pins' numbers, names and types.").clicked() {
+        if ui
+            .button("Apply house style")
+            .on_hover_text("Redraw in the house style of its kind of part, like Restyle symbol. Keeps pins' numbers, names and types.")
+            .clicked()
+        {
             *restyle = true;
         }
     }

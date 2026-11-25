@@ -87,7 +87,9 @@ fn build(root: &LibraryRoot, parts: &[(String, String)], stage: &Path, zip_path:
 
         let mut part_lib = sexpr::parse(&std::fs::read_to_string(staging.dir.join(format!("symbols/{cat}.kicad_sym")))?)?;
         for sym in part_lib.items_mut().iter_mut().filter(|c| c.head() == Some("symbol")) {
-            let fp = property(sym, "Footprint").and_then(|f| f.strip_prefix(&format!("{}:", staging.nickname(&cat)))).map(|f| format!("{NICK}:{}", renames.get(f).map_or(f, |r| r.as_str())));
+            let fp = property(sym, "Footprint")
+                .and_then(|f| f.strip_prefix(&format!("{}:", staging.nickname(&cat))))
+                .map(|f| format!("{NICK}:{}", renames.get(f).map_or(f, |r| r.as_str())));
             if let Some(fp) = fp {
                 set_property(sym, "Footprint", &fp);
             }
@@ -122,7 +124,9 @@ fn build(root: &LibraryRoot, parts: &[(String, String)], stage: &Path, zip_path:
         }
     }
 
-    let table = |kind: &str, uri: &str| format!("({kind}_lib_table\n\t(version 7)\n\t(lib (name \"{NICK}\")(type \"KiCad\")(uri \"{uri}\")(options \"\")(descr \"Exported from KLM\"))\n)\n");
+    let table = |kind: &str, uri: &str| {
+        format!("({kind}_lib_table\n\t(version 7)\n\t(lib (name \"{NICK}\")(type \"KiCad\")(uri \"{uri}\")(options \"\")(descr \"Exported from KLM\"))\n)\n")
+    };
     put("sym-lib-table", table("sym", "${KIPRJMOD}/symbols/klm_export.kicad_sym").as_bytes())?;
     put("fp-lib-table", table("fp", "${KIPRJMOD}/footprints/klm_export.pretty").as_bytes())?;
     out.finish()?;
@@ -140,11 +144,18 @@ mod tests {
         let root = LibraryRoot::global(base.join("global"), base.join("config"));
         root.ensure_layout().unwrap();
         let d = root.dir.to_string_lossy().replace('\\', "/");
-        let sym = |n: &str| format!("(symbol \"{n}\" (property \"Footprint\" \"KLM_ICs:FP_{n}\" (at 0 0 0)) (property \"Datasheet\" \"{d}/datasheets/{n}.pdf\" (at 0 0 0)))");
-        std::fs::write(root.dir.join("symbols/ICs.kicad_sym"), format!("(kicad_symbol_lib (version 20241209) (generator test)\n{}{})", sym("A"), sym("B"))).unwrap();
+        let sym = |n: &str| {
+            format!("(symbol \"{n}\" (property \"Footprint\" \"KLM_ICs:FP_{n}\" (at 0 0 0)) (property \"Datasheet\" \"{d}/datasheets/{n}.pdf\" (at 0 0 0)))")
+        };
+        std::fs::write(root.dir.join("symbols/ICs.kicad_sym"), format!("(kicad_symbol_lib (version 20241209) (generator test)\n{}{})", sym("A"), sym("B")))
+            .unwrap();
         std::fs::create_dir_all(root.dir.join("footprints/ICs.pretty")).unwrap();
         for n in ["A", "B"] {
-            std::fs::write(root.dir.join(format!("footprints/ICs.pretty/FP_{n}.kicad_mod")), format!("(footprint \"FP_{n}\" (model \"{d}/3dmodels/{n}.step\"))")).unwrap();
+            std::fs::write(
+                root.dir.join(format!("footprints/ICs.pretty/FP_{n}.kicad_mod")),
+                format!("(footprint \"FP_{n}\" (model \"{d}/3dmodels/{n}.step\"))"),
+            )
+            .unwrap();
             std::fs::write(root.dir.join(format!("3dmodels/{n}.step")), n).unwrap();
             std::fs::write(root.dir.join(format!("datasheets/{n}.pdf")), n).unwrap();
         }
@@ -191,8 +202,11 @@ mod tests {
         root.ensure_layout().unwrap();
         for (cat, n, body) in [("Caps", "C1", "a"), ("Res", "R1", "b"), ("Ind", "R2", "a")] {
             let path = root.dir.join(format!("symbols/{cat}.kicad_sym"));
-            let old = std::fs::read_to_string(&path).unwrap_or_else(|_| "(kicad_symbol_lib (version 20241209) (generator test)
-)".into());
+            let old = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+                "(kicad_symbol_lib (version 20241209) (generator test)
+)"
+                .into()
+            });
             let sym = format!("(symbol \"{n}\" (property \"Footprint\" \"KLM_{cat}:SHARED\" (at 0 0 0)))");
             std::fs::write(&path, old.trim_end().strip_suffix(')').unwrap().to_string() + &sym + ")").unwrap();
             let pretty = root.dir.join(format!("footprints/{cat}.pretty"));
@@ -206,7 +220,9 @@ mod tests {
         zip::ZipArchive::new(std::fs::File::open(&zip).unwrap()).unwrap().extract(&out).unwrap();
         let lib = sexpr::parse(&std::fs::read_to_string(out.join("symbols/klm_export.kicad_sym")).unwrap()).unwrap();
         let fp_of = |n: &str| property(lib.children("symbol").find(|s| s.arg(0) == Some(n)).unwrap(), "Footprint").unwrap().to_string();
-        let descr = |fp: String| std::fs::read_to_string(out.join(format!("footprints/klm_export.pretty/{}.kicad_mod", fp.strip_prefix("klm_export:").unwrap()))).unwrap();
+        let descr = |fp: String| {
+            std::fs::read_to_string(out.join(format!("footprints/klm_export.pretty/{}.kicad_mod", fp.strip_prefix("klm_export:").unwrap()))).unwrap()
+        };
         assert_eq!(std::fs::read_dir(out.join("footprints/klm_export.pretty")).unwrap().count(), 2);
         assert_eq!(fp_of("C1"), fp_of("R2"));
         assert_ne!(fp_of("C1"), fp_of("R1"));

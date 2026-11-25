@@ -1,7 +1,7 @@
 //! KiCad symbol pin extraction and automatic `Sim.Pins` / `Sim.Device` mapping.
 
-use crate::sexpr::Sexpr;
 use super::{SpiceKind, SpiceModel};
+use crate::sexpr::Sexpr;
 
 /// One pin extracted from a KiCad symbol S-expression.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,11 +89,7 @@ fn infer_sim_device(pins: &[SymPin], model: &SpiceModel, sym_ref: &str, category
         "D".into()
     } else if pins.len() == 3 && (ref_up.starts_with('Q') || cat_lo.contains("transistor") || cat_lo.contains("fet")) {
         let names: Vec<String> = pins.iter().map(|p| p.name.to_ascii_uppercase()).collect();
-        if names.iter().any(|n| n == "G" || n == "GATE" || n == "D" || n == "DRAIN") {
-            "NMOS".into()
-        } else {
-            "NPN".into()
-        }
+        if names.iter().any(|n| n == "G" || n == "GATE" || n == "D" || n == "DRAIN") { "NMOS".into() } else { "NPN".into() }
     } else {
         model.device.clone()
     }
@@ -248,19 +244,12 @@ fn map_subckt_pins(pins: &[SymPin], ports: &[String], _device: &str) -> Option<S
     if !all_mapped && assignments.iter().flatten().count() < ports.len() {
         return None;
     }
-    let pairs: Vec<String> = pins
-        .iter()
-        .zip(assignments.iter())
-        .filter_map(|(pin, slot)| slot.map(|si| format!("{}={}", pin.number, ports[si])))
-        .collect();
+    let pairs: Vec<String> = pins.iter().zip(assignments.iter()).filter_map(|(pin, slot)| slot.map(|si| format!("{}={}", pin.number, ports[si]))).collect();
     if pairs.is_empty() { None } else { Some(pairs.join(" ")) }
 }
 
 fn norm(s: &str) -> String {
-    s.chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '-')
-        .flat_map(char::to_lowercase)
-        .collect()
+    s.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '-').flat_map(char::to_lowercase).collect()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

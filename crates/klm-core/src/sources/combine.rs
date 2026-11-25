@@ -8,8 +8,8 @@
 
 use super::Source;
 use crate::checks::{Issue, Severity, check_pin_pad_files};
-use crate::kicad_env::upgrade_symbols;
 use crate::download::download_pdf;
+use crate::kicad_env::upgrade_symbols;
 use crate::matching::same_mpn;
 use crate::part::Part;
 use anyhow::{Result, anyhow};
@@ -173,11 +173,9 @@ fn readable_symbol(symbol: &Path) -> Result<PathBuf> {
 /// Supplier numbers from every source; otherwise the first value found, except that a distributor's
 /// longer description beats a shorter one (ZIP authors' text only fills a gap).
 fn merge_meta(meta: &mut Part, found: &Part) {
-    for (to, from) in [
-        (&mut meta.manufacturer, &found.manufacturer),
-        (&mut meta.datasheet_url, &found.datasheet_url),
-        (&mut meta.category_hint, &found.category_hint),
-    ] {
+    for (to, from) in
+        [(&mut meta.manufacturer, &found.manufacturer), (&mut meta.datasheet_url, &found.datasheet_url), (&mut meta.category_hint, &found.category_hint)]
+    {
         if to.is_empty() {
             to.clone_from(from);
         }
@@ -311,10 +309,28 @@ mod tests {
 
     #[test]
     fn metadata_merges_from_every_source() {
-        let mut meta = Part { mpn: "P1".into(), manufacturer: "TI".into(), description: "Op amp".into(), supplier_ids: vec![("DigiKey".into(), "296-1".into())], ..Part::default() };
+        let mut meta = Part {
+            mpn: "P1".into(),
+            manufacturer: "TI".into(),
+            description: "Op amp".into(),
+            supplier_ids: vec![("DigiKey".into(), "296-1".into())],
+            ..Part::default()
+        };
         let mut c = Combined::default();
-        let lcsc = Part { manufacturer: "Texas Instruments".into(), description: "Dual op amp, 8-SOIC".into(), supplier_ids: vec![("LCSC".into(), "C7950".into())], datasheet_url: "https://x/ds.pdf".into(), source: "LCSC".into(), ..Part::default() };
-        let zip = Part { description: "OPERATIONAL AMPLIFIER, DUAL, VERY LONG VENDOR TEXT".into(), supplier_ids: vec![("DigiKey".into(), "other".into())], source: "ZIP: P1.zip".into(), ..Part::default() };
+        let lcsc = Part {
+            manufacturer: "Texas Instruments".into(),
+            description: "Dual op amp, 8-SOIC".into(),
+            supplier_ids: vec![("LCSC".into(), "C7950".into())],
+            datasheet_url: "https://x/ds.pdf".into(),
+            source: "LCSC".into(),
+            ..Part::default()
+        };
+        let zip = Part {
+            description: "OPERATIONAL AMPLIFIER, DUAL, VERY LONG VENDOR TEXT".into(),
+            supplier_ids: vec![("DigiKey".into(), "other".into())],
+            source: "ZIP: P1.zip".into(),
+            ..Part::default()
+        };
         c.add(&mut meta, lcsc);
         c.add(&mut meta, zip);
         assert_eq!(meta.manufacturer, "TI", "the chosen result's manufacturer stays");
@@ -352,9 +368,13 @@ mod tests {
         let (mut c, mut meta) = (Combined::default(), Part::default());
         let mut zip = set(&dir, "ZIP: P1.zip", "s", FP);
         let lib = dir.join("ZIP__P1.zip/p.lib");
-        std::fs::write(&lib, "EESCHEMA-LIBRARY Version 2.4
+        std::fs::write(
+            &lib,
+            "EESCHEMA-LIBRARY Version 2.4
 not a library
-").unwrap();
+",
+        )
+        .unwrap();
         zip.symbol_file = Some(lib);
         c.add(&mut meta, zip);
         c.add(&mut meta, set(&dir, "LCSC", "f", FP));
@@ -407,11 +427,7 @@ not a library
     #[test]
     fn gather_asks_every_source_and_a_late_zip_joins() {
         let dir = crate::test_dir("combine_gather");
-        let sources = vec![
-            fake("Mouser", &[("P1", "M-1")], ""),
-            fake("LCSC", &[("P10", "C9"), ("p-1", "C1")], "sfm"),
-            fake("Nexar", &[("Q2", "N")], "sfm"),
-        ];
+        let sources = vec![fake("Mouser", &[("P1", "M-1")], ""), fake("LCSC", &[("P10", "C9"), ("p-1", "C1")], "sfm"), fake("Nexar", &[("Q2", "N")], "sfm")];
         let chosen = Part { mpn: "P1".into(), manufacturer: "Acme".into(), supplier_ids: vec![("Mouser".into(), "M-1".into())], ..Part::default() };
         let answers = Mutex::new(vec![]);
         gather(&sources, &chosen, 0, &dir, |name, found| answers.lock().unwrap().push((name.to_string(), found.unwrap())));

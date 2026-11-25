@@ -17,8 +17,7 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
     let file = std::fs::File::open(zip_path).with_context(|| format!("opening {}", zip_path.display()))?;
     let mut zip = zip::ZipArchive::new(file).with_context(|| format!("reading {}", zip_path.display()))?;
 
-    let (mut sym_new, mut sym_legacy, mut fps, mut steps, mut wrls, mut pdfs, mut sims) =
-        (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
+    let (mut sym_new, mut sym_legacy, mut fps, mut steps, mut wrls, mut pdfs, mut sims) = (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
     let mut part_info = String::new();
 
     for i in 0..zip.len() {
@@ -73,12 +72,7 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         return Ok(None);
     }
 
-    let info = |key: &str| {
-        part_info
-            .lines()
-            .find_map(|l| l.strip_prefix(key)?.strip_prefix('=').map(|v| v.trim().to_string()))
-            .unwrap_or_default()
-    };
+    let info = |key: &str| part_info.lines().find_map(|l| l.strip_prefix(key)?.strip_prefix('=').map(|v| v.trim().to_string())).unwrap_or_default();
     let mut part = Part {
         mpn: info("PartNumber"),
         manufacturer: info("Manufacturer"),
@@ -100,9 +94,8 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
             if part.manufacturer.is_empty() {
                 part.manufacturer = field(&["Manufacturer", "MANUFACTURER", "MF", "Manufacturer_Name"]).unwrap_or_default();
             }
-            part.description = field(&["Description", "ki_description", "DESCRIPTION"])
-                .map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "))
-                .unwrap_or_default();
+            part.description =
+                field(&["Description", "ki_description", "DESCRIPTION"]).map(|d| d.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
             part.datasheet_url = field(&["Datasheet"]).filter(|d| d.starts_with("http")).unwrap_or_default();
         }
     }
@@ -120,14 +113,11 @@ pub fn read_zip(zip_path: &Path, work: &Path) -> Result<Option<Part>> {
         part.category_hint = part.description.clone();
     }
     let mpn_lower = part.mpn.to_lowercase();
-    part.datasheet_file = pdfs
-        .into_iter()
-        .map(|(_, f)| f)
-        .find(|f| {
-            // File name only: vendors put the MPN in folder names too.
-            let name = f.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-            name.contains("datasheet") || (!mpn_lower.is_empty() && name.contains(&mpn_lower))
-        });
+    part.datasheet_file = pdfs.into_iter().map(|(_, f)| f).find(|f| {
+        // File name only: vendors put the MPN in folder names too.
+        let name = f.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+        name.contains("datasheet") || (!mpn_lower.is_empty() && name.contains(&mpn_lower))
+    });
     part.symbol_file = symbol_file;
     Ok(Some(part))
 }
@@ -142,7 +132,12 @@ pub fn extract_foreign(zip_path: &Path, dir: &Path) -> Result<(usize, bool)> {
         let name = entry.name()?.into_owned();
         let ext = Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
         libpkg |= ext == "libpkg";
-        let Some(file_name) = Path::new(&name).file_name().filter(|_| !entry.is_dir() && entry.size() <= MAX_ENTRY && ["lbr", "schlib", "pcblib", "intlib"].contains(&ext.as_str())) else { continue };
+        let Some(file_name) = Path::new(&name)
+            .file_name()
+            .filter(|_| !entry.is_dir() && entry.size() <= MAX_ENTRY && ["lbr", "schlib", "pcblib", "intlib"].contains(&ext.as_str()))
+        else {
+            continue;
+        };
         let dest = dir.join(i.to_string());
         std::fs::create_dir_all(&dest)?;
         let mut bytes = vec![];

@@ -70,12 +70,15 @@ fn convert_unit(shapes: &[&str], ox: f64, oy: f64, n_total_pins: &mut usize, pas
                     let m = ctx.pt(c);
                     ctx.pt((c.0 - rx, c.1 - rx));
                     ctx.pt((c.0 + rx, c.1 + rx));
-                    let _ = writeln!(gfx, "(circle (center {} {}) (radius {}) {} {})", fmt(m.0), fmt(m.1), fmt(rx * MM_PER_UNIT), stroke(g(6)), fill(g(8), true));
+                    let _ =
+                        writeln!(gfx, "(circle (center {} {}) (radius {}) {} {})", fmt(m.0), fmt(m.1), fmt(rx * MM_PER_UNIT), stroke(g(6)), fill(g(8), true));
                 } else {
-                    let ring: Vec<Pt> = (0..24).map(|i| {
-                        let t = i as f64 * std::f64::consts::TAU / 24.0;
-                        (c.0 + rx * t.cos(), c.1 + ry * t.sin())
-                    }).collect();
+                    let ring: Vec<Pt> = (0..24)
+                        .map(|i| {
+                            let t = i as f64 * std::f64::consts::TAU / 24.0;
+                            (c.0 + rx * t.cos(), c.1 + ry * t.sin())
+                        })
+                        .collect();
                     gfx += &polyline(&mut ctx, &ring, g(6), g(8), true);
                 }
             }
@@ -100,7 +103,18 @@ fn convert_unit(shapes: &[&str], ox: f64, oy: f64, n_total_pins: &mut usize, pas
                         if let Seg::Arc(a) = seg {
                             let (_, mid) = arc_centre_mid(from, a);
                             let (p1, pm, p2) = (ctx.pt(from), ctx.pt(mid), ctx.pt(a.to));
-                            let _ = writeln!(gfx, "(arc (start {} {}) (mid {} {}) (end {} {}) {} {})", fmt(p1.0), fmt(p1.1), fmt(pm.0), fmt(pm.1), fmt(p2.0), fmt(p2.1), stroke(g(4)), fill(g(6), false));
+                            let _ = writeln!(
+                                gfx,
+                                "(arc (start {} {}) (mid {} {}) (end {} {}) {} {})",
+                                fmt(p1.0),
+                                fmt(p1.1),
+                                fmt(pm.0),
+                                fmt(pm.1),
+                                fmt(p2.0),
+                                fmt(p2.1),
+                                stroke(g(4)),
+                                fill(g(6), false)
+                            );
                         }
                         from = match seg {
                             Seg::Line(p) | Seg::Cubic(_, _, p) => *p,
@@ -112,8 +126,19 @@ fn convert_unit(shapes: &[&str], ox: f64, oy: f64, n_total_pins: &mut usize, pas
             // Mark "L" is a free label; "P" and "N" are the reference and name, which KiCad has as fields.
             "T" if g(1) == "L" && !g(12).is_empty() => {
                 let p = ctx.pt((num(g(2)), num(g(3))));
-                let justify = match g(14) { "start" => " (justify left)", "end" => " (justify right)", _ => "" };
-                let _ = writeln!(gfx, "(text {:?} (at {} {} {}) (effects (font (size 1.27 1.27)){justify}))", g(12), fmt(p.0), fmt(p.1), fmt(kicad_angle(num(g(4)))));
+                let justify = match g(14) {
+                    "start" => " (justify left)",
+                    "end" => " (justify right)",
+                    _ => "",
+                };
+                let _ = writeln!(
+                    gfx,
+                    "(text {:?} (at {} {} {}) (effects (font (size 1.27 1.27)){justify}))",
+                    g(12),
+                    fmt(p.0),
+                    fmt(p.1),
+                    fmt(kicad_angle(num(g(4))))
+                );
             }
             "P" => {
                 pins += &pin(&mut ctx, s, passive);
@@ -263,7 +288,8 @@ mod tests {
 
     #[test]
     fn two_pin_part_is_passive_and_multi_unit_splits() {
-        let pin = |n: &str, x: i32| format!("P~show~1~{n}~{x}~0~0~r~0^^{x}~0^^M {x} 0 h-10~#000^^0~0~0~0~{n}~end~~~#000^^1~0~0~0~{n}~end~~~#000^^0~0~0^^0~M 0 0");
+        let pin =
+            |n: &str, x: i32| format!("P~show~1~{n}~{x}~0~0~r~0^^{x}~0^^M {x} 0 h-10~#000^^0~0~0~0~{n}~end~~~#000^^1~0~0~0~{n}~end~~~#000^^0~0~0^^0~M 0 0");
         let one = json!({"head": {"x": 0, "y": 0}, "shape": [pin("1", 0), pin("2", 40)]});
         let sym = convert("R", "R", "", &[&one]);
         assert_eq!(sexpr::parse(&sym).unwrap().child("symbol").unwrap().child("symbol").unwrap().child("pin").unwrap().arg(0), Some("passive"));

@@ -3,8 +3,8 @@
 use super::page_kit;
 use super::search;
 use super::ui_kit::{self, Col, Level, Section, Sort};
-use crate::{AppCtx, Msg as AppMsg, Tab};
 use crate::theme;
+use crate::{AppCtx, Msg as AppMsg, Tab};
 use eframe::egui::{self, RichText};
 use klm_core::alternatives::LibPart;
 use klm_core::bom::{self, Lifecycle, Line, ProjectBom, Quote, Row, Status};
@@ -210,7 +210,10 @@ impl BomTab {
             });
             let changed = self.settings.assembler != before;
             (reprice, save) = (reprice || changed, save || changed);
-            if self.settings.region.is_empty() && cx.settings.shipping_region.is_empty() && ui.link("Set in Settings…").on_hover_text("No region anywhere: DigiKey prices use its default site").clicked() {
+            if self.settings.region.is_empty()
+                && cx.settings.shipping_region.is_empty()
+                && ui.link("Set in Settings…").on_hover_text("No region anywhere: DigiKey prices use its default site").clicked()
+            {
                 cx.open_settings(Section::Bom);
             }
             if self.running {
@@ -225,7 +228,10 @@ impl BomTab {
                     });
                 }
             }
-            if page_kit::primary(ui, !self.running, "Read BOM and prices").on_hover_text("Runs kicad-cli, then asks the enabled distributors (cached results are reused)").clicked() {
+            if page_kit::primary(ui, !self.running, "Read BOM and prices")
+                .on_hover_text("Runs kicad-cli, then asks the enabled distributors (cached results are reused)")
+                .clicked()
+            {
                 self.load(cx, project.clone());
             }
         });
@@ -259,17 +265,30 @@ impl BomTab {
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Filter refs, MPN, maker…").desired_width(200.0));
-            if ui.add(egui::Button::new("Shortfalls only").selected(self.shortfalls)).on_hover_text("Lines missing from the library, without a price, or with less stock than the boards need").clicked() {
+            if ui
+                .add(egui::Button::new("Shortfalls only").selected(self.shortfalls))
+                .on_hover_text("Lines missing from the library, without a price, or with less stock than the boards need")
+                .clicked()
+            {
                 self.shortfalls = !self.shortfalls;
             }
-            if ui.add(egui::Button::new(format!("Not in library {not_in_library}")).selected(self.not_in_library)).on_hover_text("Lines the library doesn't have yet").clicked() {
+            if ui
+                .add(egui::Button::new(format!("Not in library {not_in_library}")).selected(self.not_in_library))
+                .on_hover_text("Lines the library doesn't have yet")
+                .clicked()
+            {
                 self.not_in_library = !self.not_in_library;
             }
-            let picks: Vec<(usize, klm_core::store::Alternative)> = self.rows.iter().enumerate().filter_map(|(i, r)| Some((i, r.alternatives[r.pick?].clone()))).collect();
-            let hint = format!("Show the alternate that suits {} best on each line: {}", self.settings.assembler.label(), match self.settings.assembler {
-                bom::Assembler::Jlc => "JLC basic, then preferred, then extended (in stock at JLC), then in stock anywhere",
-                bom::Assembler::Distributor => "active and in stock at DigiKey, then at Mouser",
-            });
+            let picks: Vec<(usize, klm_core::store::Alternative)> =
+                self.rows.iter().enumerate().filter_map(|(i, r)| Some((i, r.alternatives[r.pick?].clone()))).collect();
+            let hint = format!(
+                "Show the alternate that suits {} best on each line: {}",
+                self.settings.assembler.label(),
+                match self.settings.assembler {
+                    bom::Assembler::Jlc => "JLC basic, then preferred, then extended (in stock at JLC), then in stock anywhere",
+                    bom::Assembler::Distributor => "active and in stock at DigiKey, then at Mouser",
+                }
+            );
             if !picks.is_empty() && ui.button(format!("Use best alternates ({})", picks.len())).on_hover_text(hint).clicked() {
                 for (i, alt) in picks {
                     self.swap(i, &alt, cx);
@@ -277,14 +296,19 @@ impl BomTab {
             }
             let summary = bom::assembly_summary(&self.rows).text();
             if !summary.is_empty() {
-                ui.label(RichText::new(format!("JLCPCB: {summary}.")).color(pal.muted).size(12.0))
-                    .on_hover_text("Class and stock come from LCSC's listing, lifecycle from DigiKey and Mouser. \"?\" means no source said, not that the part is missing.");
+                ui.label(RichText::new(format!("JLCPCB: {summary}.")).color(pal.muted).size(12.0)).on_hover_text(
+                    "Class and stock come from LCSC's listing, lifecycle from DigiKey and Mouser. \"?\" means no source said, not that the part is missing.",
+                );
             }
         });
         ui.add_space(4.0);
         let needle = self.filter.trim().to_lowercase();
         let mut view: Vec<usize> = (0..self.rows.len())
-            .filter(|&i| (needle.is_empty() || matches(&self.rows[i], &needle)) && (!self.shortfalls || shortfall(&self.rows[i], boards)) && (!self.not_in_library || self.rows[i].status.missing_cad()))
+            .filter(|&i| {
+                (needle.is_empty() || matches(&self.rows[i], &needle))
+                    && (!self.shortfalls || shortfall(&self.rows[i], boards))
+                    && (!self.not_in_library || self.rows[i].status.missing_cad())
+            })
             .collect();
         let mut sort = self.sort.unwrap_or(Sort { col: usize::MAX, asc: true });
         if sort.col != usize::MAX {
@@ -314,102 +338,105 @@ impl BomTab {
         egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| {
             ui.set_min_width(940.0);
             ui_kit::table(ui, "bom", &cols, &mut sort, view.len(), |n, row| {
-            let i = view[n];
-            let r = &rows[i];
-            row.set_selected(selected == Some(i));
-            row.col(|ui| {
-                ui.label(RichText::new(r.line.refs.join(" ")).monospace()).on_hover_text(r.line.refs.join(" "));
-            });
-            row.col(|ui| {
-                ui.label((r.line.qty() * boards).to_string());
-            });
-            row.col(|ui| {
-                ui.label(RichText::new(mpn_of(r)).monospace());
-            });
-            row.col(|ui| {
-                ui.horizontal(|ui| {
-                    let ok = matches!(r.status, Status::Found { has_footprint: true, .. });
-                    ui_kit::badge(ui, &bom::library_label(&r.status), if ok { Level::Ok } else { Level::Warn });
-                    if r.status.missing_cad() && !mpn_of(r).is_empty() {
-                        if ui.small_button("Search").on_hover_text("Open Search with this MPN (copied to the clipboard)").clicked() {
-                            search = Some(mpn_of(r).to_string());
-                        }
-                        import |= ui.small_button("Import").on_hover_text("Open Import to add a downloaded ZIP or library for it").clicked();
-                    }
+                let i = view[n];
+                let r = &rows[i];
+                row.set_selected(selected == Some(i));
+                row.col(|ui| {
+                    ui.label(RichText::new(r.line.refs.join(" ")).monospace()).on_hover_text(r.line.refs.join(" "));
                 });
-            });
-            row.col(|ui| {
-                ui.horizontal(|ui| {
-                    let a = &r.assembly;
-                    if a.jlc.is_some() {
-                        ui_kit::badge(ui, bom::jlc_label(a), if a.jlc == Some(bom::JlcType::Basic) { Level::Ok } else { Level::Info });
-                    } else {
-                        ui.weak("?");
+                row.col(|ui| {
+                    ui.label((r.line.qty() * boards).to_string());
+                });
+                row.col(|ui| {
+                    ui.label(RichText::new(mpn_of(r)).monospace());
+                });
+                row.col(|ui| {
+                    ui.horizontal(|ui| {
+                        let ok = matches!(r.status, Status::Found { has_footprint: true, .. });
+                        ui_kit::badge(ui, &bom::library_label(&r.status), if ok { Level::Ok } else { Level::Warn });
+                        if r.status.missing_cad() && !mpn_of(r).is_empty() {
+                            if ui.small_button("Search").on_hover_text("Open Search with this MPN (copied to the clipboard)").clicked() {
+                                search = Some(mpn_of(r).to_string());
+                            }
+                            import |= ui.small_button("Import").on_hover_text("Open Import to add a downloaded ZIP or library for it").clicked();
+                        }
+                    });
+                });
+                row.col(|ui| {
+                    ui.horizontal(|ui| {
+                        let a = &r.assembly;
+                        if a.jlc.is_some() {
+                            ui_kit::badge(ui, bom::jlc_label(a), if a.jlc == Some(bom::JlcType::Basic) { Level::Ok } else { Level::Info });
+                        } else {
+                            ui.weak("?");
+                        }
+                        if a.out_of_stock() {
+                            ui_kit::badge(ui, "no stock", Level::Error);
+                        }
+                        if let Some(l) = a.lifecycle.filter(|l| *l != Lifecycle::Active) {
+                            ui_kit::badge(ui, bom::lifecycle_label(Some(l)), if l == Lifecycle::Nrnd { Level::Warn } else { Level::Error });
+                        }
+                        if a.flagged() {
+                            let found = if let Status::Found { symbol, .. } = &r.status { Some(symbol.clone()) } else { None };
+                            let btn = ui
+                                .add_enabled(found.is_some(), egui::Button::new("Swap").small())
+                                .on_hover_text("Find a part JLCPCB stocks in the same package")
+                                .on_disabled_hover_text("Needs the part in your library first");
+                            if btn.clicked() {
+                                swap_jlc = found;
+                            }
+                        }
+                    });
+                });
+                row.col(|ui| {
+                    let alts = r.alternatives.as_slice();
+                    if alts.is_empty() {
+                        return;
                     }
-                    if a.out_of_stock() {
-                        ui_kit::badge(ui, "no stock", Level::Error);
+                    let text = match r.pick {
+                        Some(k) => format!("better: {}", alts[k].mpn),
+                        None if alts.len() == 1 => alts[0].mpn.clone(),
+                        None => format!("{} alternates", alts.len()),
+                    };
+                    ui.menu_button(format!("{text} ▾"), |ui| {
+                        for (k, a) in alts.iter().enumerate() {
+                            let best = if r.pick == Some(k) { ", best for the assembler" } else { "" };
+                            if ui.button(format!("{} ({}{best})", a.mpn, a.role)).on_hover_text("Show this part in place of the line's own").clicked() {
+                                swap = Some((i, a.clone()));
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+                match &r.best {
+                    Some(b) => {
+                        let q = &r.quotes[b.quote];
+                        row.col(|ui| {
+                            ui.label(format!("{}{}", q.source, if q.stale { " (old)" } else { "" }));
+                        });
+                        row.col(|ui| {
+                            let text = RichText::new(q.stock.map_or("?".into(), |s| s.to_string()));
+                            ui.label(if q.stock.is_some_and(|s| s < r.line.qty() * boards) { text.color(Level::Warn.color(ui.visuals())) } else { text });
+                        });
+                        row.col(|ui| {
+                            ui.label(format!("{:.4} / {:.2}", b.priced.unit, b.priced.ext)).on_hover_text(format!("{} bought", b.priced.bought));
+                        });
+                        row.col(|ui| {
+                            ui.label(b.lead_days.map_or("?".into(), |d| if d == 0 { "in stock".into() } else { format!("{d} d") }));
+                        });
                     }
-                    if let Some(l) = a.lifecycle.filter(|l| *l != Lifecycle::Active) {
-                        ui_kit::badge(ui, bom::lifecycle_label(Some(l)), if l == Lifecycle::Nrnd { Level::Warn } else { Level::Error });
-                    }
-                    if a.flagged() {
-                        let found = if let Status::Found { symbol, .. } = &r.status { Some(symbol.clone()) } else { None };
-                        let btn = ui.add_enabled(found.is_some(), egui::Button::new("Swap").small()).on_hover_text("Find a part JLCPCB stocks in the same package").on_disabled_hover_text("Needs the part in your library first");
-                        if btn.clicked() {
-                            swap_jlc = found;
+                    None => {
+                        row.col(|ui| {
+                            ui.weak("no price");
+                        });
+                        for _ in 0..3 {
+                            row.col(|_| {});
                         }
                     }
-                });
-            });
-            row.col(|ui| {
-                let alts = r.alternatives.as_slice();
-                if alts.is_empty() {
-                    return;
                 }
-                let text = match r.pick {
-                    Some(k) => format!("better: {}", alts[k].mpn),
-                    None if alts.len() == 1 => alts[0].mpn.clone(),
-                    None => format!("{} alternates", alts.len()),
-                };
-                ui.menu_button(format!("{text} ▾"), |ui| {
-                    for (k, a) in alts.iter().enumerate() {
-                        let best = if r.pick == Some(k) { ", best for the assembler" } else { "" };
-                        if ui.button(format!("{} ({}{best})", a.mpn, a.role)).on_hover_text("Show this part in place of the line's own").clicked() {
-                            swap = Some((i, a.clone()));
-                            ui.close();
-                        }
-                    }
-                });
-            });
-            match &r.best {
-                Some(b) => {
-                    let q = &r.quotes[b.quote];
-                    row.col(|ui| {
-                        ui.label(format!("{}{}", q.source, if q.stale { " (old)" } else { "" }));
-                    });
-                    row.col(|ui| {
-                        let text = RichText::new(q.stock.map_or("?".into(), |s| s.to_string()));
-                        ui.label(if q.stock.is_some_and(|s| s < r.line.qty() * boards) { text.color(Level::Warn.color(ui.visuals())) } else { text });
-                    });
-                    row.col(|ui| {
-                        ui.label(format!("{:.4} / {:.2}", b.priced.unit, b.priced.ext)).on_hover_text(format!("{} bought", b.priced.bought));
-                    });
-                    row.col(|ui| {
-                        ui.label(b.lead_days.map_or("?".into(), |d| if d == 0 { "in stock".into() } else { format!("{d} d") }));
-                    });
+                if row.response().clicked() {
+                    pick = Some(i);
                 }
-                None => {
-                    row.col(|ui| {
-                        ui.weak("no price");
-                    });
-                    for _ in 0..3 {
-                        row.col(|_| {});
-                    }
-                }
-            }
-            if row.response().clicked() {
-                pick = Some(i);
-            }
             });
         });
         self.sort = (sort.col != usize::MAX).then_some(sort);
@@ -465,7 +492,9 @@ fn inspector(ui: &mut egui::Ui, r: &Row, boards: u64) -> Option<Insp> {
         let _ = ui.radio(true, RichText::new(mpn_of(r)).monospace());
         if let Some(b) = &r.best {
             let q = &r.quotes[b.quote];
-            ui.label(RichText::new(format!("{:.4} · {} · {}", b.priced.unit, q.source, q.stock.map_or("?".into(), |s| s.to_string()))).size(12.0).color(pal.muted));
+            ui.label(
+                RichText::new(format!("{:.4} · {} · {}", b.priced.unit, q.source, q.stock.map_or("?".into(), |s| s.to_string()))).size(12.0).color(pal.muted),
+            );
         }
     });
     for a in &r.alternatives {

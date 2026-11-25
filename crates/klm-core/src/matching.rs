@@ -171,8 +171,18 @@ fn alnum(s: &str) -> String {
 }
 
 /// Chip sizes as (imperial, metric) codes: the same package under both naming schemes.
-const CHIP_SIZES: &[(&str, &str)] =
-    &[("01005", "0402"), ("0201", "0603"), ("0402", "1005"), ("0603", "1608"), ("0805", "2012"), ("1206", "3216"), ("1210", "3225"), ("1812", "4532"), ("2010", "5025"), ("2512", "6332")];
+const CHIP_SIZES: &[(&str, &str)] = &[
+    ("01005", "0402"),
+    ("0201", "0603"),
+    ("0402", "1005"),
+    ("0603", "1608"),
+    ("0805", "2012"),
+    ("1206", "3216"),
+    ("1210", "3225"),
+    ("1812", "4532"),
+    ("2010", "5025"),
+    ("2512", "6332"),
+];
 
 /// Name prefixes after which a bare number is an imperial chip size.
 const CHIP_PREFIXES: &[&str] = &["r", "c", "l", "led", "d", "fuse", "fb", "cp"];
@@ -222,7 +232,11 @@ fn one_package(name: &str) -> String {
     let size = |code: &str, metric: bool| CHIP_SIZES.iter().find(|(i, m)| code == if metric { *m } else { *i });
     for (n, t) in toks.iter().enumerate() {
         let metric_tok = t.strip_suffix("metric").filter(|d| !d.is_empty()).or_else(|| (toks.get(n + 1) == Some(&"metric")).then_some(*t));
-        let ipc = IPC_CHIP.iter().find_map(|p| t.strip_prefix(p)).and_then(|r| r.split_once('x')).filter(|(d, _)| d.len() == 4 && d.bytes().all(|b| b.is_ascii_digit()));
+        let ipc = IPC_CHIP
+            .iter()
+            .find_map(|p| t.strip_prefix(p))
+            .and_then(|r| r.split_once('x'))
+            .filter(|(d, _)| d.len() == 4 && d.bytes().all(|b| b.is_ascii_digit()));
         let hit = match (metric_tok, ipc) {
             (Some(d), _) | (None, Some((d, _))) => size(d, true),
             _ if bare_ok => size(t, false),
@@ -253,11 +267,8 @@ fn one_package(name: &str) -> String {
 
 /// Distributor data is cleaner than what ZIP authors type, so it wins where it has a value.
 pub fn merge(zip: &mut Part, found: &Part) {
-    for (to, from) in [
-        (&mut zip.manufacturer, &found.manufacturer),
-        (&mut zip.description, &found.description),
-        (&mut zip.datasheet_url, &found.datasheet_url),
-    ] {
+    for (to, from) in [(&mut zip.manufacturer, &found.manufacturer), (&mut zip.description, &found.description), (&mut zip.datasheet_url, &found.datasheet_url)]
+    {
         if !from.is_empty() {
             to.clone_from(from);
         }
@@ -284,10 +295,29 @@ mod tests {
     fn values_with_units() {
         let (r, c, l) = (Some(Kind::Res), Some(Kind::Cap), Some(Kind::Ind));
         for (a, b, k) in [
-            ("0.1uF", "100nF", c), ("100n", "0.1µF", c), ("100000p", "0.10 μF", c), ("0.1UF", "100nf", c), ("4n7", "4.7nF", c), ("1u5", "1.5uF", c),
-            ("4k7", "4.7kΩ", r), ("4700 ohm", "4K7", r), ("4k7", "4.7 kOhm", r), ("1R0", "1Ω", r), ("1R0", "1", r), ("100", "100R", r), ("0R", "0", r),
-            ("1Meg", "1M", r), ("1k5", "1.5k", r), ("1k5", "1500", r), ("10k 1%", "10K", r), ("100nF 50V X7R ±10%", "100n/16V", c), ("10k 1% 1/10W", "10kΩ", r),
-            ("10 kΩ", "10000", r), ("6V3 10uF", "10u", c), ("4R7", "4.7uH", l), ("1R", "1", r),
+            ("0.1uF", "100nF", c),
+            ("100n", "0.1µF", c),
+            ("100000p", "0.10 μF", c),
+            ("0.1UF", "100nf", c),
+            ("4n7", "4.7nF", c),
+            ("1u5", "1.5uF", c),
+            ("4k7", "4.7kΩ", r),
+            ("4700 ohm", "4K7", r),
+            ("4k7", "4.7 kOhm", r),
+            ("1R0", "1Ω", r),
+            ("1R0", "1", r),
+            ("100", "100R", r),
+            ("0R", "0", r),
+            ("1Meg", "1M", r),
+            ("1k5", "1.5k", r),
+            ("1k5", "1500", r),
+            ("10k 1%", "10K", r),
+            ("100nF 50V X7R ±10%", "100n/16V", c),
+            ("10k 1% 1/10W", "10kΩ", r),
+            ("10 kΩ", "10000", r),
+            ("6V3 10uF", "10u", c),
+            ("4R7", "4.7uH", l),
+            ("1R", "1", r),
         ] {
             assert!(v(a, k).is_some(), "{a} should parse");
             assert_eq!(v(a, k), v(b, k), "{a} vs {b}");

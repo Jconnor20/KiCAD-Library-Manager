@@ -2,10 +2,10 @@
 //! Test IDs (L1…) are the rows of docs/ui-review/W7.3.md.
 
 use super::harness::*;
-use crate::tabs::library::TEST_PICK;
 use crate::Tab;
-use eframe::egui::accesskit::Role;
+use crate::tabs::library::TEST_PICK;
 use eframe::egui::Modifiers;
+use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -115,7 +115,9 @@ fn l5_two_thousand_parts_stay_responsive() {
     let env = setup();
     let mut sym = String::from("(kicad_symbol_lib (version 20211014) (generator test)\n");
     for i in 0..2000 {
-        sym += &format!("  (symbol \"Bulk-{i}\" (in_bom yes) (on_board yes)\n    (property \"Reference\" \"U\" (id 0) (at 0 0 0))\n    (property \"Value\" \"Bulk-{i}\" (id 1) (at 0 0 0))\n    (property \"MPN\" \"Bulk-{i}\" (id 2) (at 0 0 0))\n    (property \"Manufacturer\" \"Acme\" (id 3) (at 0 0 0)))\n");
+        sym += &format!(
+            "  (symbol \"Bulk-{i}\" (in_bom yes) (on_board yes)\n    (property \"Reference\" \"U\" (id 0) (at 0 0 0))\n    (property \"Value\" \"Bulk-{i}\" (id 1) (at 0 0 0))\n    (property \"MPN\" \"Bulk-{i}\" (id 2) (at 0 0 0))\n    (property \"Manufacturer\" \"Acme\" (id 3) (at 0 0 0)))\n"
+        );
     }
     sym += ")\n";
     std::fs::write(env.lib.join("symbols/Bulk.kicad_sym"), sym).unwrap();
@@ -329,7 +331,12 @@ fn l18_for_part_label_comes_first() {
     let mut h = library(SIZES[1]);
     click(&mut h, "Alternatives…");
     settle(&mut h);
-    let label = h.root().children_recursive().find(|n| n.accesskit_node().role() == Role::Label && n.accesskit_node().value().as_deref() == Some("For part")).expect("no 'For part' label").rect();
+    let label = h
+        .root()
+        .children_recursive()
+        .find(|n| n.accesskit_node().role() == Role::Label && n.accesskit_node().value().as_deref() == Some("For part"))
+        .expect("no 'For part' label")
+        .rect();
     let combo = h.get_by_role_and_label(Role::ComboBox, "For part").rect();
     assert!(label.max.x <= combo.min.x + 1.0, "label {label:?} is not before the box {combo:?}");
 }
@@ -355,7 +362,10 @@ fn l19_preview_thumbnails_are_at_least_240px() {
         images.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
         assert!(images.len() >= 2, "{size:?}: no thumbnails");
         assert!(images[1].min.x - images[0].min.x >= 240.0, "{size:?}: thumbnail frames narrower than 240 px: {images:?}");
-        assert!(images.iter().all(|r| r.height() >= 179.0 && r.max.x <= size.0 && r.max.y <= size.1), "{size:?}: thumbnails too short or off the window: {images:?}");
+        assert!(
+            images.iter().all(|r| r.height() >= 179.0 && r.max.x <= size.0 && r.max.y <= size.1),
+            "{size:?}: thumbnails too short or off the window: {images:?}"
+        );
         snap(&mut h, "library-preview");
     }
 }
@@ -392,7 +402,12 @@ fn alternatives_with_duplicate<'a>(confirmed: bool) -> Gui<'a> {
         // A stored group, as Confirm would leave it (Confirm itself needs two different MPNs).
         let store = klm_core::store::Store::open(&klm_core::store::Store::default_path().unwrap()).unwrap();
         for (mpn, role) in [("RC0603FR-0710KL", "preferred"), ("RC-ALT", "substitute")] {
-            store.set_alternative("RC0603FR-0710KL", &klm_core::store::Alternative { mpn: mpn.into(), manufacturer: "Yageo".into(), supplier_ids: vec![], role: role.into() }).unwrap();
+            store
+                .set_alternative(
+                    "RC0603FR-0710KL",
+                    &klm_core::store::Alternative { mpn: mpn.into(), manufacturer: "Yageo".into(), supplier_ids: vec![], role: role.into() },
+                )
+                .unwrap();
         }
     }
     click(&mut h, "Alternatives…");
@@ -423,8 +438,12 @@ fn l21_reject_hides_a_suggestion_for_good() {
 fn l22_ungroup_dissolves_a_confirmed_group() {
     let _env = setup();
     let mut h = alternatives_with_duplicate(true);
-    assert!(h.query_by_label("Reject").is_none(), "a confirmed group offers Reject:
-{}", dump(&h));
+    assert!(
+        h.query_by_label("Reject").is_none(),
+        "a confirmed group offers Reject:
+{}",
+        dump(&h)
+    );
     click(&mut h, "Ungroup");
     settle(&mut h);
     assert!(h.query_by_label("Ungroup").is_none() && h.query_by_label("Confirm group").is_none(), "the group is still shown");

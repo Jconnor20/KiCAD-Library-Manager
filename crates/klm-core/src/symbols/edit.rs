@@ -18,7 +18,18 @@ pub fn snap(v: f64) -> f64 {
 
 /// Electrical types KiCad knows, for the editor's drop-down.
 pub const PIN_TYPES: [&str; 12] = [
-    "input", "output", "bidirectional", "tri_state", "passive", "free", "unspecified", "power_in", "power_out", "open_collector", "open_emitter", "no_connect",
+    "input",
+    "output",
+    "bidirectional",
+    "tri_state",
+    "passive",
+    "free",
+    "unspecified",
+    "power_in",
+    "power_out",
+    "open_collector",
+    "open_emitter",
+    "no_connect",
 ];
 
 /// One pin as the table shows it. `rot` is 0 (left side), 180 (right), 270 (top) or 90 (bottom), as KiCad stores it.
@@ -155,7 +166,11 @@ pub fn text_at(sym: &Sexpr, key: &str) -> Option<[f64; 3]> {
 
 /// Moves a property's text (snapped to the grid); the rotation is kept as given.
 pub fn set_text_at(sym: &mut Sexpr, key: &str, [x, y, rot]: [f64; 3]) -> Result<()> {
-    let at = sym.items_mut().iter_mut().find(|p| p.head() == Some("property") && p.arg(0) == Some(key)).and_then(|p| p.items_mut().iter_mut().find(|c| c.head() == Some("at")));
+    let at = sym
+        .items_mut()
+        .iter_mut()
+        .find(|p| p.head() == Some("property") && p.arg(0) == Some(key))
+        .and_then(|p| p.items_mut().iter_mut().find(|c| c.head() == Some("at")));
     *at.with_context(|| format!("no property {key}"))? = Sexpr::list("at", vec![atom(snap(x)), atom(snap(y)), atom(rot)]);
     Ok(())
 }
@@ -171,7 +186,11 @@ pub fn load(root: &LibraryRoot, category: &str, name: &str) -> Result<Sexpr> {
 pub fn save(root: &LibraryRoot, category: &str, name: &str, was: &Sexpr, new: Sexpr) -> Result<()> {
     let path = lib_path(root, category);
     let mut lib = sexpr::parse(&std::fs::read_to_string(&path)?)?;
-    let idx = lib.items().iter().position(|c| c.head() == Some("symbol") && c.arg(0) == Some(name)).with_context(|| format!("{name} is not in {}", root.nickname(category)))?;
+    let idx = lib
+        .items()
+        .iter()
+        .position(|c| c.head() == Some("symbol") && c.arg(0) == Some(name))
+        .with_context(|| format!("{name} is not in {}", root.nickname(category)))?;
     if lib.items()[idx] != *was {
         bail!("{name} changed on disk meanwhile (in KiCad?); reopen the editor");
     }

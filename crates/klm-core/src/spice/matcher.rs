@@ -137,17 +137,9 @@ pub fn resolve_sim_library_path(raw: &str, lib: &LibraryRoot) -> Option<PathBuf>
         return None;
     }
     let replaced = if trimmed.contains("${KIPRJMOD}") {
-        if let Some(parent) = lib.dir.parent() {
-            trimmed.replace("${KIPRJMOD}", &parent.to_string_lossy().replace('\\', "/"))
-        } else {
-            trimmed.to_string()
-        }
+        if let Some(parent) = lib.dir.parent() { trimmed.replace("${KIPRJMOD}", &parent.to_string_lossy().replace('\\', "/")) } else { trimmed.to_string() }
     } else if let Some(rest) = trimmed.strip_prefix("${").and_then(|s| s.split_once('}')) {
-        if let Some(dir) = kicad_env::default_var_dir(rest.0) {
-            format!("{}{}", dir.to_string_lossy().replace('\\', "/"), rest.1)
-        } else {
-            trimmed.to_string()
-        }
+        if let Some(dir) = kicad_env::default_var_dir(rest.0) { format!("{}{}", dir.to_string_lossy().replace('\\', "/"), rest.1) } else { trimmed.to_string() }
     } else {
         trimmed.to_string()
     };
@@ -184,11 +176,7 @@ fn collect_from_file(path: &Path, label: &str, out: &mut Vec<Candidate>, seen_fi
     let models = parse_models(&text);
     for model in models {
         let pin_count = model.ports.len();
-        let mpn_hint = if !model.name.is_empty() && !model.name.starts_with("kicad_builtin_") {
-            model.name.clone()
-        } else {
-            stem.clone()
-        };
+        let mpn_hint = if !model.name.is_empty() && !model.name.starts_with("kicad_builtin_") { model.name.clone() } else { stem.clone() };
         out.push(Candidate {
             file: path.to_path_buf(),
             model,
@@ -218,7 +206,10 @@ pub fn normalize_family_mpn(mpn: &str) -> String {
     {
         s = head.to_string();
     }
-    for suffix in ["TRPBF", "TR1G", "T1GE3", "DGKR", "DBVR", "DBVT", "DCKR", "DRVR", "PWR", "PWP", "RGTR", "RGET", "TPBF", "NOPB", "E3", "TR", "WS", "W", "DR", "DT", "DGK", "DBV", "DCK", "N", "P"] {
+    for suffix in [
+        "TRPBF", "TR1G", "T1GE3", "DGKR", "DBVR", "DBVT", "DCKR", "DRVR", "PWR", "PWP", "RGTR", "RGET", "TPBF", "NOPB", "E3", "TR", "WS", "W", "DR", "DT",
+        "DGK", "DBV", "DCK", "N", "P",
+    ] {
         if s.len() > suffix.len() + 3 && s.ends_with(suffix) {
             let prefix = &s[..s.len() - suffix.len()];
             // Do not strip single-letter suffix when it separates two digits (keep e.g. 2N2222A vs 2N2222 separately if exact exists, or strip below).
@@ -244,12 +235,7 @@ pub fn find_close_sim(
     let target_family = normalize_family_mpn(mpn);
     let alt_keys: Vec<(String, String)> = alternatives
         .iter()
-        .flat_map(|a| {
-            [matching::key(a), normalize_family_mpn(a)]
-                .into_iter()
-                .filter(|k| k.len() >= 3)
-                .map(move |k| (k, a.clone()))
-        })
+        .flat_map(|a| [matching::key(a), normalize_family_mpn(a)].into_iter().filter(|k| k.len() >= 3).map(move |k| (k, a.clone())))
         .collect();
 
     let mut best: Option<(i32, Candidate, MatchTier)> = None;
@@ -273,21 +259,9 @@ pub fn find_close_sim(
         } else if target_family.len() >= 4
             && (model_fam == target_family || hint_fam == target_family || (!model_key.is_empty() && model_key == target_family.to_ascii_lowercase()))
         {
-            (
-                850,
-                MatchTier::CloseVariant {
-                    matched_part: c.mpn_hint.clone(),
-                    reason: format!("same base family as {mpn}"),
-                },
-            )
+            (850, MatchTier::CloseVariant { matched_part: c.mpn_hint.clone(), reason: format!("same base family as {mpn}") })
         } else if let Some((_, alt_orig)) = alt_keys.iter().find(|(ak, _)| *ak == model_key || *ak == hint_key || *ak == model_fam) {
-            (
-                750,
-                MatchTier::CloseVariant {
-                    matched_part: c.mpn_hint.clone(),
-                    reason: format!("listed alternative {alt_orig}"),
-                },
-            )
+            (750, MatchTier::CloseVariant { matched_part: c.mpn_hint.clone(), reason: format!("listed alternative {alt_orig}") })
         } else if target_family.len() >= 5
             && !c.model.name.starts_with("kicad_builtin_")
             && ((model_fam.len() >= 5 && (model_fam.starts_with(&target_family) || target_family.starts_with(&model_fam)))
@@ -299,13 +273,7 @@ pub fn find_close_sim(
             let (shorter, longer) = if a.len() <= b.len() { (a, b) } else { (b, a) };
             let remainder = &longer[shorter.len()..];
             if remainder.chars().all(|ch| ch.is_ascii_alphabetic()) && remainder.len() <= 3 {
-                (
-                    700,
-                    MatchTier::CloseVariant {
-                        matched_part: c.mpn_hint.clone(),
-                        reason: format!("close part family variant ({})", c.model.name),
-                    },
-                )
+                (700, MatchTier::CloseVariant { matched_part: c.mpn_hint.clone(), reason: format!("close part family variant ({})", c.model.name) })
             } else {
                 continue;
             }
@@ -325,12 +293,7 @@ pub fn find_close_sim(
 }
 
 /// Finds the best similar-class component candidate to act as a template/reference when generating a SPICE file.
-pub fn find_similar_for_adaptation(
-    target_device: &str,
-    pin_count: usize,
-    class_hint: Option<&str>,
-    candidates: &[Candidate],
-) -> Option<Candidate> {
+pub fn find_similar_for_adaptation(target_device: &str, pin_count: usize, class_hint: Option<&str>, candidates: &[Candidate]) -> Option<Candidate> {
     let mut best: Option<(i32, &Candidate)> = None;
     for c in candidates {
         let mut score = 0i32;
@@ -364,12 +327,7 @@ pub fn find_similar_for_adaptation(
 
 /// Writes a self-contained SPICE `.lib` file in `work_dir` for a matched candidate, extracting only the
 /// matched `.subckt`/`.model` and any local helper definitions it references, with provenance comments.
-pub fn materialize_matched_model(
-    candidate: &Candidate,
-    target_mpn: &str,
-    tier: &MatchTier,
-    work_dir: &Path,
-) -> Result<PathBuf> {
+pub fn materialize_matched_model(candidate: &Candidate, target_mpn: &str, tier: &MatchTier, work_dir: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(work_dir)?;
     let full_text = std::fs::read_to_string(&candidate.file)?;
     let all_models = parse_models(&full_text);

@@ -167,8 +167,15 @@ fn dry_run_prints_the_plan_and_writes_nothing() {
     let out = klm(&settings, &config, &["import", zip.to_str().unwrap(), second.to_str().unwrap(), "--category", "ICs", "--dry-run"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(text.matches("TESTPART
-").count(), 2, "one entry per ZIP: {text}");
+    assert_eq!(
+        text.matches(
+            "TESTPART
+"
+        )
+        .count(),
+        2,
+        "one entry per ZIP: {text}"
+    );
     assert!(text.contains("add symbol TESTPART in KLM_ICs") && text.contains("add library KLM_ICs to KiCad's tables"), "{text}");
     assert!(!lib.exists() && std::fs::read_dir(&config).unwrap().count() == 0, "a dry run writes nothing");
 }
@@ -205,7 +212,10 @@ fn standardise_dry_run_then_apply_keeps_parts_loadable() {
     // KiCad still loads both files.
     let svg = dir.join("svg");
     let name = fp.file_stem().unwrap().to_str().unwrap();
-    for args in [vec!["sym", "export", "svg", "--symbol", "TESTPART", sym.to_str().unwrap()], vec!["fp", "export", "svg", "--footprint", name, pretty.to_str().unwrap()]] {
+    for args in [
+        vec!["sym", "export", "svg", "--symbol", "TESTPART", sym.to_str().unwrap()],
+        vec!["fp", "export", "svg", "--footprint", name, pretty.to_str().unwrap()],
+    ] {
         let o = Command::new(&cli).args(&args).arg("-o").arg(&svg).output().unwrap();
         assert!(o.status.success(), "{args:?}: {}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     }

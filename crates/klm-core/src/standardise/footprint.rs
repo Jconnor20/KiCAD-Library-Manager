@@ -226,7 +226,15 @@ fn grow_courtyard(fp: &mut Sexpr, excess: f64) -> Option<String> {
         let lo = |v: f64| (v * 100.0 + 1e-6).floor() / 100.0;
         let hi = |v: f64| (v * 100.0 - 1e-6).ceil() / 100.0;
         let t = (lo(b.0 - excess).min(c.0), lo(b.1 - excess).min(c.1), hi(b.2 + excess).max(c.2), hi(b.3 + excess).max(c.3));
-        let edge = |v: f64, old: (f64, f64), new: (f64, f64)| if !differs(v, old.0) { new.0 } else if !differs(v, old.1) { new.1 } else { v };
+        let edge = |v: f64, old: (f64, f64), new: (f64, f64)| {
+            if !differs(v, old.0) {
+                new.0
+            } else if !differs(v, old.1) {
+                new.1
+            } else {
+                v
+            }
+        };
         let map = |(x, y): (f64, f64)| (edge(x, (c.0, c.2), (t.0, t.2)), edge(y, (c.1, c.3), (t.1, t.3)));
         let layer = format!("{side}.CrtYd");
         let mut moved = false;
@@ -364,7 +372,8 @@ fn ref_value(fp: &mut Sexpr) -> Option<String> {
             moved.push(key);
         }
     }
-    (!moved.is_empty()).then(|| format!("{} moved {}", moved.join(" and "), if moved.len() == 2 { "above and below the courtyard" } else { "next to the courtyard" }))
+    (!moved.is_empty())
+        .then(|| format!("{} moved {}", moved.join(" and "), if moved.len() == 2 { "above and below the courtyard" } else { "next to the courtyard" }))
 }
 
 fn pin1_marker(fp: &mut Sexpr, width: f64, house: Option<&str>) -> Option<String> {
@@ -490,7 +499,8 @@ mod tests {
     #[test]
     fn house_style_copies_widths_text_and_pin1_marker_but_no_geometry() {
         // Reference: a triangle on silk marks pin 1, text on F.Fab half a mm above the courtyard.
-        let reference = parse(r#"(footprint "REF" (layer "F.Cu")
+        let reference = parse(
+            r#"(footprint "REF" (layer "F.Cu")
             (property "Reference" "REF**" (at 0 -3.5 0) (layer "F.Fab") (effects (font (size 0.7 0.7) (thickness 0.1))))
             (attr smd)
             (fp_line (start -2 -2) (end 2 -2) (stroke (width 0.15) (type solid)) (layer "F.SilkS"))
@@ -499,7 +509,9 @@ mod tests {
             (pad "1" smd rect (at -1.5 -1) (size 0.6 0.6) (layers "F.Cu"))
             (pad "2" smd rect (at -1.5 1) (size 0.6 0.6) (layers "F.Cu"))
             (pad "3" smd rect (at 1.5 1) (size 0.6 0.6) (layers "F.Cu"))
-            (pad "4" smd rect (at 1.5 -1) (size 0.6 0.6) (layers "F.Cu")))"#).unwrap();
+            (pad "4" smd rect (at 1.5 -1) (size 0.6 0.6) (layers "F.Cu")))"#,
+        )
+        .unwrap();
         let style = FootprintStyle::from_footprint(&reference).unwrap();
         assert_eq!(style.widths.get("F.SilkS"), Some(&0.15));
         let t = &style.texts["Reference"];
@@ -537,7 +549,11 @@ mod tests {
         let changes = fix(&mut fp, &r, None, Some(&limits));
         assert_eq!(
             changes,
-            ["1 silkscreen line width(s) raised to the fab minimum 0.153 mm", "F.CrtYd grown to 0.25 mm around the pads and fab outline", "1 silkscreen line(s) clipped clear of pad(s) 1, 2"]
+            [
+                "1 silkscreen line width(s) raised to the fab minimum 0.153 mm",
+                "F.CrtYd grown to 0.25 mm around the pads and fab outline",
+                "1 silkscreen line(s) clipped clear of pad(s) 1, 2"
+            ]
         );
         let ends = |head: &str| {
             let g = fp.child(head).unwrap();

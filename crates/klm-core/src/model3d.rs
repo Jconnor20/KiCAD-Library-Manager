@@ -239,7 +239,9 @@ fn step_box(text: &str) -> Option<Box3> {
         let v = numbers(ents.get(id)?.1.rsplit('(').next()?.trim_end_matches(')'));
         Some([*v.first()?, *v.get(1)?, *v.get(2)?])
     };
-    let refs = |args: &str| -> Vec<String> { args.split(|c: char| !(c.is_ascii_digit() || c == '#')).filter(|t| t.len() > 1 && t.starts_with('#')).map(String::from).collect() };
+    let refs = |args: &str| -> Vec<String> {
+        args.split(|c: char| !(c.is_ascii_digit() || c == '#')).filter(|t| t.len() > 1 && t.starts_with('#')).map(String::from).collect()
+    };
     // Axis placements: where each circle is centred, and which way it faces.
     let mut placement: HashMap<String, ([f64; 3], [f64; 3])> = HashMap::new();
     let mut placed = std::collections::HashSet::new();
@@ -298,7 +300,9 @@ mod tests {
 
     fn step(lo: [f64; 3], hi: [f64; 3]) -> String {
         // An axis placement at the origin (not geometry) and the 8 corners of the box.
-        let mut s = String::from("ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=AXIS2_PLACEMENT_3D('',#1,#90,#91);\n#90=DIRECTION('',(0.,0.,1.));\n#91=DIRECTION('',(1.,0.,0.));\n");
+        let mut s = String::from(
+            "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=AXIS2_PLACEMENT_3D('',#1,#90,#91);\n#90=DIRECTION('',(0.,0.,1.));\n#91=DIRECTION('',(1.,0.,0.));\n",
+        );
         for i in 0..8 {
             let p = [0, 1, 2].map(|k| if i >> k & 1 == 1 { hi[k] } else { lo[k] });
             s += &format!("#{}=CARTESIAN_POINT('',({:.3},{:.3},{:.3}));\n", 10 + i, p[0], p[1], p[2]);
@@ -308,7 +312,10 @@ mod tests {
 
     fn wrl(lo: [f64; 3], hi: [f64; 3]) -> String {
         let (l, h) = (lo.map(|v| v / 2.54), hi.map(|v| v / 2.54));
-        format!("#VRML V2.0 utf8\nShape {{ geometry IndexedFaceSet {{ coord Coordinate {{ point [\n{} {} {},\n{} {} {}\n] }} }} }}\n", l[0], l[1], l[2], h[0], h[1], h[2])
+        format!(
+            "#VRML V2.0 utf8\nShape {{ geometry IndexedFaceSet {{ coord Coordinate {{ point [\n{} {} {},\n{} {} {}\n] }} }} }}\n",
+            l[0], l[1], l[2], h[0], h[1], h[2]
+        )
     }
 
     /// A 2 x 1 mm outline on F.Fab centred on the origin, with two pads at +-1.
@@ -427,27 +434,36 @@ DATA;
 #7=VERTEX_POINT('',#6);
 #8=VERTEX_POINT('',#6);
 ";
-        let arc = step_box(&format!("{head}#9=EDGE_CURVE('',#7,#7,#5,.T.);
+        let arc = step_box(&format!(
+            "{head}#9=EDGE_CURVE('',#7,#7,#5,.T.);
 #10=VERTEX_POINT('',#11);
 #11=CARTESIAN_POINT('',(2.,1.,1.));
 #12=EDGE_CURVE('',#7,#10,#5,.T.);
 ENDSEC;
-")).unwrap();
+"
+        ))
+        .unwrap();
         // closed (#7 to #7) and open (#7 to #10) on the same circle: still treated as full
         assert!((arc.1[0] - 5.0).abs() < 1e-9, "{arc:?}");
-        let arc = step_box(&format!("{head}#10=VERTEX_POINT('',#11);
+        let arc = step_box(&format!(
+            "{head}#10=VERTEX_POINT('',#11);
 #11=CARTESIAN_POINT('',(2.,1.,1.));
 #12=EDGE_CURVE('',#7,#10,#5,.T.);
 ENDSEC;
-")).unwrap();
+"
+        ))
+        .unwrap();
         assert!((arc.1[0] - 2.0).abs() < 1e-9 && (arc.0[0] - 1.0).abs() < 1e-9, "{arc:?}");
         // Two half edges on one circle (a seam split, as on a cylinder): still the full circle.
-        let split = step_box(&format!("{head}#10=VERTEX_POINT('',#11);
+        let split = step_box(&format!(
+            "{head}#10=VERTEX_POINT('',#11);
 #11=CARTESIAN_POINT('',(2.,1.,1.));
 #12=EDGE_CURVE('',#7,#10,#5,.T.);
 #13=EDGE_CURVE('',#10,#7,#5,.T.);
 ENDSEC;
-")).unwrap();
+"
+        ))
+        .unwrap();
         assert!((split.1[0] - 5.0).abs() < 1e-9, "{split:?}");
     }
 }

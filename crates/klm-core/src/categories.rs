@@ -76,10 +76,7 @@ const KEYWORDS: &[(&str, &str)] = &[
 pub fn guess(text: &str) -> &'static str {
     let lower = text.to_lowercase();
     let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-    KEYWORDS
-        .iter()
-        .find(|(kw, _)| words.iter().any(|w| w.starts_with(kw)))
-        .map_or("Misc", |(_, cat)| cat)
+    KEYWORDS.iter().find(|(kw, _)| words.iter().any(|w| w.starts_with(kw))).map_or("Misc", |(_, cat)| cat)
 }
 
 #[cfg(test)]

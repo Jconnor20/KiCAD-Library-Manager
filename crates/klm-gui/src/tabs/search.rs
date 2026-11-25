@@ -1,21 +1,35 @@
-use super::{import, library};
 use super::ui_kit::{self, Col, Level, Section, Sort};
+use super::{import, library};
 use crate::{AppCtx, Msg as AppMsg, Tab, new_work_dir};
 use crate::{shell, theme};
-use eframe::egui::{self, RichText, containers::menu::{MenuButton, MenuConfig}};
+use eframe::egui::{
+    self, RichText,
+    containers::menu::{MenuButton, MenuConfig},
+};
 use klm_core::cache;
-use klm_core::store::Store;
 use klm_core::currency::{Rates, display_price, price_in};
 use klm_core::part::Part;
 use klm_core::search_filter::{Filter, SortKey, view};
-use klm_core::sources::{categories::{self, Category}, combine, thumbs};
+use klm_core::sources::{
+    categories::{self, Category},
+    combine, thumbs,
+};
+use klm_core::store::Store;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 /// Thumbnail downloads running at once.
 const THUMB_JOBS: usize = 6;
 /// Sortable table columns as (column index, key).
-const SORT_KEYS: [(usize, SortKey); 7] = [(1, SortKey::Source), (2, SortKey::Mpn), (3, SortKey::Manufacturer), (4, SortKey::Description), (5, SortKey::Package), (6, SortKey::Stock), (7, SortKey::Price)];
+const SORT_KEYS: [(usize, SortKey); 7] = [
+    (1, SortKey::Source),
+    (2, SortKey::Mpn),
+    (3, SortKey::Manufacturer),
+    (4, SortKey::Description),
+    (5, SortKey::Package),
+    (6, SortKey::Stock),
+    (7, SortKey::Price),
+];
 
 pub enum Msg {
     Done(Vec<(usize, Part)>),
@@ -233,7 +247,11 @@ impl SearchTab {
         let fill = egui::Frame::new().fill(pal.panel).inner_margin(egui::Margin::same(12));
         match sel {
             Some(sel) if wide => {
-                egui::Panel::right("search_detail").default_size(300.0).size_range(260.0..=440.0).frame(fill).show(ui, |ui| self.detail_ui(ui, sel, source_names, busy, &mut action));
+                egui::Panel::right("search_detail")
+                    .default_size(300.0)
+                    .size_range(260.0..=440.0)
+                    .frame(fill)
+                    .show(ui, |ui| self.detail_ui(ui, sel, source_names, busy, &mut action));
                 self.main_ui(ui, source_names, busy, currency, &rows, shown, wide, &mut action);
             }
             // Too short a window for both: the table keeps the room and the row buttons still work.
@@ -255,11 +273,26 @@ impl SearchTab {
 
     /// Query bar, filters and the results table.
     #[allow(clippy::too_many_arguments)]
-    fn main_ui(&mut self, ui: &mut egui::Ui, source_names: &[&str], busy: bool, currency: &mut String, rows: &[usize], shown: usize, wide: bool, action: &mut Action) {
+    fn main_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        source_names: &[&str],
+        busy: bool,
+        currency: &mut String,
+        rows: &[usize],
+        shown: usize,
+        wide: bool,
+        action: &mut Action,
+    ) {
         let pal = theme::palette(ui.visuals());
         ui.horizontal(|ui| {
             ui.label(RichText::new("Search").heading().strong());
-            let edit = ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("MPN, LCSC/DigiKey number or keywords").desired_width(if wide { 300.0 } else { 220.0 }).margin(egui::Margin::symmetric(8, 6)));
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut self.query)
+                    .hint_text("MPN, LCSC/DigiKey number or keywords")
+                    .desired_width(if wide { 300.0 } else { 220.0 })
+                    .margin(egui::Margin::symmetric(8, 6)),
+            );
             let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             let can = !self.searching && (!self.query.trim().is_empty() || self.cats.picked.is_some());
             if (ui.add_enabled(can, shell::primary(ui, "Search")).clicked() || (enter && can)) && can {
@@ -325,25 +358,32 @@ impl SearchTab {
             row.col(|ui| drop(ui.label(RichText::new(source_tag(name)).monospace().size(10.5).background_color(pal.row)).on_hover_text(name)));
             let starred = self.side.favourites.contains(&p.mpn);
             let owned = self.in_library.contains(&p.mpn.to_lowercase());
-            row.col(|ui| { ui.horizontal(|ui| {
-                let mpn = ui.label(RichText::new(&p.mpn).monospace().strong());
-                if owned {
-                    let b = ui_kit::badge(ui, "In library", Level::Ok);
-                    if ui.interact(b.rect, ui.auto_id_with(("owned", i)), egui::Sense::click()).on_hover_text("Open in Library").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                        *action = Action::OpenLibrary(p.mpn.clone());
+            row.col(|ui| {
+                ui.horizontal(|ui| {
+                    let mpn = ui.label(RichText::new(&p.mpn).monospace().strong());
+                    if owned {
+                        let b = ui_kit::badge(ui, "In library", Level::Ok);
+                        if ui
+                            .interact(b.rect, ui.auto_id_with(("owned", i)), egui::Sense::click())
+                            .on_hover_text("Open in Library")
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
+                            *action = Action::OpenLibrary(p.mpn.clone());
+                        }
                     }
-                }
-                mpn.context_menu(|ui| {
-                    if owned && ui.button("Open in Library").clicked() {
-                        *action = Action::OpenLibrary(p.mpn.clone());
-                        ui.close();
-                    }
-                    if ui.button(if starred { "Remove from favourites" } else { "Add to favourites" }).clicked() {
-                        *action = Action::Star(p.mpn.clone(), !starred);
-                        ui.close();
-                    }
+                    mpn.context_menu(|ui| {
+                        if owned && ui.button("Open in Library").clicked() {
+                            *action = Action::OpenLibrary(p.mpn.clone());
+                            ui.close();
+                        }
+                        if ui.button(if starred { "Remove from favourites" } else { "Add to favourites" }).clicked() {
+                            *action = Action::Star(p.mpn.clone(), !starred);
+                            ui.close();
+                        }
+                    });
                 });
-            }); });
+            });
             row.col(|ui| drop(ui.label(&p.manufacturer)));
             row.col(|ui| drop(ui.label(&p.description).on_hover_text(&p.description)));
             row.col(|ui| drop(ui.label(&p.package)));
@@ -355,20 +395,29 @@ impl SearchTab {
                     l.on_hover_text(tip);
                 }
             });
-            row.col(|ui| { ui.horizontal(|ui| {
-                let known = p.supplier_ids.iter().any(|(k, _)| k == "LCSC") || p.source.contains("LCSC");
-                ui.spacing_mut().item_spacing.x = 3.0;
-                let tip = cad_summary(p, known);
-                if known {
-                    for (t, lvl) in [("SYM", Level::Ok), ("FP", Level::Ok), ("3D", Level::Info)].into_iter().chain((!p.sim_files.is_empty()).then_some(("SPICE", Level::Ok))) {
-                        ui_kit::badge(ui, t, lvl).on_hover_text(&tip);
-                    }
-                } else {
-                    ui.weak("not known").on_hover_text(tip);
-                }
-            }); });
             row.col(|ui| {
-                if ui.add_enabled(!busy, egui::Button::new("Import").small()).on_hover_text("Fetch symbol, footprint, 3D model and datasheet into your library").clicked() {
+                ui.horizontal(|ui| {
+                    let known = p.supplier_ids.iter().any(|(k, _)| k == "LCSC") || p.source.contains("LCSC");
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    let tip = cad_summary(p, known);
+                    if known {
+                        for (t, lvl) in [("SYM", Level::Ok), ("FP", Level::Ok), ("3D", Level::Info)]
+                            .into_iter()
+                            .chain((!p.sim_files.is_empty()).then_some(("SPICE", Level::Ok)))
+                        {
+                            ui_kit::badge(ui, t, lvl).on_hover_text(&tip);
+                        }
+                    } else {
+                        ui.weak("not known").on_hover_text(tip);
+                    }
+                });
+            });
+            row.col(|ui| {
+                if ui
+                    .add_enabled(!busy, egui::Button::new("Import").small())
+                    .on_hover_text("Fetch symbol, footprint, 3D model and datasheet into your library")
+                    .clicked()
+                {
                     *action = Action::Get(i);
                 }
             });
@@ -388,11 +437,14 @@ impl SearchTab {
         let warn = Level::Warn.color(ui.visuals());
         ui.label(RichText::new("Search").heading().strong());
         ui.add_space(8.0);
-        egui::Frame::new().fill(warn.gamma_multiply(0.12)).stroke(egui::Stroke::new(1.0, warn)).corner_radius(4).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
-            ui.set_width(ui.available_width().min(560.0));
-            ui.label(RichText::new("No search source is ready.").strong());
-            ui.label(RichText::new("Enable at least one source, or add an API key, to search for parts here. You can still import ZIPs.").color(pal.muted));
-        });
+        egui::Frame::new().fill(warn.gamma_multiply(0.12)).stroke(egui::Stroke::new(1.0, warn)).corner_radius(4).inner_margin(egui::Margin::same(12)).show(
+            ui,
+            |ui| {
+                ui.set_width(ui.available_width().min(560.0));
+                ui.label(RichText::new("No search source is ready.").strong());
+                ui.label(RichText::new("Enable at least one source, or add an API key, to search for parts here. You can still import ZIPs.").color(pal.muted));
+            },
+        );
         ui.add_space(8.0);
         egui::Grid::new("sources_state").num_columns(3).spacing([24.0, 8.0]).show(ui, |ui| {
             for h in ["Source", "State", ""] {
@@ -430,11 +482,19 @@ impl SearchTab {
         let name = source_names.get(*src).copied().unwrap_or("?");
         egui::Panel::bottom("search_detail_actions").frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8))).show(ui, |ui| {
             ui.horizontal(|ui| {
-                if ui.add_enabled(!busy, egui::Button::new("Find alternatives")).on_hover_text("Search again with this part's description, to see similar parts").clicked() {
+                if ui
+                    .add_enabled(!busy, egui::Button::new("Find alternatives"))
+                    .on_hover_text("Search again with this part's description, to see similar parts")
+                    .clicked()
+                {
                     *action = Action::Search(p.description.split_whitespace().take(6).collect::<Vec<_>>().join(" "));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add_enabled(!busy, shell::primary(ui, "Import to library")).on_hover_text("Fetch symbol, footprint, 3D model and datasheet into your library").clicked() {
+                    if ui
+                        .add_enabled(!busy, shell::primary(ui, "Import to library"))
+                        .on_hover_text("Fetch symbol, footprint, 3D model and datasheet into your library")
+                        .clicked()
+                    {
                         *action = Action::Get(i);
                     }
                 });
@@ -445,12 +505,19 @@ impl SearchTab {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&p.mpn).monospace().strong().size(16.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(if starred { "★" } else { "☆" }).frame(false)).on_hover_text(if starred { "Remove from favourites" } else { "Add to favourites" }).clicked() {
+                    if ui
+                        .add(egui::Button::new(if starred { "★" } else { "☆" }).frame(false))
+                        .on_hover_text(if starred { "Remove from favourites" } else { "Add to favourites" })
+                        .clicked()
+                    {
                         *action = Action::Star(p.mpn.clone(), !starred);
                     }
                 });
             });
-            ui.label(RichText::new([p.manufacturer.as_str(), p.description.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · ")).color(pal.muted));
+            ui.label(
+                RichText::new([p.manufacturer.as_str(), p.description.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · "))
+                    .color(pal.muted),
+            );
             let ids: Vec<String> = p.supplier_ids.iter().map(|(k, v)| format!("{k} {v}")).collect();
             if !ids.is_empty() {
                 ui.label(RichText::new(ids.join(" · ")).monospace().size(11.5).color(pal.muted));
@@ -458,7 +525,9 @@ impl SearchTab {
             ui.add_space(8.0);
             ui.horizontal_top(|ui| {
                 if let Some(Some(path)) = self.thumbs.get(&p.image_url) {
-                    shell::card(ui, |ui| ui.add(egui::Image::new(format!("file://{}", path.to_string_lossy().replace('\\', "/"))).fit_to_exact_size(egui::vec2(84.0, 84.0))));
+                    shell::card(ui, |ui| {
+                        ui.add(egui::Image::new(format!("file://{}", path.to_string_lossy().replace('\\', "/"))).fit_to_exact_size(egui::vec2(84.0, 84.0)))
+                    });
                 }
                 ui.vertical(|ui| {
                     shell::caption(ui, "Files on import");
@@ -615,7 +684,11 @@ impl SearchTab {
         for mpn in &self.side.imported {
             ui.horizontal(|ui| {
                 let starred = self.side.favourites.contains(mpn);
-                if ui.small_button(if starred { "★" } else { "☆" }).on_hover_text(if starred { "Remove from favourites" } else { "Add to favourites" }).clicked() {
+                if ui
+                    .small_button(if starred { "★" } else { "☆" })
+                    .on_hover_text(if starred { "Remove from favourites" } else { "Add to favourites" })
+                    .clicked()
+                {
                     *action = Action::Star(mpn.clone(), !starred);
                 }
                 if ui.add_enabled(can, egui::Link::new(mpn)).clicked() {
@@ -651,12 +724,14 @@ impl SearchTab {
             if shell::chip(ui, "In stock", f.in_stock).clicked() {
                 f.in_stock = !f.in_stock;
             }
-            egui::ComboBox::from_id_salt("manufacturer_filter").selected_text(if f.manufacturer.is_empty() { "Any manufacturer" } else { &f.manufacturer }).show_ui(ui, |ui| {
-                ui.selectable_value(&mut f.manufacturer, String::new(), "Any manufacturer");
-                for m in manufacturers {
-                    ui.selectable_value(&mut f.manufacturer, m.to_string(), m);
-                }
-            });
+            egui::ComboBox::from_id_salt("manufacturer_filter")
+                .selected_text(if f.manufacturer.is_empty() { "Any manufacturer" } else { &f.manufacturer })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut f.manufacturer, String::new(), "Any manufacturer");
+                    for m in manufacturers {
+                        ui.selectable_value(&mut f.manufacturer, m.to_string(), m);
+                    }
+                });
             ui.add(egui::TextEdit::singleline(&mut f.package).hint_text("Package contains").desired_width(110.0));
             let unit = if currency.is_empty() { "as listed" } else { currency.as_str() };
             ui.add(egui::TextEdit::singleline(&mut f.max_price).hint_text(format!("Max price ({unit})")).desired_width(110.0));
@@ -710,7 +785,8 @@ impl SearchTab {
 
     /// Starts downloads for result thumbnails not fetched yet, a few at a time.
     fn load_thumbs(&mut self, cx: &AppCtx) {
-        let wanted = self.results.iter().map(|(_, p)| &p.image_url).filter(|u| !u.is_empty() && !self.thumbs.contains_key(*u) && !self.thumbs_loading.contains(*u));
+        let wanted =
+            self.results.iter().map(|(_, p)| &p.image_url).filter(|u| !u.is_empty() && !self.thumbs.contains_key(*u) && !self.thumbs_loading.contains(*u));
         let room = THUMB_JOBS.saturating_sub(self.thumbs_loading.len());
         let urls: Vec<String> = wanted.take(room).cloned().collect::<HashSet<_>>().into_iter().collect();
         for url in urls {
@@ -755,7 +831,8 @@ impl SearchTab {
             let mut results = vec![];
             let query = &query;
             std::thread::scope(|s| {
-                let handles: Vec<_> = sources.iter().enumerate().map(|(i, src)| s.spawn(move || (i, src.name(), search_cached(src.as_ref(), query, ttl)))).collect();
+                let handles: Vec<_> =
+                    sources.iter().enumerate().map(|(i, src)| s.spawn(move || (i, src.name(), search_cached(src.as_ref(), query, ttl)))).collect();
                 for h in handles {
                     match h.join() {
                         Ok((i, _, Ok(parts))) => results.extend(parts.into_iter().map(|p| (i, p))),
@@ -840,12 +917,22 @@ fn price_cell(p: &Part, target: Option<&str>, rates: Option<&Rates>) -> (String,
         tip.push(format!("{} of {n}", if p.packaging.is_empty() { "Pack" } else { &p.packaging }));
     }
     if !p.price_breaks.is_empty() {
-        tip.push(format!("Price breaks
-{}", p.price_breaks.iter().map(|(q, v)| format!("{q}+: {v} {cur}")).collect::<Vec<_>>().join("
-")));
+        tip.push(format!(
+            "Price breaks
+{}",
+            p.price_breaks.iter().map(|(q, v)| format!("{q}+: {v} {cur}")).collect::<Vec<_>>().join(
+                "
+"
+            )
+        ));
     } else if target.is_some() && !p.unit_price.is_empty() && shown == p.unit_price {
         tip.push("Not converted: unknown currency or no exchange rates".into());
     }
-    (shown, tip.join("
-"))
+    (
+        shown,
+        tip.join(
+            "
+",
+        ),
+    )
 }

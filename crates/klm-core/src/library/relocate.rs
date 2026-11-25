@@ -133,9 +133,9 @@ fn file_sizes(dir: &Path) -> std::io::Result<BTreeMap<PathBuf, u64>> {
 /// copy has the same files and sizes. On any failure the original stays and the partial copy goes.
 /// `to` must not hold anything worth keeping: the caller has checked it is new or empty.
 fn move_across(from: &Path, to: &Path, copy: impl Fn(&Path, &Path) -> std::io::Result<()>) -> Result<()> {
-    let copied = copy(from, to).context("copying the library").and_then(|()| {
-        if file_sizes(from)? == file_sizes(to)? { Ok(()) } else { bail!("the copy doesn't match the original") }
-    });
+    let copied = copy(from, to)
+        .context("copying the library")
+        .and_then(|()| if file_sizes(from)? == file_sizes(to)? { Ok(()) } else { bail!("the copy doesn't match the original") });
     if let Err(e) = copied {
         let _ = std::fs::remove_dir_all(to);
         return Err(e.context(format!("could not copy the library to {}; the original is untouched", to.display())));

@@ -14,8 +14,8 @@ mod status;
 
 pub use attach::{ATTACH_EXTENSIONS, AttachKind};
 pub use edit::{EDIT_FIELDS, Edited, PartEdit};
-pub use fields::{property, set_property};
 pub(crate) use fields::rename_symbol;
+pub use fields::{property, set_property};
 pub use remove::{Piece, RemovePlan};
 pub use status::{Check, PartStatus};
 
@@ -42,10 +42,7 @@ pub struct LibraryRoot {
 
 /// Characters KiCad or Windows reject in library ids and file names.
 pub fn sanitize(name: &str) -> String {
-    name.trim()
-        .chars()
-        .map(|c| if c.is_whitespace() || r#":/\{}"'<>|?*"#.contains(c) { '_' } else { c })
-        .collect()
+    name.trim().chars().map(|c| if c.is_whitespace() || r#":/\{}"'<>|?*"#.contains(c) { '_' } else { c }).collect()
 }
 
 impl LibraryRoot {
@@ -86,9 +83,7 @@ impl LibraryRoot {
     /// Categories that already have a symbol library here.
     pub fn categories(&self) -> Vec<String> {
         let Ok(rd) = std::fs::read_dir(self.dir.join("symbols")) else { return vec![] };
-        rd.flatten()
-            .filter_map(|e| e.file_name().to_str()?.strip_suffix(".kicad_sym").map(String::from))
-            .collect()
+        rd.flatten().filter_map(|e| e.file_name().to_str()?.strip_suffix(".kicad_sym").map(String::from)).collect()
     }
 
     pub fn has_part(&self, category: &str, mpn: &str) -> bool {

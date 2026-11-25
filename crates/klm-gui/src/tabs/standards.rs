@@ -100,7 +100,8 @@ pub fn symbols(ui: &mut egui::Ui, rules: &mut Rules) {
 
 pub fn reset_symbols(rules: &mut Rules) {
     let d = Rules::default();
-    (rules.symbol_text_size, rules.pin_length_min, rules.symbol_line_width, rules.symbol_field_positions, rules.house_symbols, rules.house_ics) = (d.symbol_text_size, d.pin_length_min, d.symbol_line_width, d.symbol_field_positions, d.house_symbols, d.house_ics);
+    (rules.symbol_text_size, rules.pin_length_min, rules.symbol_line_width, rules.symbol_field_positions, rules.house_symbols, rules.house_ics) =
+        (d.symbol_text_size, d.pin_length_min, d.symbol_line_width, d.symbol_field_positions, d.house_symbols, d.house_ics);
 }
 
 pub fn footprints(ui: &mut egui::Ui, rules: &mut Rules) {
@@ -115,7 +116,8 @@ pub fn footprints(ui: &mut egui::Ui, rules: &mut Rules) {
 
 pub fn reset_footprints(rules: &mut Rules) {
     let d = Rules::default();
-    (rules.silk_width, rules.fab_width, rules.courtyard_width, rules.footprint_ref_value, rules.footprint_origin, rules.pin1_marker) = (d.silk_width, d.fab_width, d.courtyard_width, d.footprint_ref_value, d.footprint_origin, d.pin1_marker);
+    (rules.silk_width, rules.fab_width, rules.courtyard_width, rules.footprint_ref_value, rules.footprint_origin, rules.pin1_marker) =
+        (d.silk_width, d.fab_width, d.courtyard_width, d.footprint_ref_value, d.footprint_origin, d.pin1_marker);
 }
 
 /// A row of exclusive choices drawn as one segmented control. `items` are (label, enabled, why not); returns the index clicked.

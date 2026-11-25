@@ -52,9 +52,7 @@ pub trait Source: Send + Sync {
 
 /// SnapMagic's part search; its results link to the Ultra Librarian and SamacSys downloads too.
 fn snapmagic_url(part: &Part) -> Option<String> {
-    reqwest::Url::parse_with_params("https://www.snapeda.com/search/", [("q", part.mpn.as_str()), ("search-type", "parts")])
-        .ok()
-        .map(String::from)
+    reqwest::Url::parse_with_params("https://www.snapeda.com/search/", [("q", part.mpn.as_str()), ("search-type", "parts")]).ok().map(String::from)
 }
 
 /// A source built from its stored credentials, enabled or not (the Settings "Test" button

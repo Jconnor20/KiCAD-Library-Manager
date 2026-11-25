@@ -1,8 +1,8 @@
 //! The dialogs shared by every batch: the dry-run review, the progress while a worker applies it, and
 //! the "Import all" setup. A tab keeps an `Option<BatchDialog>` and calls these from `dialogs`/`handle`.
 
-use crate::{AppCtx, Msg as AppMsg};
 use super::ui_kit::{Level, badge};
+use crate::{AppCtx, Msg as AppMsg};
 use eframe::egui::{self, RichText};
 use klm_core::batch::{self, ItemResult, Op, Plan, Target};
 use klm_core::part::Part;
@@ -16,12 +16,23 @@ pub enum Progress {
 pub enum BatchDialog {
     /// The dry run, waiting for Apply.
     Review(Plan),
-    Running { done: usize, total: usize },
+    Running {
+        done: usize,
+        total: usize,
+    },
 }
 
 /// A modal in the wireframes' shape: a title row (with `sub` beside it and a close ✕), the body, then a footer bar.
 /// True when the user dismissed it with ✕, Esc or a click outside.
-pub fn dialog(ctx: &egui::Context, id: egui::Id, width: f32, title: &str, sub: Option<&str>, body: impl FnOnce(&mut egui::Ui), footer: impl FnOnce(&mut egui::Ui)) -> bool {
+pub fn dialog(
+    ctx: &egui::Context,
+    id: egui::Id,
+    width: f32,
+    title: &str,
+    sub: Option<&str>,
+    body: impl FnOnce(&mut egui::Ui),
+    footer: impl FnOnce(&mut egui::Ui),
+) -> bool {
     let line = crate::theme::palette(&ctx.global_style().visuals).line;
     let frame = egui::Frame::window(&ctx.global_style()).inner_margin(0);
     let mut closed = false;
@@ -185,7 +196,16 @@ pub fn show(batch: &mut Option<BatchDialog>, ctx: &egui::Context) -> Option<Plan
 /// The dry-run dialog for work that isn't a `batch::Plan` (standardise, restyle, export, delete): a heading per item with
 /// its lines under it, and whatever `extra` adds below. `Some(true)` is the `confirm` button, `Some(false)` Cancel.
 /// `danger` paints the confirm button red.
-pub fn review(ctx: &egui::Context, id: &str, confirm: &str, danger: bool, title: &str, sections: &[(String, Vec<String>)], can_apply: bool, extra: impl FnOnce(&mut egui::Ui)) -> Option<bool> {
+pub fn review(
+    ctx: &egui::Context,
+    id: &str,
+    confirm: &str,
+    danger: bool,
+    title: &str,
+    sections: &[(String, Vec<String>)],
+    can_apply: bool,
+    extra: impl FnOnce(&mut egui::Ui),
+) -> Option<bool> {
     let mut answer = None;
     let rows: Vec<_> = sections.iter().map(|(l, lines)| (l.clone(), lines.iter().map(|t| (t.clone(), Tone::Plain)).collect())).collect();
     let dismissed = dialog(

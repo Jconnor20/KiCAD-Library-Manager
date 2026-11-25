@@ -204,27 +204,38 @@ fn attach_lands_in_each_library() {
     global.copy_part_to("Switches", "2-1977223-4", &project, false).unwrap();
 
     for (root, tag) in [(&global, "global"), (&project, "project")] {
-        for (file, text) in [("ds.pdf", "%PDF"), ("m.cir", "* x
+        for (file, text) in [
+            ("ds.pdf", "%PDF"),
+            (
+                "m.cir",
+                "* x
 .SUBCKT M 1 2
 .ENDS
-"), ("body.step", "ISO-10303-21;")] {
+",
+            ),
+            ("body.step", "ISO-10303-21;"),
+        ] {
             let path = src.join(format!("{tag}-{file}"));
             std::fs::write(&path, format!("{tag} {text}")).unwrap();
             root.attach_file("Switches", "2-1977223-4", AttachKind::of(&path).unwrap(), &path).unwrap();
         }
     }
 
-    for (root, tag, var) in [
-        (&global, "global", global.dir.to_string_lossy().replace('\\', "/")),
-        (&project, "project", "${KIPRJMOD}/lib".to_string()),
-    ] {
+    for (root, tag, var) in [(&global, "global", global.dir.to_string_lossy().replace('\\', "/")), (&project, "project", "${KIPRJMOD}/lib".to_string())] {
         assert_eq!(field_in(root, "Switches", "Datasheet").unwrap(), format!("{var}/datasheets/TE_Connectivity_2-1977223-4.pdf"));
         assert_eq!(field_in(root, "Switches", "Sim.Library").unwrap(), format!("{var}/simulation/2-1977223-4.cir"));
         let fp = read(&root.dir.join("footprints/Switches.pretty/SOT-23-ACME.kicad_mod"));
         assert_eq!(fp.child("model").unwrap().arg(0), Some(format!("{var}/3dmodels/Switches.3dshapes/SOT-23-ACME.step").as_str()));
         // Each library keeps its own copy of the file, not a link to the other's.
-        for (rel, ends) in [("datasheets/TE_Connectivity_2-1977223-4.pdf", "%PDF"), ("simulation/2-1977223-4.cir", ".ENDS
-"), ("3dmodels/Switches.3dshapes/SOT-23-ACME.step", "10303-21;")] {
+        for (rel, ends) in [
+            ("datasheets/TE_Connectivity_2-1977223-4.pdf", "%PDF"),
+            (
+                "simulation/2-1977223-4.cir",
+                ".ENDS
+",
+            ),
+            ("3dmodels/Switches.3dshapes/SOT-23-ACME.step", "10303-21;"),
+        ] {
             let text = std::fs::read_to_string(root.dir.join(rel)).unwrap();
             assert!(text.starts_with(tag) && text.ends_with(ends), "{rel}: {text:?}");
         }

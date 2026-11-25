@@ -44,7 +44,13 @@ impl BomFields {
     fn names(&self) -> [String; 5] {
         let d = Self::default();
         let pick = |v: &str, def: String| if v.trim().is_empty() { def } else { v.trim().to_string() };
-        [pick(&self.mpn, d.mpn), pick(&self.manufacturer, d.manufacturer), pick(&self.lcsc, d.lcsc), pick(&self.digikey, d.digikey), pick(&self.mouser, d.mouser)]
+        [
+            pick(&self.mpn, d.mpn),
+            pick(&self.manufacturer, d.manufacturer),
+            pick(&self.lcsc, d.lcsc),
+            pick(&self.digikey, d.digikey),
+            pick(&self.mouser, d.mouser),
+        ]
     }
 }
 
@@ -198,7 +204,8 @@ pub fn parse_bom(csv: &str) -> Vec<Line> {
         let mpn = cell(r, "MPN");
         let maker = cell(r, "Manufacturer");
         // The same MPN from two makers is two parts.
-        let group = if mpn.is_empty() { format!("v:{}|{footprint}", value.to_lowercase()) } else { format!("m:{}|{}|{footprint}", key(&mpn), maker.to_lowercase()) };
+        let group =
+            if mpn.is_empty() { format!("v:{}|{footprint}", value.to_lowercase()) } else { format!("m:{}|{}|{footprint}", key(&mpn), maker.to_lowercase()) };
         let i = *index.entry(group).or_insert_with(|| {
             lines.push(Line { value, footprint, mpn, manufacturer: maker, ..Line::default() });
             lines.len() - 1
@@ -232,7 +239,10 @@ pub enum Status {
     /// No MPN and no supplier number: nothing to match on (a stock `Device:R`, say).
     NoPartNumber,
     /// In the library under `symbol`; `has_footprint` is false when the symbol names no footprint.
-    Found { symbol: String, has_footprint: bool },
+    Found {
+        symbol: String,
+        has_footprint: bool,
+    },
     NotInLibrary,
     /// The MPN is in the library but only from other manufacturers than the BOM's.
     OtherMaker(String),
@@ -452,23 +462,25 @@ pub fn fetch_quotes(lines: &[Line], dist: &[Distributor], store: Option<&Store>,
                     continue;
                 }
                 let skip = failed.contains(&di);
-                let res = done.entry((di, query.to_lowercase())).or_insert_with(|| match cache::search(store, &d.cache_name, &query, ttl_secs, || {
-                    if skip {
-                        bail!("skipped")
-                    }
-                    if let Some(wait) = last_call.get(&di).and_then(|t| d.interval.checked_sub(t.elapsed())) {
-                        std::thread::sleep(wait);
-                    }
-                    last_call.insert(di, std::time::Instant::now());
-                    d.source.search(&query)
-                }) {
-                    Ok(r) => Some((r, false)),
-                    Err(e) => {
-                        if !skip {
-                            failed.push(di);
-                            problems.push(format!("{name}: {e:#}; using older cached data where there is some"));
+                let res = done.entry((di, query.to_lowercase())).or_insert_with(|| {
+                    match cache::search(store, &d.cache_name, &query, ttl_secs, || {
+                        if skip {
+                            bail!("skipped")
                         }
-                        store.and_then(|s| cache::get(s, &d.cache_name, &query, i64::MAX, 0)).map(|old| (old, true))
+                        if let Some(wait) = last_call.get(&di).and_then(|t| d.interval.checked_sub(t.elapsed())) {
+                            std::thread::sleep(wait);
+                        }
+                        last_call.insert(di, std::time::Instant::now());
+                        d.source.search(&query)
+                    }) {
+                        Ok(r) => Some((r, false)),
+                        Err(e) => {
+                            if !skip {
+                                failed.push(di);
+                                problems.push(format!("{name}: {e:#}; using older cached data where there is some"));
+                            }
+                            store.and_then(|s| cache::get(s, &d.cache_name, &query, i64::MAX, 0)).map(|old| (old, true))
+                        }
                     }
                 });
                 if let Some((results, stale)) = res {
@@ -652,10 +664,24 @@ impl Assembler {
                 Some(JlcType::Preferred) => 1,
                 _ => 2,
             },
-            Self::Jlc => if stocked("") { 3 } else { 4 },
+            Self::Jlc => {
+                if stocked("") {
+                    3
+                } else {
+                    4
+                }
+            }
             // shortcut: an unknown lifecycle counts as active, since not every reply carries one; upgrade if that picks dead parts.
             Self::Distributor if a.lifecycle.is_some_and(|l| l != Lifecycle::Active) => 2,
-            Self::Distributor => if stocked("DigiKey") { 0 } else if stocked("Mouser") { 1 } else { 2 },
+            Self::Distributor => {
+                if stocked("DigiKey") {
+                    0
+                } else if stocked("Mouser") {
+                    1
+                } else {
+                    2
+                }
+            }
         }
     }
 }
@@ -698,7 +724,15 @@ pub struct Row {
     pub pick: Option<usize>,
 }
 
-pub fn build_rows(lines: Vec<Line>, lib: &[LibPart], store: Option<&Store>, quotes: Vec<Vec<Quote>>, boards: u64, target: &str, rates: Option<&Rates>) -> Vec<Row> {
+pub fn build_rows(
+    lines: Vec<Line>,
+    lib: &[LibPart],
+    store: Option<&Store>,
+    quotes: Vec<Vec<Quote>>,
+    boards: u64,
+    target: &str,
+    rates: Option<&Rates>,
+) -> Vec<Row> {
     lines
         .into_iter()
         .zip(quotes)
@@ -766,7 +800,9 @@ pub fn library_label(s: &Status) -> String {
 }
 
 pub fn to_csv(rows: &[Row], boards: u64, target: &str) -> String {
-    let mut out = format!("Refs,Qty,Value,Footprint,MPN,Manufacturer,Library,Alternatives,Source,Supplier no.,Stock,Unit price ({target}),Extended ({target}),Quantity bought,Lead time (days),JLC class,JLC stock,Lifecycle\n");
+    let mut out = format!(
+        "Refs,Qty,Value,Footprint,MPN,Manufacturer,Library,Alternatives,Source,Supplier no.,Stock,Unit price ({target}),Extended ({target}),Quantity bought,Lead time (days),JLC class,JLC stock,Lifecycle\n"
+    );
     for r in rows {
         let (src, id, stock, unit, ext, bought, lead) = match &r.best {
             Some(b) => {
@@ -1007,7 +1043,11 @@ C1,100n,C_0603,,,,,,\n";
         let store = Store::open(&crate::test_dir("bom_rate").join("parts.db")).unwrap();
         let line = |m: &str| Line { refs: vec!["R1".into()], mpn: m.into(), ..Line::default() };
         let lines = [line("AAAAA1"), line("BBBBB2"), line("AAAAA1")];
-        let d = vec![Distributor { cache_name: "LCSC/v2".into(), source: Box::new(Fake(Default::default(), false)), interval: std::time::Duration::from_millis(150) }];
+        let d = vec![Distributor {
+            cache_name: "LCSC/v2".into(),
+            source: Box::new(Fake(Default::default(), false)),
+            interval: std::time::Duration::from_millis(150),
+        }];
         let t = std::time::Instant::now();
         fetch_quotes(&lines, &d, Some(&store), 60);
         let e = t.elapsed();
@@ -1118,7 +1158,13 @@ C1,100n,C_0603,,,,,,\n";
 
     #[test]
     fn align_picks_per_assembler() {
-        let q = |src: &str, stock: u64, jlc: &str, life: &str| Quote { source: src.into(), stock: Some(stock), jlc_type: jlc.into(), lifecycle: life.into(), ..Quote::default() };
+        let q = |src: &str, stock: u64, jlc: &str, life: &str| Quote {
+            source: src.into(),
+            stock: Some(stock),
+            jlc_type: jlc.into(),
+            lifecycle: life.into(),
+            ..Quote::default()
+        };
         let alt = |mpn: &str| Alternative { mpn: mpn.into(), manufacturer: String::new(), supplier_ids: vec![], role: "substitute".into() };
         // Own part: extended at JLC, obsolete. A: basic at JLC but none in stock there. B: basic in stock. C: active at Mouser. D: active at DigiKey.
         let own = vec![q("LCSC", 50, "extended", ""), q("DigiKey", 10, "", "Obsolete")];

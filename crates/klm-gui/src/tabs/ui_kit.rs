@@ -196,7 +196,15 @@ pub fn table(ui: &mut Ui, id: &str, cols: &[Col], sort: &mut Sort, rows: usize, 
 }
 
 /// [`table`] where `head(column, ui)` may draw a header cell itself (a select-all box) and return true.
-pub fn table_with_head(ui: &mut Ui, id: &str, cols: &[Col], sort: &mut Sort, rows: usize, mut head: impl FnMut(usize, &mut Ui) -> bool, mut row: impl FnMut(usize, &mut TableRow)) {
+pub fn table_with_head(
+    ui: &mut Ui,
+    id: &str,
+    cols: &[Col],
+    sort: &mut Sort,
+    rows: usize,
+    mut head: impl FnMut(usize, &mut Ui) -> bool,
+    mut row: impl FnMut(usize, &mut TableRow),
+) {
     let mut t = TableBuilder::new(ui).id_salt(id).striped(false).resizable(true).sense(Sense::click()).auto_shrink(false);
     for c in cols {
         t = t.column(if c.width > 0.0 { Column::initial(c.width).at_least(24.0).clip(true) } else { Column::remainder().at_least(60.0).clip(true) });

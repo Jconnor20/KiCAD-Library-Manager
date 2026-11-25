@@ -101,7 +101,10 @@ fn health_text_flags_the_incomplete_part_and_exits_1() {
     let incomplete: Vec<&&str> = lines.iter().filter(|l| l.contains("Resistors/RC-INCOMPLETE")).collect();
     assert!(incomplete.iter().any(|l| l.starts_with("error") && l.contains("footprint")), "{text}");
     assert!(incomplete.iter().any(|l| l.starts_with("warning") && l.contains("datasheet")), "{text}");
-    assert!(!lines.iter().any(|l| l.contains("Resistors/RC0603-10K") && (l.contains("footprint") || l.contains("datasheet") || l.contains("3d-model"))), "complete part flagged:\n{text}");
+    assert!(
+        !lines.iter().any(|l| l.contains("Resistors/RC0603-10K") && (l.contains("footprint") || l.contains("datasheet") || l.contains("3d-model"))),
+        "complete part flagged:\n{text}"
+    );
     // The sandbox's KiCad tables were looked up there, not in the real %APPDATA%.
     assert!(sb.join("kicad").is_dir());
 }
@@ -144,11 +147,7 @@ fn health_csv_has_a_header_and_one_row_per_finding() {
 fn health_on_a_complete_project_exits_0() {
     let sb = fresh("clean");
     let proj = project(&sb.join("proj"));
-    std::fs::write(
-        proj.join("lib/symbols/Resistors.kicad_sym"),
-        SYMBOLS.split("  (symbol \"RC-INCOMPLETE\"").next().unwrap().to_string() + ")\n",
-    )
-    .unwrap();
+    std::fs::write(proj.join("lib/symbols/Resistors.kicad_sym"), SYMBOLS.split("  (symbol \"RC-INCOMPLETE\"").next().unwrap().to_string() + ")\n").unwrap();
     let out = klm(&sb, &["health", "--project", proj.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0), "stdout:\n{}\nstderr:\n{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
     // The fixture is complete but not in house style, so the only finding is the compliance one.

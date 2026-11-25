@@ -156,4 +156,3 @@ fn no_distributor_was_called() {
     // Runs last by name only if the others ran first; it also holds on its own: the counter only moves on a source call.
     assert_eq!(SOURCE_CALLS.load(std::sync::atomic::Ordering::SeqCst), 0, "a test reached a distributor");
 }
-

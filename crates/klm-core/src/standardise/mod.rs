@@ -9,8 +9,8 @@
 mod footprint;
 pub mod profile;
 
-pub use footprint::{FootprintStyle, TextStyle};
 pub(crate) use footprint::fix as fix_footprint;
+pub use footprint::{FootprintStyle, TextStyle};
 pub(crate) mod symbol;
 
 use crate::convert::easyeda::geom::fmt;
@@ -19,8 +19,8 @@ use crate::library::{LibraryRoot, property, sanitize};
 use crate::sexpr::{self, Sexpr};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
-use std::fmt as stdfmt;
 use std::collections::HashMap;
+use std::fmt as stdfmt;
 use std::path::PathBuf;
 
 /// Which fixes run and to what values. `None` (or `false`) switches a rule off. Defaults are KLC's.
@@ -163,7 +163,9 @@ pub fn plan_for(root: &LibraryRoot, profile: &profile::Profile, naming: &crate::
                 out.extend(crate::symbols::pintype::fill(sym, &cat).map(|c| format!("{name}: {c}")));
                 let class = crate::symbols::class_of(&cat, sym, naming).ok();
                 // A refusal keeps the symbol's own drawing; the generic rules below still tidy it.
-                let redrawn = class.filter(|c| rules.house_symbols && !parents.contains(&name) && (rules.house_ics || !matches!(c, crate::symbols::Class::Ic))).and_then(|c| Some((c, crate::symbols::restyle(sym, c, profile).ok()?)));
+                let redrawn = class
+                    .filter(|c| rules.house_symbols && !parents.contains(&name) && (rules.house_ics || !matches!(c, crate::symbols::Class::Ic)))
+                    .and_then(|c| Some((c, crate::symbols::restyle(sym, c, profile).ok()?)));
                 if let Some((c, new)) = redrawn {
                     if new != *sym {
                         out.push(format!("{name}: redrawn as {c:?} (house style)"));
@@ -174,7 +176,8 @@ pub fn plan_for(root: &LibraryRoot, profile: &profile::Profile, naming: &crate::
                     let templated = class.is_some_and(|c| profile.templates.contains_key(&format!("{c:?}")));
                     let rules = Rules { symbol_field_positions: rules.symbol_field_positions && !templated, ..rules.clone() };
                     out.extend(symbol::fix(sym, &rules).into_iter().map(|c| format!("{name}: {c}")));
-                    if rules.house_symbols && matches!(crate::categories::guess(&cat), "Resistors" | "Capacitors" | "Inductors" | "Diodes" | "Optoelectronics") {
+                    if rules.house_symbols && matches!(crate::categories::guess(&cat), "Resistors" | "Capacitors" | "Inductors" | "Diodes" | "Optoelectronics")
+                    {
                         out.extend(symbol::two_pin_labels(sym).map(|c| format!("{name}: {c}")));
                     }
                 }
@@ -199,7 +202,12 @@ pub fn plan_for(root: &LibraryRoot, profile: &profile::Profile, naming: &crate::
             cats.dedup();
             let mut out = vec![];
             for cat in cats {
-                let Ok(lib) = std::fs::read_to_string(root.dir.join("symbols").join(format!("{}.kicad_sym", sanitize(cat)))).map_err(anyhow::Error::from).and_then(|t| sexpr::parse(&t)) else { continue };
+                let Ok(lib) = std::fs::read_to_string(root.dir.join("symbols").join(format!("{}.kicad_sym", sanitize(cat))))
+                    .map_err(anyhow::Error::from)
+                    .and_then(|t| sexpr::parse(&t))
+                else {
+                    continue;
+                };
                 for sym in lib.children("symbol").filter(|s| want(cat, s.arg(0).unwrap_or_default())) {
                     if let Some(fp) = property(sym, "Footprint").and_then(|f| f.rsplit(':').next()) {
                         out.push(crate::compliance::footprint_path(root, cat, fp));
@@ -424,8 +432,16 @@ mod tests {
         let base = crate::test_dir("standardise_scoped");
         let root = LibraryRoot::global(base.join("lib"), base.join("config"));
         root.ensure_layout().unwrap();
-        let sym = |n: &str| format!(r#"(symbol "{n}" (property "Reference" "R" (at 0 2.54 0) (effects (font (size 1.27 1.27)) (justify right))) (property "Value" "{n}" (at 0 -2.54 0)) (symbol "{n}_1_1" (rectangle (start -2.54 1.27) (end 2.54 -1.27)) (pin passive line (at -5.08 0 0) (length 0) (name "1") (number "1")) (pin passive line (at 5.08 0 0) (length 0) (name "2") (number "2"))))"#);
-        std::fs::write(root.dir.join("symbols/Resistors.kicad_sym"), format!(r#"(kicad_symbol_lib (version 20241209) (generator "t") {} {})"#, sym("R1"), sym("R2"))).unwrap();
+        let sym = |n: &str| {
+            format!(
+                r#"(symbol "{n}" (property "Reference" "R" (at 0 2.54 0) (effects (font (size 1.27 1.27)) (justify right))) (property "Value" "{n}" (at 0 -2.54 0)) (symbol "{n}_1_1" (rectangle (start -2.54 1.27) (end 2.54 -1.27)) (pin passive line (at -5.08 0 0) (length 0) (name "1") (number "1")) (pin passive line (at 5.08 0 0) (length 0) (name "2") (number "2"))))"#
+            )
+        };
+        std::fs::write(
+            root.dir.join("symbols/Resistors.kicad_sym"),
+            format!(r#"(kicad_symbol_lib (version 20241209) (generator "t") {} {})"#, sym("R1"), sym("R2")),
+        )
+        .unwrap();
         let text = |only: &[(String, String)]| plan_for(&root, &Profile::default(), &Default::default(), Some(only)).to_string();
         let one = text(&[("Resistors".into(), "R2".into())]);
         assert!(one.contains("R2: redrawn") && !one.contains("R1:"), "{one}");

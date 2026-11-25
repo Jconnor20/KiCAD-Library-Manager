@@ -96,7 +96,23 @@ pub struct TemplateEditor {
 impl TemplateEditor {
     /// `template` is the class's current house or built-in template; `default_size` the text height the rules give.
     pub fn new(class: Class, template: Template, default_size: f64) -> Self {
-        Self { class, doc: Doc::of(&template), base: template, undo: vec![], sel: Sel::None, tool: Tool::Select, draft: vec![], drag: None, raw: (0.0, 0.0), grid: 2.54, scale: 16.0, pan: Vec2::ZERO, fitted: false, default_size, changed: false }
+        Self {
+            class,
+            doc: Doc::of(&template),
+            base: template,
+            undo: vec![],
+            sel: Sel::None,
+            tool: Tool::Select,
+            draft: vec![],
+            drag: None,
+            raw: (0.0, 0.0),
+            grid: 2.54,
+            scale: 16.0,
+            pan: Vec2::ZERO,
+            fitted: false,
+            default_size,
+            changed: false,
+        }
     }
 
     fn template(&self) -> Template {
@@ -235,7 +251,9 @@ impl TemplateEditor {
             let outline: Vec<Pos2> = match &sh.geo {
                 Geo::Line(v) => v.iter().map(|p| self.to_screen(rect, *p)).collect(),
                 Geo::Rect(a, b) => [*a, (b.0, a.1), *b, (a.0, b.1), *a].iter().map(|p| self.to_screen(rect, *p)).collect(),
-                Geo::Circle(c, r) => (0..=32).map(|k| k as f64 * std::f64::consts::TAU / 32.0).map(|t| self.to_screen(rect, (c.0 + r * t.cos(), c.1 + r * t.sin()))).collect(),
+                Geo::Circle(c, r) => {
+                    (0..=32).map(|k| k as f64 * std::f64::consts::TAU / 32.0).map(|t| self.to_screen(rect, (c.0 + r * t.cos(), c.1 + r * t.sin()))).collect()
+                }
                 Geo::Arc([a, m, e]) => arc_points(*a, *m, *e).iter().map(|p| self.to_screen(rect, *p)).collect(),
                 Geo::Other(_) => vec![],
             };
@@ -453,7 +471,13 @@ impl TemplateEditor {
             p.circle_filled(self.to_screen(rect, at), 3.0, accent);
         }
         if let Some(at) = hover {
-            p.text(rect.left_bottom() + Vec2::new(8.0, -6.0), Align2::LEFT_BOTTOM, format!("x {}  y {} mm", fmt(at.0), fmt(at.1)), FontId::monospace(11.0), pal.muted);
+            p.text(
+                rect.left_bottom() + Vec2::new(8.0, -6.0),
+                Align2::LEFT_BOTTOM,
+                format!("x {}  y {} mm", fmt(at.0), fmt(at.1)),
+                FontId::monospace(11.0),
+                pal.muted,
+            );
         }
     }
 
@@ -644,7 +668,9 @@ impl TemplateEditor {
             self.doc.sizes = Some(sizes);
         }
         ui.weak("KiCad's default is 1.27 mm (50 mil).");
-        if self.doc.fields.is_some() && ui.small_button("Put text above and below").on_hover_text("Forget the text positions: Reference above the body, Value below").clicked() {
+        if self.doc.fields.is_some()
+            && ui.small_button("Put text above and below").on_hover_text("Forget the text positions: Reference above the body, Value below").clicked()
+        {
             self.push_undo();
             self.doc.fields = None;
         }
@@ -705,14 +731,17 @@ impl TemplateEditor {
                     ui.label("Length");
                     change |= ui.add(egui::DragValue::new(&mut s.3).speed(grid).range(0.254..=20.0).suffix(" mm")).changed();
                 });
-                egui::ComboBox::from_id_salt("tpl_pin_dir").selected_text(DIRECTIONS.iter().find(|d| d.0 == s.2).map_or(format!("{}°", s.2), |d| d.1.to_string())).show_ui(ui, |ui| {
-                    for (v, label) in DIRECTIONS {
-                        change |= ui.selectable_value(&mut s.2, v, label).changed();
-                    }
-                });
+                egui::ComboBox::from_id_salt("tpl_pin_dir")
+                    .selected_text(DIRECTIONS.iter().find(|d| d.0 == s.2).map_or(format!("{}°", s.2), |d| d.1.to_string()))
+                    .show_ui(ui, |ui| {
+                        for (v, label) in DIRECTIONS {
+                            change |= ui.selectable_value(&mut s.2, v, label).changed();
+                        }
+                    });
                 let on = |v: f64| ((v / 2.54).round() * 2.54 - v).abs() < 1e-3;
                 if !(on(s.0) && on(s.1)) {
-                    ui.colored_label(ui.visuals().warn_fg_color, "Off the 100 mil grid: wires meeting it may miss").on_hover_text("KLC wants every pin end on the 2.54 mm grid.");
+                    ui.colored_label(ui.visuals().warn_fg_color, "Off the 100 mil grid: wires meeting it may miss")
+                        .on_hover_text("KLC wants every pin end on the 2.54 mm grid.");
                 }
                 if change {
                     self.push_undo();

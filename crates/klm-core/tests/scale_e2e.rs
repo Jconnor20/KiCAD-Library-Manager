@@ -3,9 +3,9 @@
 //! read back through the real `LibraryRoot`, `checks` and `alternatives` functions. The whole binary runs
 //! in one sandbox (`KLM_CONFIG_DIR`), so KiCad's tables and KLM's queues never reach the real `%APPDATA%`.
 
+use klm_core::kicad_env::{PendingLib, PendingTable, TableOp};
 use klm_core::library::{Check, LibraryRoot};
 use klm_core::{alternatives, checks, kicad_env, settings};
-use klm_core::kicad_env::{PendingLib, PendingTable, TableOp};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, Once};
 use std::time::Instant;
@@ -182,7 +182,8 @@ fn scale_timings_for_2000_parts() {
 
 // ---- KiCad-open: the pending queue against a KiCad table that changed in between ----
 
-const TABLE: &str = "(sym_lib_table\n  (version 7)\n  (lib (name \"Device\")(type \"KiCad\")(uri \"${KICAD10_SYMBOL_DIR}/Device.kicad_sym\")(options \"\")(descr \"\"))\n)\n";
+const TABLE: &str =
+    "(sym_lib_table\n  (version 7)\n  (lib (name \"Device\")(type \"KiCad\")(uri \"${KICAD10_SYMBOL_DIR}/Device.kicad_sym\")(options \"\")(descr \"\"))\n)\n";
 
 /// What a user or KiCad adds to the table while KLM's entry waits in the queue.
 fn outside_edit(table: &Path, name: &str) {
@@ -246,8 +247,14 @@ fn queued_removal_keeps_an_outside_edit_and_drops_ours() {
 
     kicad_env::apply_in(&queue).unwrap();
     let text = std::fs::read_to_string(&table).unwrap();
-    assert!(text.contains("\"UserLib\"") && text.contains("\"Device\""), "outside entries lost:
-{text}");
-    assert!(!text.contains("KLM_ICs"), "our entry should be gone:
-{text}");
+    assert!(
+        text.contains("\"UserLib\"") && text.contains("\"Device\""),
+        "outside entries lost:
+{text}"
+    );
+    assert!(
+        !text.contains("KLM_ICs"),
+        "our entry should be gone:
+{text}"
+    );
 }

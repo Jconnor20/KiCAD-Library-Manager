@@ -1,6 +1,6 @@
 //! Importing one part into a library.
 
-use super::fields::{rename_symbol, same_geometry, set_footprint, datasheet_name, merge_symbol};
+use super::fields::{datasheet_name, merge_symbol, rename_symbol, same_geometry, set_footprint};
 use super::{LibraryRoot, copy_file, has_ext, property, sanitize, set_property};
 use crate::kicad_env::{self, write_atomic};
 use crate::part::Part;
@@ -74,7 +74,15 @@ impl LibraryRoot {
         let (combined, meta, used, why) = state.into_inner().unwrap_or_else(|e| e.into_inner());
         let part = combined.to_part(&meta);
         if part.symbol_file.is_none() {
-            bail!("no source has CAD files for {}{}", chosen.mpn, if sources.is_empty() { " (no source is enabled)".into() } else { format!(": {}", why.into_iter().filter(|w| !w.is_empty()).collect::<Vec<_>>().join("; ")) });
+            bail!(
+                "no source has CAD files for {}{}",
+                chosen.mpn,
+                if sources.is_empty() {
+                    " (no source is enabled)".into()
+                } else {
+                    format!(": {}", why.into_iter().filter(|w| !w.is_empty()).collect::<Vec<_>>().join("; "))
+                }
+            );
         }
         self.add_part_named(&part, category, name, true)?;
         Ok(used)
@@ -119,11 +127,7 @@ impl LibraryRoot {
                 fps.push(sexpr::parse(&std::fs::read_to_string(e.path())?)?);
             }
             let main_idx = fps.iter().position(|f| f.arg(0) == Some(&wanted_fp)).unwrap_or(0);
-            let model = part
-                .model_files
-                .iter()
-                .find(|m| has_ext(m, &["step", "stp"]))
-                .or_else(|| part.model_files.first());
+            let model = part.model_files.iter().find(|m| has_ext(m, &["step", "stp"])).or_else(|| part.model_files.first());
 
             let pretty = self.dir.join("footprints").join(format!("{cat}.pretty"));
             let shapes = self.dir.join("3dmodels").join(format!("{cat}.3dshapes"));
@@ -185,9 +189,8 @@ impl LibraryRoot {
             self.attach_sim(&mut symbol, sim, &sanitize(&part.mpn))?;
         } else {
             let settings = crate::settings::Settings::load();
-            if let Some(existing_lib) = property(&symbol, "Sim.Library")
-                .and_then(|raw| crate::spice::matcher::resolve_sim_library_path(raw, self))
-                .filter(|p| p.is_file())
+            if let Some(existing_lib) =
+                property(&symbol, "Sim.Library").and_then(|raw| crate::spice::matcher::resolve_sim_library_path(raw, self)).filter(|p| p.is_file())
             {
                 self.attach_sim(&mut symbol, &existing_lib, &sanitize(&part.mpn))?;
             } else if settings.sim.auto_sim

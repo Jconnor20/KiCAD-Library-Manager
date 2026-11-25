@@ -103,7 +103,11 @@ pub enum Field {
 
 /// Every field with its label and the header spellings it's detected from (lower case, letters and digits only; a trailing `*` matches any header starting so).
 pub const FIELDS: [(Field, &str, &[&str]); 11] = [
-    (Field::Mpn, "MPN", &["mpn", "manufacturerpartnumber", "manufacturerpart", "manufacturerpn", "mfrpartnumber", "mfrpartno", "mfrpn", "mfgpartnumber", "mfgpn", "partnumber"]),
+    (
+        Field::Mpn,
+        "MPN",
+        &["mpn", "manufacturerpartnumber", "manufacturerpart", "manufacturerpn", "mfrpartnumber", "mfrpartno", "mfrpn", "mfgpartnumber", "mfgpn", "partnumber"],
+    ),
     (Field::Manufacturer, "Manufacturer", &["manufacturer", "manufacturername", "mfr", "mfg", "maker"]),
     (Field::Lcsc, "LCSC", &["lcsc", "lcscpart", "lcscpartnumber", "lcscpartno", "lcscpn", "jlcpcbpart"]),
     (Field::DigiKey, "DigiKey", &["digikey", "digikeypart", "digikeypartnumber", "digikeypn", "dkpn"]),
@@ -141,7 +145,11 @@ pub fn detect(header: &[String]) -> Mapping {
 pub fn set_column(map: &mut Mapping, header: &[String], field: &str, column: &str) -> Result<()> {
     let f = FIELDS.iter().position(|(_, l, _)| l.eq_ignore_ascii_case(field)).with_context(|| format!("unknown field {field}"))?;
     let by_name = header.iter().position(|h| h.trim().eq_ignore_ascii_case(column.trim()));
-    map[f] = Some(by_name.or_else(|| column.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).filter(|n| *n < header.len())).with_context(|| format!("no column {column}"))?);
+    map[f] = Some(
+        by_name
+            .or_else(|| column.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).filter(|n| *n < header.len()))
+            .with_context(|| format!("no column {column}"))?,
+    );
     Ok(())
 }
 
@@ -176,9 +184,20 @@ impl Alt {
 /// The item for one row, or none when it has no MPN, no supplier number and no value.
 fn read_row(r: &[String], map: &Mapping) -> Option<Item> {
     let cell = |f: Field| map[f as usize].and_then(|i| r.get(i)).map(|s| s.trim().to_string()).unwrap_or_default();
-    let supplier_ids: Vec<_> = [Field::Lcsc, Field::DigiKey, Field::Mouser].into_iter().filter(|f| !cell(*f).is_empty()).map(|f| (FIELDS[f as usize].1.to_string(), cell(f))).collect();
+    let supplier_ids: Vec<_> = [Field::Lcsc, Field::DigiKey, Field::Mouser]
+        .into_iter()
+        .filter(|f| !cell(*f).is_empty())
+        .map(|f| (FIELDS[f as usize].1.to_string(), cell(f)))
+        .collect();
     let refs: Vec<String> = cell(Field::Refs).split([',', ';', ' ']).filter(|s| !s.is_empty()).map(String::from).collect();
-    let line = Line { value: cell(Field::Value), footprint: cell(Field::Footprint), mpn: cell(Field::Mpn), manufacturer: cell(Field::Manufacturer), supplier_ids, refs };
+    let line = Line {
+        value: cell(Field::Value),
+        footprint: cell(Field::Footprint),
+        mpn: cell(Field::Mpn),
+        manufacturer: cell(Field::Manufacturer),
+        supplier_ids,
+        refs,
+    };
     if line.mpn.is_empty() && line.supplier_ids.is_empty() && line.value.is_empty() {
         return None;
     }
@@ -247,7 +266,18 @@ pub fn flag(l: &Line) -> Option<Flag> {
             return Some(Flag::NonPart(w));
         }
         let text = format!("{} {}", l.value, l.footprint).to_ascii_lowercase().replace(['_', '-'], " ");
-        let by_text = [("test point", "test point"), ("testpoint", "test point"), ("fiducial", "fiducial"), ("mounting hole", "mounting hole"), ("mountinghole", "mounting hole"), ("npth", "mounting hole"), ("logo", "logo"), ("smd pad", "pad"), ("smdpad", "pad"), ("solder pad", "pad")];
+        let by_text = [
+            ("test point", "test point"),
+            ("testpoint", "test point"),
+            ("fiducial", "fiducial"),
+            ("mounting hole", "mounting hole"),
+            ("mountinghole", "mounting hole"),
+            ("npth", "mounting hole"),
+            ("logo", "logo"),
+            ("smd pad", "pad"),
+            ("smdpad", "pad"),
+            ("solder pad", "pad"),
+        ];
         return by_text.iter().find(|(k, _)| text.contains(k)).map(|(_, w)| Flag::NonPart(w));
     }
     if !l.supplier_ids.is_empty() {
@@ -340,7 +370,10 @@ pub fn load(path: &Path, sheet: Option<&str>, header: Option<usize>) -> Result<V
     let sheets = read_sheets(path)?;
     let (i, h) = match sheet {
         Some(n) => {
-            let i = sheets.iter().position(|s| s.name.eq_ignore_ascii_case(n.trim())).with_context(|| format!("no sheet {n} (sheets: {})", sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")))?;
+            let i = sheets
+                .iter()
+                .position(|s| s.name.eq_ignore_ascii_case(n.trim()))
+                .with_context(|| format!("no sheet {n} (sheets: {})", sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")))?;
             (i, header_of(&sheets[i].rows))
         }
         None => auto(&sheets),
@@ -359,7 +392,10 @@ pub fn load_manifests() -> Vec<Manifest> {
 #[derive(Clone, Debug)]
 pub enum Resolved {
     /// In the standard library: its category and `part_id`.
-    Stdlib { category: String, part_id: String },
+    Stdlib {
+        category: String,
+        part_id: String,
+    },
     Source(Part),
     /// Nothing found, plus the sources that failed.
     NotFound(Vec<String>),
@@ -420,7 +456,9 @@ pub fn resolve_by(line: &Line, by: By, manifests: &[Manifest], sources: &[Box<dy
     }
     if !line.mpn.is_empty() && !matches!(flag(line), Some(Flag::BadMpn(_))) || by == By::Lcsc {
         for m in manifests {
-            let hit = |r: &&crate::stdlib::Row| if by == By::Lcsc { lcsc.is_some_and(|id| r.get("lcsc").eq_ignore_ascii_case(id)) } else { same_mpn(r.get("mpn"), &line.mpn) };
+            let hit = |r: &&crate::stdlib::Row| {
+                if by == By::Lcsc { lcsc.is_some_and(|id| r.get("lcsc").eq_ignore_ascii_case(id)) } else { same_mpn(r.get("mpn"), &line.mpn) }
+            };
             if let Some(g) = m.groups().into_iter().find(|g| g.iter().any(hit)) {
                 return Resolved::Stdlib { category: m.category.clone(), part_id: g[0].get("part_id").into() };
             }
@@ -472,7 +510,14 @@ pub fn resolve_by(line: &Line, by: By, manifests: &[Manifest], sources: &[Box<dy
 
 /// Looks the lines up (each is `(index, line)`) on several threads, reporting progress; results come back in the same order
 /// (the lines a stop kept from being looked up are left out).
-pub fn resolve_all(lines: &[(usize, Line)], by: By, manifests: &[Manifest], sources: &[Box<dyn Source>], report: Report, ctl: &Control) -> Vec<(usize, Resolved)> {
+pub fn resolve_all(
+    lines: &[(usize, Line)],
+    by: By,
+    manifests: &[Manifest],
+    sources: &[Box<dyn Source>],
+    report: Report,
+    ctl: &Control,
+) -> Vec<(usize, Resolved)> {
     par_report("Looking up", lines, report, ctl, |(n, l)| (*n, resolve_by(l, by, manifests, sources)))
 }
 
@@ -490,7 +535,11 @@ pub struct Avail {
 pub fn fetch_cad(r: &Resolved, sources: &[Box<dyn Source>], work: &Path) -> Option<(Avail, Option<Part>)> {
     let Resolved::Source(found) = r else { return None };
     let fetched = sources.iter().find(|s| s.name() == found.source).and_then(|s| s.fetch(found, work).ok().flatten());
-    let avail = fetched.as_ref().map_or_else(Avail::default, |p| Avail { symbol: p.symbol_file.is_some(), footprint: !p.footprint_files.is_empty(), model: !p.model_files.is_empty() });
+    let avail = fetched.as_ref().map_or_else(Avail::default, |p| Avail {
+        symbol: p.symbol_file.is_some(),
+        footprint: !p.footprint_files.is_empty(),
+        model: !p.model_files.is_empty(),
+    });
     Some((avail, fetched))
 }
 
@@ -545,33 +594,52 @@ fn target_roots(target: Target, global: Option<&LibraryRoot>, project: Option<&L
 /// The whole run is one snapshot per library (one entry in History). A stop through `ctl` keeps what was imported, or with
 /// undo puts every library back from that snapshot.
 #[allow(clippy::too_many_arguments)]
-pub fn generate(resolved: &[Resolved], alts: &[Vec<Alt>], prefetched: &[Option<Part>], sources: &[Box<dyn Source>], global: Option<&LibraryRoot>, project: Option<&LibraryRoot>, opts: &Options, settings: &crate::settings::Settings, work: &Path, report: Report, ctl: &Control) -> Result<Generated> {
+pub fn generate(
+    resolved: &[Resolved],
+    alts: &[Vec<Alt>],
+    prefetched: &[Option<Part>],
+    sources: &[Box<dyn Source>],
+    global: Option<&LibraryRoot>,
+    project: Option<&LibraryRoot>,
+    opts: &Options,
+    settings: &crate::settings::Settings,
+    work: &Path,
+    report: Report,
+    ctl: &Control,
+) -> Result<Generated> {
     let roots = target_roots(opts.target, global, project);
     let primary = roots.first().context("no library to write into")?;
     let mut lines: Vec<Done> = resolved.iter().map(|_| Done::default()).collect();
     crate::download::set_abort(false);
-    let held = roots.iter().filter(|r| r.dir.is_dir()).map(|r| crate::snapshot::guard_id(r, "BOM import").map(|(g, id)| (g, r, id))).collect::<Result<Vec<_>>>()?;
+    let held =
+        roots.iter().filter(|r| r.dir.is_dir()).map(|r| crate::snapshot::guard_id(r, "BOM import").map(|(g, id)| (g, r, id))).collect::<Result<Vec<_>>>()?;
     let mut added: Vec<(String, String)> = vec![];
 
     // Imports one downloaded part; runs on this thread, which holds the snapshots.
-    let mut import_one = |lines: &mut Vec<Done>, i: usize, found: &Part, fetched: Result<Option<Part>>| match fetched.map(|p| p.unwrap_or_else(|| found.clone())) {
-        Ok(mut p) if p.symbol_file.is_some() => {
-            p.source = found.source.clone();
-            p.mpn = settings.rules.normalise_mpn(&p.mpn);
-            let cat = sanitize(&opts.category.clone().unwrap_or_else(|| settings.rules.category_for(&p)));
-            let name = sanitize(&settings.rules.name_for(&p, &cat));
-            let plan = batch::plan_with(vec![Op::ImportPart { part: p, category: opts.category.clone(), target: opts.target, overwrite: opts.overwrite }], global, project, &settings.rules);
-            match batch::apply(&plan, |_, _| {}).into_iter().find_map(|res| res.error) {
-                Some(e) => lines[i].error = Some(e),
-                None => {
-                    lines[i].library_part = Some(format!("{}:{name}", primary.nickname(&cat)));
-                    added.push((cat, name));
+    let mut import_one =
+        |lines: &mut Vec<Done>, i: usize, found: &Part, fetched: Result<Option<Part>>| match fetched.map(|p| p.unwrap_or_else(|| found.clone())) {
+            Ok(mut p) if p.symbol_file.is_some() => {
+                p.source = found.source.clone();
+                p.mpn = settings.rules.normalise_mpn(&p.mpn);
+                let cat = sanitize(&opts.category.clone().unwrap_or_else(|| settings.rules.category_for(&p)));
+                let name = sanitize(&settings.rules.name_for(&p, &cat));
+                let plan = batch::plan_with(
+                    vec![Op::ImportPart { part: p, category: opts.category.clone(), target: opts.target, overwrite: opts.overwrite }],
+                    global,
+                    project,
+                    &settings.rules,
+                );
+                match batch::apply(&plan, |_, _| {}).into_iter().find_map(|res| res.error) {
+                    Some(e) => lines[i].error = Some(e),
+                    None => {
+                        lines[i].library_part = Some(format!("{}:{name}", primary.nickname(&cat)));
+                        added.push((cat, name));
+                    }
                 }
             }
-        }
-        Ok(_) => lines[i].error = Some(format!("{} has no CAD files for {}", found.source, found.mpn)),
-        Err(e) => lines[i].error = Some(format!("{e:#}")),
-    };
+            Ok(_) => lines[i].error = Some(format!("{} has no CAD files for {}", found.source, found.mpn)),
+            Err(e) => lines[i].error = Some(format!("{e:#}")),
+        };
 
     let is_source = |i: usize| matches!(resolved[i], Resolved::Source(_));
     let total = (0..resolved.len()).filter(|&i| is_source(i)).count();
@@ -661,7 +729,17 @@ pub fn generate(resolved: &[Resolved], alts: &[Vec<Alt>], prefetched: &[Option<P
 
 /// The (category, symbol name) of each part imported is added to `added`.
 #[allow(clippy::too_many_arguments)]
-fn import_alternatives(lines: &mut [Done], alts: &[Vec<Alt>], sources: &[Box<dyn Source>], (global, project): (Option<&LibraryRoot>, Option<&LibraryRoot>), primary: &LibraryRoot, opts: &Options, settings: &crate::settings::Settings, work: &Path, added: &mut Vec<(String, String)>) {
+fn import_alternatives(
+    lines: &mut [Done],
+    alts: &[Vec<Alt>],
+    sources: &[Box<dyn Source>],
+    (global, project): (Option<&LibraryRoot>, Option<&LibraryRoot>),
+    primary: &LibraryRoot,
+    opts: &Options,
+    settings: &crate::settings::Settings,
+    work: &Path,
+    added: &mut Vec<(String, String)>,
+) {
     let (mut ops, mut pending) = (vec![], vec![]);
     for (i, list) in alts.iter().enumerate().take(lines.len()) {
         if lines[i].library_part.is_none() {
@@ -669,7 +747,12 @@ fn import_alternatives(lines: &mut [Done], alts: &[Vec<Alt>], sources: &[Box<dyn
         }
         for (j, a) in list.iter().enumerate() {
             let line = Line { mpn: a.mpn.clone(), supplier_ids: vec![("LCSC".into(), a.lcsc.clone())], ..Line::default() };
-            let mut alt = crate::store::Alternative { mpn: a.mpn.clone(), manufacturer: String::new(), supplier_ids: line.supplier_ids.clone(), role: "substitute".into() };
+            let mut alt = crate::store::Alternative {
+                mpn: a.mpn.clone(),
+                manufacturer: String::new(),
+                supplier_ids: line.supplier_ids.clone(),
+                role: "substitute".into(),
+            };
             let mut note = format!("{} not found at the sources", a.lcsc);
             if let Resolved::Source(found) = resolve_by(&line, By::Lcsc, &[], sources) {
                 alt.mpn = settings.rules.normalise_mpn(&found.mpn);
@@ -743,7 +826,7 @@ mod tests {
         let stopped = Control(AtomicU8::new(STOP));
         assert!(par_report("t", &items, &|_, _, _| {}, &stopped, |n| *n).is_empty(), "a stopped run starts nothing");
     }
-    
+
     fn h(s: &str) -> Vec<String> {
         s.split(',').map(String::from).collect()
     }
@@ -772,7 +855,9 @@ mod tests {
 
     #[test]
     fn dropbear_style_headers_and_alternatives() {
-        let m = detect(&h("Line,Current KiCad refs,Proposed designators,Qty,Value,KiCad footprint (as drawn),Manufacturer,MPN,LCSC #,Alternative 1 (unverified unless noted),Alternative 2 (unverified unless noted)"));
+        let m = detect(&h(
+            "Line,Current KiCad refs,Proposed designators,Qty,Value,KiCad footprint (as drawn),Manufacturer,MPN,LCSC #,Alternative 1 (unverified unless noted),Alternative 2 (unverified unless noted)",
+        ));
         let at = |f: Field| m[f as usize];
         assert_eq!((at(Field::Refs), at(Field::Footprint), at(Field::Lcsc), at(Field::Alt1), at(Field::Alt2)), (Some(2), Some(5), Some(8), Some(9), Some(10)));
         let a = Alt::parse("TPS62933FDRLR (forced-PWM) C5219272 - listing checked 2026-11-08").unwrap();
@@ -826,7 +911,8 @@ mod tests {
         )
         .unwrap();
         // The stdlib MPN also exists at the source; the stdlib must win without a search.
-        let stub = Stub { parts: vec![part("CRCW060310K0FKEA", "Vishay", "C9"), part("LM358", "TI", "C7950"), part("NE555", "TI", "C1"), part("NE555", "ST", "C2")] };
+        let stub =
+            Stub { parts: vec![part("CRCW060310K0FKEA", "Vishay", "C9"), part("LM358", "TI", "C7950"), part("NE555", "TI", "C1"), part("NE555", "ST", "C2")] };
         let sources: Vec<Box<dyn Source>> = vec![Box::new(stub)];
         match resolve(&line("crcw060310k0fkea"), std::slice::from_ref(&manifest), &sources) {
             Resolved::Stdlib { category, part_id } => assert_eq!((category.as_str(), part_id.as_str()), ("Resistors", "R_10k")),
@@ -855,7 +941,11 @@ mod tests {
         use std::io::Write;
         let cell = |r: &str, t: &str| format!(r#"<c r="{r}" t="inlineStr"><is><t>{t}</t></is></c>"#);
         let sheet = |rows: &[&[(&str, &str)]]| {
-            let body: String = rows.iter().enumerate().map(|(n, r)| format!(r#"<row r="{}">{}</row>"#, n + 1, r.iter().map(|(a, t)| cell(a, t)).collect::<String>())).collect();
+            let body: String = rows
+                .iter()
+                .enumerate()
+                .map(|(n, r)| format!(r#"<row r="{}">{}</row>"#, n + 1, r.iter().map(|(a, t)| cell(a, t)).collect::<String>()))
+                .collect();
             format!(r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{body}</sheetData></worksheet>"#)
         };
         let files = [
@@ -917,7 +1007,12 @@ mod tests {
             std::fs::create_dir_all(work)?;
             let sym = work.join("p.kicad_sym");
             let name = &part.mpn;
-            std::fs::write(&sym, format!(r#"(kicad_symbol_lib (version 20241209) (generator "t") (symbol "{name}" (property "Reference" "U" (at 0 0 0)) (property "Value" "{name}" (at 0 0 0)) (symbol "{name}_1_1" (rectangle (start -2 2) (end 2 -2)) (pin passive line (at -4 0 0) (length 2) (name "1") (number "1")))))"#))?;
+            std::fs::write(
+                &sym,
+                format!(
+                    r#"(kicad_symbol_lib (version 20241209) (generator "t") (symbol "{name}" (property "Reference" "U" (at 0 0 0)) (property "Value" "{name}" (at 0 0 0)) (symbol "{name}_1_1" (rectangle (start -2 2) (end 2 -2)) (pin passive line (at -4 0 0) (length 2) (name "1") (number "1")))))"#
+                ),
+            )?;
             Ok(Some(Part { symbol_file: Some(sym), ..part.clone() }))
         }
     }
@@ -933,7 +1028,20 @@ mod tests {
         let names: Vec<String> = (0..count).map(|i| format!("P{i}")).collect();
         let resolved: Vec<Resolved> = names.iter().map(|n| Resolved::Source(Part { mpn: n.clone(), source: "Fake".into(), ..Part::default() })).collect();
         let opts = Options { target: Target::Global, category: Some("Test".into()), overwrite: false, alternatives: false };
-        let g = generate(&resolved, &vec![vec![]; count], &[], &sources, Some(&root), None, &opts, &crate::settings::Settings::default(), &base.join("work"), &|_, _, _| {}, &ctl).unwrap();
+        let g = generate(
+            &resolved,
+            &vec![vec![]; count],
+            &[],
+            &sources,
+            Some(&root),
+            None,
+            &opts,
+            &crate::settings::Settings::default(),
+            &base.join("work"),
+            &|_, _, _| {},
+            &ctl,
+        )
+        .unwrap();
         let in_lib = names.iter().filter(|n| root.has_part("Test", n)).count();
         (g, in_lib)
     }

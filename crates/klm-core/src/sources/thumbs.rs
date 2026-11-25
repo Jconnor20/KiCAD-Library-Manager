@@ -15,7 +15,13 @@ fn dir() -> Option<PathBuf> {
 fn file_name(url: &str) -> String {
     let h = url.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
     // The extension tells the GUI's image loader which decoder to use.
-    let ext = url.split(['?', '#']).next().and_then(|u| u.rsplit_once('.')).map(|(_, e)| e.to_ascii_lowercase()).filter(|e| matches!(e.as_str(), "jpg" | "jpeg" | "png")).unwrap_or_else(|| "jpg".into());
+    let ext = url
+        .split(['?', '#'])
+        .next()
+        .and_then(|u| u.rsplit_once('.'))
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .filter(|e| matches!(e.as_str(), "jpg" | "jpeg" | "png"))
+        .unwrap_or_else(|| "jpg".into());
     format!("{h:016x}.{ext}")
 }
 

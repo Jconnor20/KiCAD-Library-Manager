@@ -42,7 +42,15 @@ fn cred(source: &str, field: &str) -> String {
 }
 
 fn token(c: &Client, url: &str, id: &str, secret: &str) -> String {
-    let r: Value = c.post(url).form(&[("grant_type", "client_credentials"), ("client_id", id), ("client_secret", secret)]).send().unwrap().error_for_status().expect("token request").json().unwrap();
+    let r: Value = c
+        .post(url)
+        .form(&[("grant_type", "client_credentials"), ("client_id", id), ("client_secret", secret)])
+        .send()
+        .unwrap()
+        .error_for_status()
+        .expect("token request")
+        .json()
+        .unwrap();
     r["access_token"].as_str().unwrap().to_string()
 }
 
@@ -77,7 +85,8 @@ fn live_record_digikey() {
     save("digikey_categories.json", &cats, &secrets);
     // Resistors category id, from the tree just fetched.
     let rid = cats["Categories"].as_array().unwrap().iter().find(|c| c["Name"] == "Resistors").map(|c| c["CategoryId"].clone()).unwrap_or(json!(2));
-    let by_cat = post(json!({ "Keywords": "", "Limit": 3, "Offset": 0, "FilterOptionsRequest": { "CategoryFilter": [{ "Id": rid.to_string().trim_matches('"') }] } }));
+    let by_cat =
+        post(json!({ "Keywords": "", "Limit": 3, "Offset": 0, "FilterOptionsRequest": { "CategoryFilter": [{ "Id": rid.to_string().trim_matches('"') }] } }));
     save("digikey_search_category.json", &by_cat, &secrets);
 }
 
@@ -85,7 +94,12 @@ fn live_record_digikey() {
 #[ignore]
 fn live_record_mouser() {
     let key = cred("Mouser", "api_key");
-    let r = http().post("https://api.mouser.com/api/v1/search/keyword").query(&[("apiKey", &key)]).json(&json!({ "SearchByKeywordRequest": { "keyword": "LM358", "records": 5, "startingRecord": 0 } })).send().unwrap();
+    let r = http()
+        .post("https://api.mouser.com/api/v1/search/keyword")
+        .query(&[("apiKey", &key)])
+        .json(&json!({ "SearchByKeywordRequest": { "keyword": "LM358", "records": 5, "startingRecord": 0 } }))
+        .send()
+        .unwrap();
     save("mouser_search_LM358.json", &ok(r), &[key]);
 }
 
@@ -98,9 +112,13 @@ fn live_record_nexar() {
     let secrets = [id, secret, tok.clone()];
     let gql = |q: &str| ok(c.post("https://api.nexar.com/graphql").bearer_auth(&tok).json(&json!({ "query": q })).send().unwrap());
     // The same query text the app sends, with the term inlined.
-    let search = gql("query { supSearch(q: \"LM358\", limit: 3) { results { part { mpn shortDescription totalAvail manufacturer { name } category { name } bestDatasheet { url } bestImage { url } specs { attribute { name shortname } displayValue } sellers { company { name } offers { sku moq packaging factoryLeadDays factoryPackQuantity orderMultiple multipackQuantity prices { quantity price currency } } } } } } }");
+    let search = gql(
+        "query { supSearch(q: \"LM358\", limit: 3) { results { part { mpn shortDescription totalAvail manufacturer { name } category { name } bestDatasheet { url } bestImage { url } specs { attribute { name shortname } displayValue } sellers { company { name } offers { sku moq packaging factoryLeadDays factoryPackQuantity orderMultiple multipackQuantity prices { quantity price currency } } } } } } }",
+    );
     save("nexar_quota_exceeded.json", &search, &secrets);
-    let schema = gql("query { a: __type(name: \"SupOffer\") { fields { name } } b: __type(name: \"SupPart\") { fields { name } } c: __type(name: \"SupCategory\") { fields { name } } }");
+    let schema = gql(
+        "query { a: __type(name: \"SupOffer\") { fields { name } } b: __type(name: \"SupPart\") { fields { name } } c: __type(name: \"SupCategory\") { fields { name } } }",
+    );
     save("nexar_schema_fields.json", &schema, &secrets);
     let cats = gql("query { supCategories { id name parentId numParts path } }");
     save("nexar_categories.json", &cats, &secrets);
@@ -109,7 +127,11 @@ fn live_record_nexar() {
 #[test]
 #[ignore]
 fn live_record_lcsc() {
-    let r = http().post("https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/selectSmtComponentList").json(&json!({"keyword": "LM358", "currentPage": 1, "pageSize": 5})).send().unwrap();
+    let r = http()
+        .post("https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/selectSmtComponentList")
+        .json(&json!({"keyword": "LM358", "currentPage": 1, "pageSize": 5}))
+        .send()
+        .unwrap();
     save("jlcpcb_search_LM358.json", &ok(r), &[]);
 }
 

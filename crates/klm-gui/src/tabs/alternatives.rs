@@ -1,5 +1,5 @@
-use eframe::egui;
 use crate::{AppCtx, Msg as AppMsg, new_work_dir};
+use eframe::egui;
 use klm_core::alternatives::{self, Filters, LibPart, ROLES};
 use klm_core::library::LibraryRoot;
 use klm_core::part::Part;
@@ -54,9 +54,10 @@ impl AlternativesPanel {
                         .enumerate()
                         .map(|(n, i)| {
                             // A stored role wins; otherwise the first part is the suggested preferred one.
-                            let stored = store.as_ref().and_then(|s| alternatives::alternatives_of(s, &parts[i].mpn).ok()).and_then(|grp| {
-                                grp.into_iter().find(|a| klm_core::matching::same_mpn(&a.mpn, &parts[i].mpn)).map(|a| a.role)
-                            });
+                            let stored = store
+                                .as_ref()
+                                .and_then(|s| alternatives::alternatives_of(s, &parts[i].mpn).ok())
+                                .and_then(|grp| grp.into_iter().find(|a| klm_core::matching::same_mpn(&a.mpn, &parts[i].mpn)).map(|a| a.role));
                             confirmed |= stored.is_some();
                             (i, stored.unwrap_or_else(|| if n == 0 { "preferred" } else { "substitute" }.into()), true)
                         })
@@ -67,7 +68,19 @@ impl AlternativesPanel {
             let _ = tx.send((parts, groups));
             ctx.request_repaint();
         });
-        Self { root: root.clone(), parts: Vec::new(), groups: Vec::new(), rx: Some(rx), base: 0, open_on, online: Vec::new(), searching: None, manual: Default::default(), filters: Filters::default(), auto_search: false }
+        Self {
+            root: root.clone(),
+            parts: Vec::new(),
+            groups: Vec::new(),
+            rx: Some(rx),
+            base: 0,
+            open_on,
+            online: Vec::new(),
+            searching: None,
+            manual: Default::default(),
+            filters: Filters::default(),
+            auto_search: false,
+        }
     }
 
     /// For a BOM line that needs another part: online results narrowed to JLCPCB stock and the same package, searched at once.
@@ -82,15 +95,20 @@ impl AlternativesPanel {
         ui.heading("Alternates from outside the library");
         ui.horizontal(|ui| {
             let label = ui.label("For part");
-            egui::ComboBox::from_id_salt("alt_base").selected_text(format!("{} ({})", base.mpn, base.category)).width(320.0).show_ui(ui, |ui| {
-                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                    for (i, p) in self.parts.iter().enumerate() {
-                        if ui.selectable_label(i == self.base, format!("{} ({})", p.mpn, p.category)).clicked() {
-                            (self.base, self.online) = (i, Vec::new());
+            egui::ComboBox::from_id_salt("alt_base")
+                .selected_text(format!("{} ({})", base.mpn, base.category))
+                .width(320.0)
+                .show_ui(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                        for (i, p) in self.parts.iter().enumerate() {
+                            if ui.selectable_label(i == self.base, format!("{} ({})", p.mpn, p.category)).clicked() {
+                                (self.base, self.online) = (i, Vec::new());
+                            }
                         }
-                    }
-                });
-            }).response.labelled_by(label.id);
+                    });
+                })
+                .response
+                .labelled_by(label.id);
         });
         ui.horizontal(|ui| {
             let can = self.searching.is_none() && !cx.sources.is_empty();
@@ -113,7 +131,8 @@ impl AlternativesPanel {
                 ui.spinner();
             }
             ui.checkbox(&mut self.filters.same_package, "Same package").on_hover_text("Only parts whose package matches this part's footprint");
-            ui.checkbox(&mut self.filters.at_jlcpcb, "Available at JLCPCB").on_hover_text("Only parts JLCPCB lists with stock (LCSC's search; needs LCSC enabled), basic ones first");
+            ui.checkbox(&mut self.filters.at_jlcpcb, "Available at JLCPCB")
+                .on_hover_text("Only parts JLCPCB lists with stock (LCSC's search; needs LCSC enabled), basic ones first");
         });
         if self.filters.at_jlcpcb && !cx.sources.iter().any(|s| s.name() == "LCSC") {
             ui.weak("Enable LCSC in Settings: it is the source that knows what JLCPCB stocks.");

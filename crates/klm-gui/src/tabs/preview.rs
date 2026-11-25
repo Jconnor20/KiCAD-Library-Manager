@@ -85,7 +85,18 @@ impl PreviewPanel {
             let _ = itx.send(check());
             repaint.request_repaint();
         });
-        Self { ctx: ctx.clone(), src, slots: [Slot::Loading, Slot::Loading, Slot::Loading], issues: None, zoomed: None, symbols: vec![], symbol: None, tx, rx, issues_rx }
+        Self {
+            ctx: ctx.clone(),
+            src,
+            slots: [Slot::Loading, Slot::Loading, Slot::Loading],
+            issues: None,
+            zoomed: None,
+            symbols: vec![],
+            symbol: None,
+            tx,
+            rx,
+            issues_rx,
+        }
     }
 
     /// Draws another symbol of the file.

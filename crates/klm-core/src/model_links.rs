@@ -57,7 +57,8 @@ fn resolve(uri: &str, root: &LibraryRoot) -> Option<PathBuf> {
         let Some(start) = path.find("${") else { break };
         let end = start + path[start..].find('}')?;
         let var = &path[start + 2..end];
-        let value = std::env::var(var).ok().or_else(|| vars.get(var).cloned()).or_else(|| kicad_env::default_var_dir(var).map(|p| p.to_string_lossy().into_owned()))?;
+        let value =
+            std::env::var(var).ok().or_else(|| vars.get(var).cloned()).or_else(|| kicad_env::default_var_dir(var).map(|p| p.to_string_lossy().into_owned()))?;
         path.replace_range(start..=end, &value);
     }
     if path.contains("${") || path.starts_with("http") || path.starts_with("kicad-embed:") {
@@ -226,7 +227,8 @@ pub fn plan(roots: &[LibraryRoot], project: Option<&Path>) -> Result<Vec<Repair>
                 let Some((source, index, pretty)) = footprints.get(id) else { continue };
                 let root = &roots[*index];
                 let models = &model_lists[*index];
-                let reference = property(&fp, "Reference").or_else(|| fp.children("fp_text").find(|t| t.arg(0) == Some("reference")).and_then(|t| t.arg(1))).unwrap_or(id);
+                let reference =
+                    property(&fp, "Reference").or_else(|| fp.children("fp_text").find(|t| t.arg(0) == Some("reference")).and_then(|t| t.arg(1))).unwrap_or(id);
                 // A project may override a global nickname with a library outside KLM's managed files.
                 let nick = id.split_once(':').map(|p| p.0).unwrap_or_default();
                 if let Some(entry) = table.as_ref().and_then(|t| t.children("lib").find(|l| l.child("name").and_then(|n| n.arg(0)) == Some(nick))) {
@@ -290,7 +292,11 @@ mod tests {
         std::fs::write(&model, "STEP fixture").unwrap();
         let fp = root.dir.join("footprints/ICs.pretty/PART.kicad_mod");
         let uri = model.to_string_lossy().replace('\\', "/");
-        std::fs::write(&fp, format!(r#"(footprint "PART" (pad "1" smd rect (at 2 3)) (model "{uri}" (offset (xyz 1 2 3)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 90))))"#)).unwrap();
+        std::fs::write(
+            &fp,
+            format!(r#"(footprint "PART" (pad "1" smd rect (at 2 3)) (model "{uri}" (offset (xyz 1 2 3)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 90))))"#),
+        )
+        .unwrap();
         (dir, root, model)
     }
 
@@ -345,7 +351,11 @@ mod tests {
         let stale = r#"(footprint "PART" (model "Z:/old/part.step" (offset (xyz 7 8 9)) (rotate (xyz 10 20 30))))"#;
         std::fs::write(&fp, stale).unwrap();
         let board = dir.join("test.kicad_pcb");
-        std::fs::write(&board, format!(r#"(kicad_pcb (footprint "KLM_ICs:PART" (property "Reference" "U1") (model "Z:/old/part.step" (offset (xyz 4 5 6)))))"#)).unwrap();
+        std::fs::write(
+            &board,
+            format!(r#"(kicad_pcb (footprint "KLM_ICs:PART" (property "Reference" "U1") (model "Z:/old/part.step" (offset (xyz 4 5 6)))))"#),
+        )
+        .unwrap();
         let fixes = plan(&[root], Some(&dir)).unwrap();
         assert_eq!(fixes.len(), 2);
         assert!(fixes[0].after.contains("(xyz 7 8 9)"));

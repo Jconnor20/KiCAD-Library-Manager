@@ -67,7 +67,9 @@ impl Page {
     fn subs(self) -> &'static [(&'static str, fn() -> Tab)] {
         match self {
             Page::Import => &[("Parts", || Tab::Import), ("From a BOM", || Tab::BomImport)],
-            Page::Standards => &[("Classes", || Tab::Classes), ("Create", || Tab::Footprint), ("Library health", || Tab::Health), ("KiCad tables", || Tab::Cleanup)],
+            Page::Standards => {
+                &[("Classes", || Tab::Classes), ("Create", || Tab::Footprint), ("Library health", || Tab::Health), ("KiCad tables", || Tab::Cleanup)]
+            }
             _ => &[],
         }
     }
@@ -103,7 +105,10 @@ impl Omni {
     /// Reads the libraries' parts and the recent searches; called when the box takes focus.
     fn load(&mut self, cx: &crate::AppCtx) {
         self.parts = cx.roots().iter().flat_map(|r| r.list_parts()).map(|p| (p.mpn, p.manufacturer, p.category)).collect();
-        self.recent = klm_core::store::Store::default_path().and_then(|p| klm_core::store::Store::open(&p).ok()).and_then(|s| s.recent_searches(8).ok()).unwrap_or_default();
+        self.recent = klm_core::store::Store::default_path()
+            .and_then(|p| klm_core::store::Store::open(&p).ok())
+            .and_then(|s| s.recent_searches(8).ok())
+            .unwrap_or_default();
     }
 }
 
@@ -225,10 +230,18 @@ impl App {
         edge(ui, top.response.rect, Side::Bottom);
         let status = egui::Panel::bottom("status").exact_size(STATUS_H).frame(bar).show(ui, |ui| self.status(ui));
         edge(ui, status.response.rect, Side::Top);
-        let rail = egui::Panel::left("rail").exact_size(RAIL_W).resizable(false).frame(egui::Frame::new().fill(pal.rail).inner_margin(Margin::symmetric(4, 8))).show(ui, |ui| self.rail(ui));
+        let rail = egui::Panel::left("rail")
+            .exact_size(RAIL_W)
+            .resizable(false)
+            .frame(egui::Frame::new().fill(pal.rail).inner_margin(Margin::symmetric(4, 8)))
+            .show(ui, |ui| self.rail(ui));
         edge(ui, rail.response.rect, Side::Right);
         if self.log_open {
-            let log = egui::Panel::bottom("log").resizable(true).default_size(120.0).frame(egui::Frame::new().fill(pal.panel).inner_margin(Margin::same(8))).show(ui, |ui| self.log_drawer(ui));
+            let log = egui::Panel::bottom("log")
+                .resizable(true)
+                .default_size(120.0)
+                .frame(egui::Frame::new().fill(pal.panel).inner_margin(Margin::same(8)))
+                .show(ui, |ui| self.log_drawer(ui));
             edge(ui, log.response.rect, Side::Top);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(pal.bg).inner_margin(Margin::symmetric(12, 10))).show(ui, |ui| self.page(ui));
@@ -312,7 +325,10 @@ impl App {
     fn omnibox(&mut self, ui: &mut Ui) {
         let id = egui::Id::unique("omni_field");
         let pressed = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::K));
-        let r = ui.add_sized([420.0f32.min(ui.available_width() - 160.0).max(160.0), 30.0], egui::TextEdit::singleline(&mut self.omni.text).id(id).hint_text("Search parts, pages, actions…  Ctrl K").margin(Margin::symmetric(10, 6)));
+        let r = ui.add_sized(
+            [420.0f32.min(ui.available_width() - 160.0).max(160.0), 30.0],
+            egui::TextEdit::singleline(&mut self.omni.text).id(id).hint_text("Search parts, pages, actions…  Ctrl K").margin(Margin::symmetric(10, 6)),
+        );
         if pressed {
             r.request_focus();
         }
@@ -330,7 +346,8 @@ impl App {
         if r.has_focus() {
             let n = self.hits().len();
             let o = &mut self.omni;
-            let (down, up) = ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)));
+            let (down, up) =
+                ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)));
             if down && o.sel + 1 < n {
                 o.sel += 1;
             }
@@ -358,7 +375,13 @@ impl App {
         let mut out = vec![];
         if !q.is_empty() {
             for (mpn, maker, cat) in self.omni.parts.iter().filter(|(m, mk, _)| has(m) || has(mk)).take(5) {
-                out.push(Hit { section: "In your library", title: mpn.clone(), detail: format!("{maker} · {cat}"), hint: "Library", cmd: Cmd::Part(mpn.clone()) });
+                out.push(Hit {
+                    section: "In your library",
+                    title: mpn.clone(),
+                    detail: format!("{maker} · {cat}"),
+                    hint: "Library",
+                    cmd: Cmd::Part(mpn.clone()),
+                });
             }
         }
         for s in self.omni.recent.iter().filter(|s| has(s)).take(3) {
@@ -366,7 +389,13 @@ impl App {
         }
         if !q.is_empty() && !self.cx.sources.is_empty() {
             let names: Vec<&str> = self.cx.sources.iter().map(|s| s.name()).collect();
-            out.push(Hit { section: "Suppliers", title: format!("Search {} for \"{}\"", names.join(", "), self.omni.text.trim()), detail: String::new(), hint: "Search", cmd: Cmd::Search(self.omni.text.trim().to_string()) });
+            out.push(Hit {
+                section: "Suppliers",
+                title: format!("Search {} for \"{}\"", names.join(", "), self.omni.text.trim()),
+                detail: String::new(),
+                hint: "Search",
+                cmd: Cmd::Search(self.omni.text.trim().to_string()),
+            });
         }
         let mut pages: Vec<(String, Cmd)> = Page::ALL.iter().map(|p| (format!("Go to {}", p.title()), Cmd::Go(p.first_tab()))).collect();
         pages.push(("Go to BOM to library".into(), Cmd::Go(Tab::BomImport)));
@@ -439,9 +468,21 @@ impl App {
                     }
                     let font = if matches!(h.cmd, Cmd::Part(_)) { egui::FontId::monospace(13.0) } else { egui::FontId::proportional(13.0) };
                     let t = ui.painter().text(rect.left_center() + Vec2::new(14.0, 0.0), egui::Align2::LEFT_CENTER, &h.title, font, pal.fg);
-                    ui.painter().text(egui::pos2(t.right() + 10.0, rect.center().y), egui::Align2::LEFT_CENTER, &h.detail, egui::FontId::proportional(12.0), pal.muted);
+                    ui.painter().text(
+                        egui::pos2(t.right() + 10.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        &h.detail,
+                        egui::FontId::proportional(12.0),
+                        pal.muted,
+                    );
                     let hint = if i == sel { "Enter" } else { h.hint };
-                    ui.painter().text(rect.right_center() - Vec2::new(14.0, 0.0), egui::Align2::RIGHT_CENTER, hint, egui::FontId::proportional(11.5), pal.muted);
+                    ui.painter().text(
+                        rect.right_center() - Vec2::new(14.0, 0.0),
+                        egui::Align2::RIGHT_CENTER,
+                        hint,
+                        egui::FontId::proportional(11.5),
+                        pal.muted,
+                    );
                     if resp.clicked() {
                         chosen = Some(i);
                     }
@@ -548,7 +589,9 @@ impl App {
                         self.log_open = true;
                     }
                 } else if warns > 0 {
-                    ui.label(RichText::new(format!("⚠ {warns} warning{}", if warns == 1 { "" } else { "s" })).size(12.0).color(Level::Warn.color(ui.visuals())));
+                    ui.label(
+                        RichText::new(format!("⚠ {warns} warning{}", if warns == 1 { "" } else { "s" })).size(12.0).color(Level::Warn.color(ui.visuals())),
+                    );
                 }
             });
         });
@@ -559,7 +602,9 @@ impl App {
         let (all, warns, errors) = (self.cx.log.lines.len(), self.cx.log.warnings(), self.cx.log.errors());
         ui.horizontal(|ui| {
             ui.label(RichText::new("Log").strong().size(14.0));
-            for (text, level) in [(format!("All {all}"), None), (format!("Warnings {warns}"), Some(Level::Warn)), (format!("Errors {errors}"), Some(Level::Error))] {
+            for (text, level) in
+                [(format!("All {all}"), None), (format!("Warnings {warns}"), Some(Level::Warn)), (format!("Errors {errors}"), Some(Level::Error))]
+            {
                 if chip(ui, &text, self.omni.log_filter == level).clicked() {
                     self.omni.log_filter = level;
                 }

@@ -40,7 +40,9 @@ fn port_pin(n: &str) -> bool {
     let mut c = r.chars();
     match c.next() {
         Some(port) if port.is_ascii_uppercase() => r.len() > 1 && c.all(|d| d.is_ascii_digit()),
-        Some(d) if d.is_ascii_digit() => r.split(['.', '_']).count() == 2 && r.split(['.', '_']).all(|s| !s.is_empty() && s.chars().all(|d| d.is_ascii_digit())),
+        Some(d) if d.is_ascii_digit() => {
+            r.split(['.', '_']).count() == 2 && r.split(['.', '_']).all(|s| !s.is_empty() && s.chars().all(|d| d.is_ascii_digit()))
+        }
         _ => false,
     }
 }
@@ -115,7 +117,8 @@ mod tests {
         let types: Vec<_> = ic.child("symbol").unwrap().children("pin").map(|p| p.arg(0).unwrap()).collect();
         assert_eq!(types, ["power_in", "output", "unspecified"]);
 
-        let mut r = parse(r#"(symbol "R" (symbol "R_1_1" (pin unspecified line (name "1") (number "1")) (pin unspecified line (name "2") (number "2"))))"#).unwrap();
+        let mut r =
+            parse(r#"(symbol "R" (symbol "R_1_1" (pin unspecified line (name "1") (number "1")) (pin unspecified line (name "2") (number "2"))))"#).unwrap();
         fill(&mut r, "Resistors");
         assert!(r.child("symbol").unwrap().children("pin").all(|p| p.arg(0) == Some("passive")));
         assert_eq!(fill(&mut r, "Resistors"), None, "nothing left to do");

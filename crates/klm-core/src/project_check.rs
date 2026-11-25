@@ -72,7 +72,8 @@ impl Copy {
             .map(|e| e.path())
             .filter(|p| p.is_file())
             .collect();
-        let pro = files.iter().find(|p| p.extension().is_some_and(|e| e == "kicad_pro")).with_context(|| format!("no .kicad_pro in {}", project_dir.display()))?;
+        let pro =
+            files.iter().find(|p| p.extension().is_some_and(|e| e == "kicad_pro")).with_context(|| format!("no .kicad_pro in {}", project_dir.display()))?;
         let stem = pro.file_stem().unwrap_or_default().to_string_lossy().into_owned();
         let dir = std::env::temp_dir().join(format!("klm-project-check-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&dir);
@@ -129,14 +130,16 @@ fn drc(copy: &Copy, kicad_cli: &Path, limits: &FabLimits) -> Result<Vec<Finding>
     };
     std::fs::write(copy.dir.join(format!("{}.kicad_dru", copy.stem)), rules)?;
     let report = copy.dir.join("drc.json");
-    let args = ["pcb".as_ref(), "drc".as_ref(), "--format".as_ref(), "json".as_ref(), "--severity-all".as_ref(), "-o".as_ref(), report.as_os_str(), pcb.as_os_str()];
+    let args =
+        ["pcb".as_ref(), "drc".as_ref(), "--format".as_ref(), "json".as_ref(), "--severity-all".as_ref(), "-o".as_ref(), report.as_os_str(), pcb.as_os_str()];
     Ok(findings(&run(kicad_cli, &args, &report)?, "drc"))
 }
 
 fn erc(copy: &Copy, kicad_cli: &Path) -> Result<Vec<Finding>> {
     let sch = copy.file("kicad_sch").with_context(|| format!("the project has no schematic ({}.kicad_sch)", copy.stem))?;
     let report = copy.dir.join("erc.json");
-    let args = ["sch".as_ref(), "erc".as_ref(), "--format".as_ref(), "json".as_ref(), "--severity-all".as_ref(), "-o".as_ref(), report.as_os_str(), sch.as_os_str()];
+    let args =
+        ["sch".as_ref(), "erc".as_ref(), "--format".as_ref(), "json".as_ref(), "--severity-all".as_ref(), "-o".as_ref(), report.as_os_str(), sch.as_os_str()];
     Ok(findings(&run(kicad_cli, &args, &report)?, "erc"))
 }
 

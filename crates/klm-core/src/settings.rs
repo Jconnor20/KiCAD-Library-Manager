@@ -58,11 +58,7 @@ pub struct SimSettings {
 
 impl Default for SimSettings {
     fn default() -> Self {
-        Self {
-            auto_sim: true,
-            auto_generate_from_datasheet: true,
-            spice_dirs: Vec::new(),
-        }
+        Self { auto_sim: true, auto_generate_from_datasheet: true, spice_dirs: Vec::new() }
     }
 }
 
@@ -122,10 +118,7 @@ fn path() -> Option<PathBuf> {
 
 impl Settings {
     pub fn load() -> Self {
-        let mut s = path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| Self::parse(&t))
-            .unwrap_or_default();
+        let mut s = path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| Self::parse(&t)).unwrap_or_default();
         match s.legacy_standards.take() {
             // Customised rules from before profiles become a profile of their own, once.
             Some(old) if s.profile.is_empty() && old != crate::standardise::Rules::default() => {

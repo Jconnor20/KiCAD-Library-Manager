@@ -20,7 +20,8 @@ pub struct CleanupTab {
     preview: Option<Result<(Vec<String>, Vec<String>), String>>,
 }
 
-const GROUPS: [(IssueKind, &str); 4] = [(IssueKind::Broken, "Broken"), (IssueKind::Unused, "Maybe unused"), (IssueKind::Duplicate, "Duplicate"), (IssueKind::Unverifiable, "Can't check")];
+const GROUPS: [(IssueKind, &str); 4] =
+    [(IssueKind::Broken, "Broken"), (IssueKind::Unused, "Maybe unused"), (IssueKind::Duplicate, "Duplicate"), (IssueKind::Unverifiable, "Can't check")];
 
 fn same(a: IssueKind, b: IssueKind) -> bool {
     std::mem::discriminant(&a) == std::mem::discriminant(&b)
@@ -55,7 +56,10 @@ impl CleanupTab {
         let Some(report) = &self.report else { return };
         match cleanup::plan(report, &self.queue).and_then(|p| cleanup::apply(&p, true)) {
             Ok(backups) => {
-                cx.log.push(format!("Cleaned up the library tables; backups: {}", backups.iter().map(|b| b.display().to_string()).collect::<Vec<_>>().join(", ")));
+                cx.log.push(format!(
+                    "Cleaned up the library tables; backups: {}",
+                    backups.iter().map(|b| b.display().to_string()).collect::<Vec<_>>().join(", ")
+                ));
                 self.scan(cx);
             }
             Err(e) => cx.log.push(format!("Nothing was changed: {e:#}")),
@@ -144,9 +148,8 @@ impl CleanupTab {
         for c in &report.other_configs {
             ui.weak(format!("Not scanned (another KiCad version): {}", c.display()));
         }
-        let rows: Vec<(usize, bool, &Issue)> = (0..report.entries.len())
-            .flat_map(|i| report.issues_of(i).enumerate().map(move |(n, x)| (i, n == 0, x)))
-            .collect();
+        let rows: Vec<(usize, bool, &Issue)> =
+            (0..report.entries.len()).flat_map(|i| report.issues_of(i).enumerate().map(move |(n, x)| (i, n == 0, x))).collect();
         let of = |k: IssueKind| rows.iter().filter(|r| same(r.2.kind, k)).count();
         let outside = report.entries.iter().filter(|e| movable(e)).count();
         let pal = theme::palette(ui.visuals());
@@ -200,7 +203,9 @@ impl CleanupTab {
                         ui.weak("Locked").on_hover_text(format!("Can't be changed here: {why}"));
                         return;
                     }
-                    let queued = self.queue.iter().position(|a| matches!(a, Action::Remove { table, name } | Action::FixPath { table, name, .. } if *table == e.table && *name == e.name));
+                    let queued = self.queue.iter().position(
+                        |a| matches!(a, Action::Remove { table, name } | Action::FixPath { table, name, .. } if *table == e.table && *name == e.name),
+                    );
                     if let Some(q) = queued {
                         let text = match &self.queue[q] {
                             Action::FixPath { new_path, .. } => format!("Will point to {}", new_path.display()),
@@ -216,7 +221,11 @@ impl CleanupTab {
                         want = Some(Action::Remove { table: e.table.clone(), name: e.name.clone() });
                     }
                     if ui.small_button("Fix path…").clicked() {
-                        let picked = if e.kind == Kind::Symbol { rfd::FileDialog::new().add_filter("Symbol library", &["kicad_sym", "lib"]).pick_file() } else { rfd::FileDialog::new().pick_folder() };
+                        let picked = if e.kind == Kind::Symbol {
+                            rfd::FileDialog::new().add_filter("Symbol library", &["kicad_sym", "lib"]).pick_file()
+                        } else {
+                            rfd::FileDialog::new().pick_folder()
+                        };
                         if let Some(new_path) = picked {
                             want = Some(Action::FixPath { table: e.table.clone(), name: e.name.clone(), new_path });
                         }
@@ -257,9 +266,15 @@ impl CleanupTab {
             for c in &mv.caveats {
                 ui.colored_label(Level::Warn.color(ui.visuals()), c);
             }
-            ui.weak("This copies the library into KLM. The old table entry and its files stay as they are; remove the entry afterwards if the copy is complete.");
+            ui.weak(
+                "This copies the library into KLM. The old table entry and its files stay as they are; remove the entry afterwards if the copy is complete.",
+            );
             ui.horizontal(|ui| {
-                if ui.add_enabled(!kicad_env::kicad_running(), egui::Button::new("Import")).on_disabled_hover_text("KiCad is open; close it so the new libraries can be linked").clicked() {
+                if ui
+                    .add_enabled(!kicad_env::kicad_running(), egui::Button::new("Import"))
+                    .on_disabled_hover_text("KiCad is open; close it so the new libraries can be linked")
+                    .clicked()
+                {
                     for r in mv.apply() {
                         cx.log.push(match r.error {
                             Some(e) => format!("{}: {e}", r.label),

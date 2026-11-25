@@ -38,10 +38,15 @@ fn sandbox_kicad_dir(base: &Path) -> Result<PathBuf> {
     let d = base.join("10.0");
     std::fs::create_dir_all(&d)?;
     for (file, root) in [("sym-lib-table", "sym_lib_table"), ("fp-lib-table", "fp_lib_table")] {
-        std::fs::write(d.join(file), format!("({root}
+        std::fs::write(
+            d.join(file),
+            format!(
+                "({root}
   (version 7)
 )
-"))?;
+"
+            ),
+        )?;
     }
     Ok(d)
 }
@@ -205,11 +210,7 @@ pub fn is_registered(table: &Path, nickname: &str) -> bool {
 /// The new line is spliced in as text so the user's existing table is left byte-for-byte as it was.
 pub fn register_lib(table: &Path, nickname: &str, uri: &str) -> Result<bool> {
     let kind = if table.file_name().is_some_and(|n| n == "fp-lib-table") { "fp_lib_table" } else { "sym_lib_table" };
-    let text = if table.exists() {
-        std::fs::read_to_string(table)?
-    } else {
-        format!("({kind}\n\t(version 7)\n)\n")
-    };
+    let text = if table.exists() { std::fs::read_to_string(table)? } else { format!("({kind}\n\t(version 7)\n)\n") };
     sexpr::parse(&text).with_context(|| format!("reading {}", table.display()))?;
     if is_registered(table, nickname) {
         return Ok(false);

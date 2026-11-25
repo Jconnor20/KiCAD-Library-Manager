@@ -292,7 +292,14 @@ fn s11_restore_defaults_is_per_page() {
 fn s12_open_settings_at_a_section() {
     let _env = setup();
     let mut h = app(SIZES[1], Tab::Library);
-    for (section, marker) in [(Section::Sources, "LCSC needs no keys."), (Section::History, "Keep the last"), (Section::Bom, "Shipping region"), (Section::Standards, "Text size"), (Section::Mouser, "API key"), (Section::General, "Global library")] {
+    for (section, marker) in [
+        (Section::Sources, "LCSC needs no keys."),
+        (Section::History, "Keep the last"),
+        (Section::Bom, "Shipping region"),
+        (Section::Standards, "Text size"),
+        (Section::Mouser, "API key"),
+        (Section::General, "Global library"),
+    ] {
         h.state().cx.open_settings(section);
         h.run_ok();
         assert!(has(&h, marker), "{section:?}: no {marker:?}");
